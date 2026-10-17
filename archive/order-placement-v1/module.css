@@ -1,0 +1,534 @@
+/* ==========================================================================
+   Fairbank Order Placement, module styles.
+   Dark navy + gold skin matched to the Fairbank Product Inquiry module on
+   sales.fairbankequipment.com (navy panels, gold gradient actions,
+   uppercase letter-spaced labels, dark inputs). Layout and class names are
+   unchanged from the original light theme; only the palette moved.
+   ========================================================================== */
+
+.fob-app {
+  /* Palette sampled from the Product Inquiry page */
+  --fob-bg: #0a1c33;          /* app background */
+  --fob-bg-deep: #081627;     /* darkest backdrop accents */
+  --fob-panel: #102743;       /* tiles */
+  --fob-panel-inner: #0c1f38; /* nested tiles / table headers */
+  --fob-input-bg: #0a1e37;    /* form controls */
+  --fob-border: rgba(148, 178, 214, 0.28);
+  --fob-border-soft: rgba(148, 178, 214, 0.16);
+  --fob-text: #e9f0f9;
+  --fob-text-muted: #8fa7c4;
+  --fob-gold: #eeb64b;
+  --fob-gold-strong: #f2c765;
+  --fob-gold-deep: #dfa237;
+  --fob-success: #4fd6b8;
+  --fob-warning: #f0c46a;
+  --fob-error: #ff8f94;
+
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  color: var(--fob-text);
+  font-size: 14px;
+  line-height: 1.45;
+  max-width: 980px;
+  margin: 0 auto;
+  background: linear-gradient(180deg, #0d2340 0%, var(--fob-bg-deep) 100%);
+  border: 1px solid var(--fob-border-soft);
+  border-radius: 14px;
+  padding: 24px;
+  /* border-box so the mobile full-bleed width:100vw includes padding and
+     centers exactly (otherwise content-box overflows by the padding). */
+  box-sizing: border-box;
+  /* Native controls (date pickers, select arrows, scrollbars) render for a
+     dark surface. */
+  color-scheme: dark;
+}
+
+.fob-app *,
+.fob-app *::before,
+.fob-app *::after {
+  box-sizing: border-box;
+}
+
+.fob-stack > * + * {
+  margin-top: 16px;
+}
+
+.fob-h1 {
+  font-size: 22px;
+  font-weight: 800;
+  margin: 0;
+  color: #ffffff;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.fob-h2 {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0;
+  color: #ffffff;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.fob-bold {
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.fob-muted {
+  color: var(--fob-text-muted);
+}
+
+.fob-italic {
+  font-style: italic;
+  color: var(--fob-text-muted);
+}
+
+.fob-error-text {
+  color: var(--fob-error);
+  font-weight: 600;
+}
+
+.fob-success-text {
+  color: var(--fob-success);
+  font-weight: 600;
+}
+
+/* ── Tiles ── */
+.fob-tile {
+  border: 1px solid var(--fob-border-soft);
+  border-radius: 10px;
+  padding: 16px;
+  background: var(--fob-panel);
+}
+
+.fob-tile > * + * {
+  margin-top: 10px;
+}
+
+.fob-tile--inner {
+  background: var(--fob-panel-inner);
+}
+
+/* ── Alerts ── */
+.fob-alert {
+  border-radius: 8px;
+  padding: 12px 16px;
+  border: 1px solid transparent;
+}
+
+.fob-alert > * + * {
+  margin-top: 6px;
+}
+
+.fob-alert__title {
+  font-weight: 700;
+  display: block;
+  color: #ffffff;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 13px;
+}
+
+.fob-alert--error {
+  background: rgba(242, 84, 91, 0.14);
+  border-color: rgba(242, 84, 91, 0.55);
+}
+
+.fob-alert--warning {
+  background: rgba(238, 182, 75, 0.12);
+  border-color: rgba(238, 182, 75, 0.5);
+}
+
+.fob-alert--success {
+  background: rgba(0, 189, 165, 0.12);
+  border-color: rgba(0, 189, 165, 0.5);
+}
+
+/* ── Tags / status tags ── */
+.fob-tag {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  background: rgba(148, 178, 214, 0.16);
+  color: var(--fob-text);
+  white-space: nowrap;
+}
+
+.fob-tag--success {
+  background: rgba(0, 189, 165, 0.16);
+  color: var(--fob-success);
+}
+
+.fob-tag--warning {
+  background: rgba(238, 182, 75, 0.16);
+  color: var(--fob-warning);
+}
+
+.fob-tag--error {
+  background: rgba(242, 84, 91, 0.16);
+  color: var(--fob-error);
+}
+
+/* ── Step indicator ── */
+.fob-steps {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+}
+
+.fob-steps__step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fob-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.fob-steps__num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid var(--fob-border);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.fob-steps__step--active {
+  color: #ffffff;
+}
+
+.fob-steps__step--active .fob-steps__num {
+  border-color: var(--fob-gold);
+  background: var(--fob-gold);
+  color: #0a1c33;
+}
+
+/* ── Tables ── */
+.fob-table-wrap {
+  overflow-x: auto;
+}
+
+.fob-table {
+  border-collapse: collapse;
+  width: 100%;
+  background: var(--fob-panel-inner);
+}
+
+.fob-table th,
+.fob-table td {
+  border: 1px solid var(--fob-border-soft);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+  font-size: 13px;
+  color: var(--fob-text);
+}
+
+.fob-table th {
+  background: rgba(148, 178, 214, 0.1);
+  font-weight: 700;
+  white-space: nowrap;
+  color: #ffffff;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 12px;
+}
+
+/* ── Buttons ── */
+.fob-btn {
+  display: inline-block;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  padding: 9px 18px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1.2;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.fob-btn--primary {
+  background: linear-gradient(90deg, var(--fob-gold-strong), var(--fob-gold-deep));
+  border-color: transparent;
+  color: #0a1c33;
+}
+
+.fob-btn--primary:hover:not(:disabled) {
+  background: linear-gradient(90deg, #f7d382, var(--fob-gold));
+}
+
+.fob-btn--secondary {
+  background: transparent;
+  border-color: var(--fob-border);
+  color: var(--fob-text);
+}
+
+.fob-btn--secondary:hover:not(:disabled) {
+  background: rgba(148, 178, 214, 0.12);
+}
+
+.fob-btn--destructive {
+  background: transparent;
+  border-color: rgba(242, 84, 91, 0.65);
+  color: var(--fob-error);
+}
+
+.fob-btn--destructive:hover:not(:disabled) {
+  background: rgba(242, 84, 91, 0.14);
+}
+
+.fob-btn--sm {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.fob-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Forms ── */
+.fob-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.fob-field label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--fob-gold);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.fob-app select,
+.fob-app input[type="number"],
+.fob-app input[type="date"],
+.fob-app input[type="text"] {
+  border: 1px solid var(--fob-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--fob-text);
+  background: var(--fob-input-bg);
+  width: 100%;
+}
+
+.fob-app select:focus,
+.fob-app input:focus {
+  outline: none;
+  border-color: var(--fob-gold);
+  background: #0c2342;
+}
+
+.fob-app input::placeholder {
+  color: var(--fob-text-muted);
+}
+
+/* Native date inputs: iOS/Safari renders them taller than other controls
+   and centers the value on a dark theme. Strip the native chrome so our
+   padding controls the height, left-align the value, and recolor the
+   calendar icon so it's visible on the navy background. */
+.fob-app input[type="date"] {
+  -webkit-appearance: none;
+  appearance: none;
+  min-height: 40px;
+}
+
+.fob-app input[type="date"]::-webkit-date-and-time-value {
+  text-align: left;
+  margin: 0;
+}
+
+.fob-app input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.75);
+  opacity: 0.8;
+  cursor: pointer;
+}
+
+/* ── Layout helpers ── */
+.fob-row-flex {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.fob-row-flex > .fob-grow-3 {
+  flex: 3 1 220px;
+}
+
+.fob-row-flex > .fob-grow-2 {
+  flex: 2 1 160px;
+}
+
+.fob-row-flex > .fob-grow-1 {
+  flex: 1 1 90px;
+}
+
+.fob-space-between {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.fob-inline-tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.fob-divider {
+  border: none;
+  border-top: 1px solid var(--fob-border-soft);
+  margin: 14px 0;
+}
+
+.fob-divider--light {
+  border-top-style: dashed;
+  margin: 10px 0;
+}
+
+/* ── Loading spinner ── */
+.fob-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 0;
+  color: var(--fob-text-muted);
+}
+
+.fob-spinner {
+  width: 34px;
+  height: 34px;
+  border: 4px solid rgba(148, 178, 214, 0.25);
+  border-top-color: var(--fob-gold);
+  border-radius: 50%;
+  animation: fob-spin 0.9s linear infinite;
+}
+
+@keyframes fob-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── Empty state ── */
+.fob-empty {
+  text-align: center;
+  padding: 32px 16px;
+  color: var(--fob-text-muted);
+}
+
+.fob-empty .fob-h2 {
+  color: #ffffff;
+}
+
+/* ── Small print under gated buttons ── */
+.fob-gate-reason {
+  font-size: 12px;
+  color: var(--fob-error);
+  margin-top: 4px;
+}
+
+.fob-link {
+  color: var(--fob-gold);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.fob-link:hover {
+  text-decoration: underline;
+  color: var(--fob-gold-strong);
+}
+
+@media (max-width: 640px) {
+  /* Full-bleed on phones: the theme wraps the module in a padded content
+     column, so the module can't otherwise reach the screen edges. This
+     spans it to the full viewport width regardless of that wrapper's
+     padding (width:100vw + margin-left:50% + translateX(-50%) centers a
+     viewport-wide box on the viewport for any symmetric wrapper), reclaiming
+     the side gutters. Safe from horizontal scroll because the page body
+     clips overflow-x. Internal padding keeps content off the very edge. */
+  .fob-app {
+    width: 100vw;
+    margin-left: 50%;
+    transform: translateX(-50%);
+    max-width: 100vw;
+    padding: 18px 16px;
+    /* No outer card chrome on phones: the module fills the width and blends
+       into the page's navy section, so its own border/radius would just draw
+       a stray card outline inside the navy. The inner tiles are the cards. */
+    border: none;
+    border-radius: 0;
+  }
+
+  .fob-row-flex {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  /* The fob-grow-* flex bases (e.g. flex: 3 1 220px) are meant for row
+     layout; once the container switches to column they become HEIGHTS and
+     stretch each field ~220px tall, leaving huge empty gaps. Reset them so
+     stacked fields size to their content. */
+  .fob-row-flex > .fob-grow-1,
+  .fob-row-flex > .fob-grow-2,
+  .fob-row-flex > .fob-grow-3 {
+    flex: 0 0 auto;
+  }
+
+  .fob-row-flex > * {
+    width: 100%;
+  }
+
+  .fob-row-flex .fob-btn {
+    width: 100%;
+  }
+
+  .fob-tile {
+    padding: 16px 14px;
+  }
+
+  /* De-nest on phones: an outer tile whose job is to wrap inner tiles
+     (the Custom Branch Selection card) drops its own card chrome so its
+     children read as top-level cards instead of boxes-inside-boxes. Its
+     heading/intro text then align with the other headings at the app's
+     padding edge. Falls back gracefully (keeps the nested look) where
+     :has() is unsupported. */
+  .fob-tile:has(.fob-tile--inner) {
+    background: none;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+  }
+
+  /* Inner tiles become normal full-width cards, matching the other tiles. */
+  .fob-tile--inner {
+    margin-left: 0;
+    margin-right: 0;
+    background: var(--fob-panel);
+    border: 1px solid var(--fob-border-soft);
+    border-radius: 10px;
+    padding: 16px 14px;
+  }
+}

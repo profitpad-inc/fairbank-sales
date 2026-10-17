@@ -1,0 +1,179 @@
+{{ require_css("https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700&family=Barlow:wght@400;500;600&display=swap") }}
+
+<div class="fairbank-inquiry-module">
+
+  <div class="fim-bg" aria-hidden="true"></div>
+
+  <div class="fim-inner">
+
+    <div class="page-title">Inventory &amp; Pricing</div>
+    <h1>Product Inquiry</h1>
+
+    <div class="search-card">
+
+      {# ── Customer search ── #}
+      <div class="field-group-full" style="margin-bottom:20px">
+        <label for="fbi-customer-search"><span>[E]</span> Customer</label>
+
+        <input type="hidden" id="fbi-customer-id" />
+
+        <div class="product-search-wrap" id="fbi-customer-wrap">
+
+          <span class="search-icon-inner">
+            <svg width="15" height="15" viewBox="0 0 20 20" fill="none">
+              <circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="2"/>
+              <path d="M13 13L17 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </span>
+
+          <input type="text"
+                 id="fbi-customer-search"
+                 placeholder="Type a customer name or ID…"
+                 autocomplete="off" />
+
+          <button class="search-clear" id="fbi-customer-clear" title="Clear">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M2 2l10 10M12 2L2 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </button>
+
+          <div class="selected-product" id="fbi-selected-customer" title="Click to change customer">
+            <div class="selected-product-info">
+              <div class="selected-product-id"   id="fbi-selected-customer-id"></div>
+              <div class="selected-product-desc" id="fbi-selected-customer-name"></div>
+            </div>
+            <button class="selected-clear-btn" id="fbi-selected-customer-clear" title="Clear selection">
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+                <path d="M2 2l10 10M12 2L2 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </button>
+          </div>
+
+          <div class="product-dropdown" id="fbi-customer-dropdown"></div>
+        </div>
+
+        {# Customer footer — links & meta revealed once a customer is selected #}
+        <div class="customer-meta-row">
+          <div class="hs-link-wrap" id="fbi-hs-link-wrap">
+            <a class="hs-link" id="fbi-hs-link" href="#" target="_blank" rel="noopener noreferrer">
+              View Customer in HubSpot
+              <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" focusable="false">
+                <path d="M26.91 5.78c-.07-.16-.16-.3-.28-.41a1.1 1.1 0 0 0-.4-.27c-.14-.06-.3-.09-.47-.09h-7.72c-.7 0-1.26.56-1.27 1.26 0 .7.57 1.27 1.27 1.27h4.64L11.86 18.35a1.272 1.272 0 0 0 1.8 1.8L24.47 9.34v4.64c0 .7.57 1.27 1.27 1.27s1.27-.57 1.27-1.27V6.27c0-.17-.03-.33-.09-.47Zm-4.57 11.91c-.7 0-1.27.57-1.27 1.27v5.15c0 .19-.16.35-.35.35H7.89c-.19 0-.35-.16-.35-.35V11.27c0-.19.16-.35.35-.35h5.15c.7 0 1.27-.57 1.27-1.27s-.57-1.27-1.27-1.27H7.89c-1.59 0-2.88 1.3-2.89 2.89v12.84a2.9 2.9 0 0 0 2.89 2.9h12.86c1.6 0 2.9-1.3 2.9-2.9v-5.14c0-.7-.57-1.27-1.27-1.27h-.03Z"/>
+              </svg>
+            </a>
+          </div>
+        </div>
+      </div>
+
+      {# ── Product search ── #}
+      <input type="hidden" id="fbi-product-id" />
+
+      <div class="field-group-full">
+        <label for="fbi-product-search"><span>[E]</span> Product</label>
+        <div class="product-search-wrap" id="fbi-search-wrap">
+
+          <span class="search-icon-inner">
+            <svg width="15" height="15" viewBox="0 0 20 20" fill="none">
+              <circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="2"/>
+              <path d="M13 13L17 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </span>
+
+          <input type="text"
+                 id="fbi-product-search"
+                 placeholder="Type a product name or part number…"
+                 autocomplete="off" />
+
+          <button class="search-clear" id="fbi-search-clear" title="Clear">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M2 2l10 10M12 2L2 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </button>
+
+          <div class="selected-product" id="fbi-selected-product" title="Click to change product">
+            <div class="selected-product-info">
+              <div class="selected-product-id"   id="fbi-selected-id"></div>
+              <div class="selected-product-desc" id="fbi-selected-desc"></div>
+            </div>
+            <button class="selected-clear-btn" id="fbi-selected-clear" title="Clear selection">
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+                <path d="M2 2l10 10M12 2L2 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </button>
+          </div>
+
+          <div class="product-dropdown" id="fbi-product-dropdown"></div>
+        </div>
+      </div>
+
+      <button class="search-btn" id="fbi-search-btn" onclick="fbiDoSearch()">
+        <svg class="btn-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="2"/>
+          <path d="M13 13L17 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <div class="spinner" id="fbi-spinner"></div>
+        <span id="fbi-btn-label">Search</span>
+      </button>
+
+    </div>{# /search-card #}
+
+    <div class="admin-toggle-row" id="fbi-admin-toggle-row">
+      <label class="admin-toggle" for="fbi-admin-toggle">
+        <input type="checkbox" id="fbi-admin-toggle" />
+        <span class="admin-toggle-slider"></span>
+        <span class="admin-toggle-label">Admin View</span>
+      </label>
+    </div>
+
+    <div class="state-box" id="fbi-error-box">
+      <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+        <circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="2"/>
+        <path d="M10 6v4M10 14h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <span id="fbi-error-msg">An error occurred.</span>
+    </div>
+
+    <div id="fbi-results">
+      <div class="price-stats animate-in" id="fbi-price-stats">
+        <div class="admin-stat admin-only">
+          <div class="admin-stat-label">Unit Cost</div>
+          <div class="admin-stat-value" id="fbi-unit-cost">—</div>
+        </div>
+        <div class="admin-stat admin-only">
+          <div class="admin-stat-label">Margin</div>
+          <div class="admin-stat-value admin-margin-value" id="fbi-margin">—</div>
+        </div>
+        <div class="admin-stat admin-only">
+          <div class="admin-stat-label">List Price</div>
+          <div class="admin-stat-value" id="fbi-list-price">—</div>
+        </div>
+        <div class="admin-stat">
+          <div class="admin-stat-label">Price Class</div>
+          <div class="admin-stat-value" id="fbi-res-price-class">—</div>
+        </div>
+      </div>
+
+      <div class="price-breaks-wrap animate-in" id="fbi-price-breaks-wrap" style="animation-delay:0.05s">
+        <div class="price-breaks-head">
+          <span>Volume Pricing</span>
+          <span>Unit Price</span>
+        </div>
+        <div id="fbi-price-break-rows"></div>
+      </div>
+
+      <div class="stock-table-wrap animate-in" style="animation-delay:0.1s">
+        <div class="stock-table-head">
+          <span>Warehouse Inventory</span>
+          <span>Quantity</span>
+        </div>
+        <div id="fbi-stock-rows"></div>
+      </div>
+
+      <div class="stock-total animate-in" style="animation-delay:0.15s">
+        <div class="stock-total-label">Total Stock</div>
+        <div class="stock-total-val" id="fbi-total-stock">0</div>
+      </div>
+    </div>{# /fbi-results #}
+
+  </div>{# /fim-inner #}
+</div>{# /fairbank-inquiry-module #}

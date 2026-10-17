@@ -1,0 +1,20 @@
+<!--
+  Fairbank Order Placement, web version of the Eclipse Branch Fulfillment
+  app card. All behavior lives in module.js; this template only provides the
+  mount point and passes module field values through data attributes.
+-->
+<div class="fob-app"
+     id="fob-app-{{ name }}"
+     data-fob-app
+     data-title="{{ module.title }}"
+     data-api-base="{{ module.api_base_url }}"
+     data-api-key="{{ module.api_access_key }}"
+     data-deal-param="{{ module.deal_id_query_param }}"
+     data-portal-id="{{ module.portal_id }}"
+     data-view-id="{{ module.deals_view_id }}">
+  <noscript>
+    <div class="fob-alert fob-alert--error">
+      This tool requires JavaScript. Enable JavaScript and reload the page.
+    </div>
+  </noscript>
+</div>

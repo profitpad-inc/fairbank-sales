@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LocalHost Fairbank | Order Placement</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700&family=Barlow:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="module.css">
+  <style>
+    body {
+      margin: 0;
+      background: linear-gradient(to bottom right, #081529, #003057);
+      min-height: 100vh;
+    }
+    header h1 {
+      margin: 20px;
+      font-family: 'Roboto', sans-serif;
+      color: #ffffff;
+    }
+  </style>
+</head>
+
+<body>
+  <header><h1>LocalHost - Fairbank</h1></header>
+  <main></main>
+  <script>
+    fetch('module.html')
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        // Strip HubSpot template expressions and comments
+        html = html.replace(/\{\{[\s\S]*?\}\}/g, '');
+        html = html.replace(/\{#[\s\S]*?#\}/g, '');
+        document.querySelector('main').innerHTML = html;
+
+        var s = document.createElement('script');
+        s.src = 'module.js';
+        document.querySelector('main').appendChild(s);
+      });
+  </script>
+</body>
+
+</html>

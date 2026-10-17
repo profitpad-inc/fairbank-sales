@@ -1,0 +1,825 @@
+/* ============================================================
+   Fairbank — Product Inquiry Module
+   All rules scoped to .fairbank-inquiry-module so this module
+   never bleeds styles onto the rest of the page.
+   ============================================================ */
+
+/* ── CSS custom properties (scoped — cascade to all descendants) ── */
+.fairbank-inquiry-module {
+  --navy:      #0e2245;
+  --navy-mid:  #162f5e;
+  --navy-dark: #091529;
+  --gold:      #c8962a;
+  --gold-lt:   #e0aa38;
+  --gold-dim:  #a87a1e;
+  --white:     #ffffff;
+  --off-white: #f0f4fa;
+  --muted:     #8fa4c2;
+  --border:    rgba(200, 150, 42, 0.25);
+  --card-bg:   rgba(22, 47, 94, 0.55);
+  --row-even:  rgba(255, 255, 255, 0.04);
+  --row-hover: rgba(200, 150, 42, 0.08);
+  --success:   #3ecf8e;
+  --error:     #ff5f5f;
+}
+
+/* ── Box-sizing reset scoped to module ── */
+.fairbank-inquiry-module *,
+.fairbank-inquiry-module *::before,
+.fairbank-inquiry-module *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* ── Module wrapper ── */
+.fairbank-inquiry-module {
+  position: relative;
+  overflow: hidden;
+  font-family: 'Barlow', sans-serif;
+/*   background: var(--navy-dark); */
+  color: var(--white);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px 24px 60px;
+}
+
+/* ── Decorative background layer (replaces body::before) ── */
+/* .fairbank-inquiry-module .fim-bg {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% -10%, rgba(200, 150, 42, 0.12) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 80% at 90% 110%, rgba(14, 34, 69, 0.9) 0%, transparent 60%),
+    repeating-linear-gradient(0deg,
+      transparent,
+      transparent 39px,
+      rgba(255, 255, 255, 0.018) 39px,
+      rgba(255, 255, 255, 0.018) 40px),
+    repeating-linear-gradient(90deg,
+      transparent,
+      transparent 39px,
+      rgba(255, 255, 255, 0.018) 39px,
+      rgba(255, 255, 255, 0.018) 40px);
+  pointer-events: none;
+  z-index: 0;
+} */
+
+/* ── Content wrapper (replaces <main>) ── */
+.fairbank-inquiry-module .fim-inner {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 780px;
+}
+
+/* ── Page title / H1 ── */
+.fairbank-inquiry-module .page-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 8px;
+}
+
+.fairbank-inquiry-module h1 {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 42px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  color: var(--white);
+  margin-bottom: 40px;
+}
+
+/* ── Search card ── */
+.fairbank-inquiry-module .search-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 36px 40px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow:
+    0 4px 32px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  margin-bottom: 36px;
+  position: relative;
+  z-index: 10;
+}
+
+/* ── Field groups ── */
+.fairbank-inquiry-module .field-group-full {
+  position: relative;
+  margin-bottom: 28px;
+}
+
+.fairbank-inquiry-module .field-group-full label {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.fairbank-inquiry-module .field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── Labels & inputs ── */
+.fairbank-inquiry-module label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.fairbank-inquiry-module label span {
+  color: var(--gold);
+  margin-right: 2px;
+}
+
+.fairbank-inquiry-module input {
+  background: rgba(6, 17, 31, 0.7);
+  border: 1px solid rgba(200, 150, 42, 0.3);
+  border-radius: 6px;
+  padding: 12px 16px;
+  font-family: 'Barlow', sans-serif;
+  font-size: 16px;
+  color: var(--white);
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  width: 100%;
+}
+
+.fairbank-inquiry-module input::placeholder {
+  color: rgba(143, 164, 194, 0.45);
+  font-size: 14px;
+}
+
+.fairbank-inquiry-module input:focus {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px rgba(200, 150, 42, 0.18);
+}
+
+/* ── HubSpot contact link ── */
+.fairbank-inquiry-module .customer-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.fairbank-inquiry-module .hs-link-wrap {
+  display: none;
+}
+
+.fairbank-inquiry-module .hs-link-wrap.visible {
+  display: flex;
+  align-items: center;
+}
+
+.fairbank-inquiry-module .price-class-tag {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding-left: 16px;
+  border-left: 1px solid var(--border);
+}
+
+.fairbank-inquiry-module .price-class-tag.visible {
+  display: flex;
+}
+
+.fairbank-inquiry-module .price-class-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.fairbank-inquiry-module .price-class-tag span:last-child {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--navy-dark);
+  background: var(--gold);
+  border-radius: 4px;
+  padding: 2px 8px;
+}
+
+.fairbank-inquiry-module .hs-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--gold-dim);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.fairbank-inquiry-module .hs-link:hover {
+  color: var(--gold-lt);
+}
+
+.fairbank-inquiry-module .hs-link svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  fill: currentColor;
+}
+
+/* ── Search wraps (shared by both customer and product fields) ── */
+.fairbank-inquiry-module .product-search-wrap {
+  position: relative;
+}
+
+.fairbank-inquiry-module .search-icon-inner {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+}
+
+/* Indent both search inputs to make room for the icon */
+.fairbank-inquiry-module #fbi-customer-search,
+.fairbank-inquiry-module #fbi-product-search {
+  padding-left: 40px;
+  padding-right: 36px;
+}
+
+.fairbank-inquiry-module .search-clear {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--muted);
+  padding: 2px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: color 0.15s;
+}
+
+.fairbank-inquiry-module .search-clear:hover {
+  color: var(--white);
+}
+
+.fairbank-inquiry-module .search-clear.visible {
+  display: flex;
+}
+
+/* ── Product/customer dropdown (shared) ── */
+.fairbank-inquiry-module .product-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: #0a1828;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+  z-index: 100;
+  max-height: 320px;
+  overflow-y: auto;
+  display: none;
+}
+
+.fairbank-inquiry-module .product-dropdown.open {
+  display: block;
+}
+
+.fairbank-inquiry-module .product-dropdown::-webkit-scrollbar       { width: 6px; }
+.fairbank-inquiry-module .product-dropdown::-webkit-scrollbar-track { background: transparent; }
+.fairbank-inquiry-module .product-dropdown::-webkit-scrollbar-thumb {
+  background: rgba(200, 150, 42, 0.3);
+  border-radius: 3px;
+}
+
+.fairbank-inquiry-module .dropdown-status {
+  padding: 14px 16px;
+  font-size: 13px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #0a1828;
+}
+
+.fairbank-inquiry-module .dd-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(143, 164, 194, 0.2);
+  border-top-color: var(--gold);
+  border-radius: 50%;
+  animation: fbi-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+.fairbank-inquiry-module .product-item {
+  padding: 11px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  transition: background 0.12s;
+  background: #0a1828;
+}
+
+.fairbank-inquiry-module .product-item:last-child {
+  border-bottom: none;
+}
+
+.fairbank-inquiry-module .product-item:hover,
+.fairbank-inquiry-module .product-item.active {
+  background: rgba(200, 150, 42, 0.12);
+}
+
+.fairbank-inquiry-module .product-item-desc {
+  font-size: 13px;
+  color: var(--off-white);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.4;
+}
+
+.fairbank-inquiry-module .product-item-id {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--gold-dim);
+  margin-top: 3px;
+  text-transform: uppercase;
+}
+
+/* ── Selected item overlay (shared by customer and product) ── */
+.fairbank-inquiry-module .selected-product {
+  display: none;
+  position: absolute;
+  inset: 0;
+  background: rgba(6, 17, 31, 0.7);
+  border: 1px solid var(--gold);
+  border-radius: 6px;
+  box-shadow: 0 0 0 3px rgba(200, 150, 42, 0.18);
+  padding: 0 44px 0 16px;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  cursor: pointer;
+  z-index: 2;
+  transition: background 0.15s;
+}
+
+.fairbank-inquiry-module .selected-product:hover {
+  background: rgba(6, 17, 31, 0.85);
+}
+
+.fairbank-inquiry-module .selected-product.visible {
+  display: flex;
+}
+
+.fairbank-inquiry-module .selected-product-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  pointer-events: none;
+}
+
+.fairbank-inquiry-module .selected-product-desc {
+  font-size: 15px;
+  color: var(--white);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.fairbank-inquiry-module .selected-product-id {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--navy-dark);
+  background: var(--gold);
+  border-radius: 4px;
+  padding: 2px 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.fairbank-inquiry-module .selected-clear-btn {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--muted);
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: color 0.15s;
+  pointer-events: auto;
+}
+
+.fairbank-inquiry-module .selected-clear-btn:hover {
+  color: var(--white);
+}
+
+/* Hide the raw input + icon when a selection is active — covers both fields */
+.fairbank-inquiry-module .product-search-wrap.has-selection #fbi-customer-search,
+.fairbank-inquiry-module .product-search-wrap.has-selection #fbi-product-search,
+.fairbank-inquiry-module .product-search-wrap.has-selection .search-icon-inner,
+.fairbank-inquiry-module .product-search-wrap.has-selection .search-clear {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* ── Search button ── */
+.fairbank-inquiry-module .search-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 14px 28px;
+  background: linear-gradient(135deg, var(--gold) 0%, var(--gold-lt) 100%);
+  color: var(--navy-dark);
+  border: none;
+  border-radius: 6px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.12s;
+  position: relative;
+  overflow: hidden;
+}
+
+.fairbank-inquiry-module .search-btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, transparent 40%, rgba(255, 255, 255, 0.2) 100%);
+  pointer-events: none;
+}
+
+.fairbank-inquiry-module .search-btn:hover    { opacity: 0.92; transform: translateY(-1px); }
+.fairbank-inquiry-module .search-btn:active   { transform: translateY(0); opacity: 1; }
+.fairbank-inquiry-module .search-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+.fairbank-inquiry-module .btn-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.fairbank-inquiry-module .spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(9, 21, 41, 0.3);
+  border-top-color: var(--navy-dark);
+  border-radius: 50%;
+  animation: fbi-spin 0.7s linear infinite;
+  display: none;
+}
+
+/* ── Error state box ── */
+.fairbank-inquiry-module .state-box {
+  display: none;
+  background: var(--card-bg);
+  border: 1px solid rgba(255, 95, 95, 0.3);
+  border-radius: 8px;
+  padding: 24px 28px;
+  color: var(--error);
+  font-size: 14px;
+  font-weight: 500;
+  align-items: center;
+  gap: 10px;
+}
+
+.fairbank-inquiry-module .state-box.show {
+  display: flex;
+}
+
+/* ── Admin toggle ── */
+.fairbank-inquiry-module .admin-toggle-row {
+  display: none;
+  justify-content: flex-start;
+  margin-bottom: 20px;
+}
+
+.fairbank-inquiry-module .admin-toggle-row.show {
+  display: flex;
+}
+
+.fairbank-inquiry-module .admin-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.fairbank-inquiry-module .admin-toggle input[type="checkbox"] {
+  display: none;
+}
+
+.fairbank-inquiry-module .admin-toggle-slider {
+  width: 36px;
+  height: 20px;
+  background: rgba(143, 164, 194, 0.2);
+  border-radius: 10px;
+  position: relative;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.fairbank-inquiry-module .admin-toggle-slider::after {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  background: var(--muted);
+  border-radius: 50%;
+  top: 3px;
+  left: 3px;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.fairbank-inquiry-module .admin-toggle input:checked ~ .admin-toggle-slider {
+  background: rgba(200, 150, 42, 0.3);
+}
+
+.fairbank-inquiry-module .admin-toggle input:checked ~ .admin-toggle-slider::after {
+  transform: translateX(16px);
+  background: var(--gold);
+}
+
+.fairbank-inquiry-module .admin-toggle-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* ── Results ── */
+.fairbank-inquiry-module #fbi-results {
+  display: none;
+}
+
+.fairbank-inquiry-module .price-stats {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.fairbank-inquiry-module .admin-stat.admin-only {
+  display: none;
+}
+
+.fairbank-inquiry-module .price-stats.admin-visible .admin-stat.admin-only {
+  display: flex;
+  flex-direction: column;
+}
+
+.fairbank-inquiry-module .meta-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+
+/* ── Price breaks table ── */
+.fairbank-inquiry-module .price-breaks-wrap {
+  background: rgba(6, 17, 31, 0.5);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.fairbank-inquiry-module .price-breaks-head {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  padding: 10px 20px;
+  background: rgba(200, 150, 42, 0.1);
+  border-bottom: 1px solid var(--border);
+}
+
+.fairbank-inquiry-module .price-breaks-head span {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--gold-lt);
+}
+
+.fairbank-inquiry-module .price-breaks-head span:last-child {
+  text-align: right;
+}
+
+.fairbank-inquiry-module .price-break-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  padding: 11px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  align-items: center;
+  transition: background 0.15s;
+}
+
+.fairbank-inquiry-module .price-break-row:last-child { border-bottom: none; }
+.fairbank-inquiry-module .price-break-row:nth-child(even) { background: var(--row-even); }
+.fairbank-inquiry-module .price-break-row:hover { background: var(--row-hover); }
+
+.fairbank-inquiry-module .pb-qty {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  min-width: 52px;
+}
+
+.fairbank-inquiry-module .pb-row-base .pb-qty {
+  color: var(--off-white);
+}
+
+.fairbank-inquiry-module .pb-price {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--off-white);
+  text-align: right;
+}
+
+.fairbank-inquiry-module .pb-price-base {
+  color: var(--gold-lt);
+  font-size: 22px;
+}
+
+/* ── Stock table ── */
+.fairbank-inquiry-module .stock-table-wrap {
+  background: rgba(6, 17, 31, 0.5);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.fairbank-inquiry-module .stock-table-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  padding: 10px 20px;
+  background: rgba(200, 150, 42, 0.1);
+  border-bottom: 1px solid var(--border);
+}
+
+.fairbank-inquiry-module .stock-table-head span {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--gold-lt);
+}
+
+.fairbank-inquiry-module .stock-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  padding: 13px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  align-items: center;
+  transition: background 0.15s;
+}
+
+.fairbank-inquiry-module .stock-row:last-child      { border-bottom: none; }
+.fairbank-inquiry-module .stock-row:nth-child(even) { background: var(--row-even); }
+.fairbank-inquiry-module .stock-row:hover           { background: var(--row-hover); }
+
+.fairbank-inquiry-module .warehouse-name {
+  font-size: 14px;
+  color: var(--off-white);
+  font-weight: 500;
+}
+
+.fairbank-inquiry-module .qty-badge {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  min-width: 48px;
+  text-align: right;
+}
+
+.fairbank-inquiry-module .qty-good { color: var(--success); }
+.fairbank-inquiry-module .qty-low  { color: var(--gold-lt); }
+.fairbank-inquiry-module .qty-zero { color: var(--error); }
+
+.fairbank-inquiry-module .stock-total {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px 0;
+}
+
+.fairbank-inquiry-module .stock-total-label {
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.fairbank-inquiry-module .stock-total-val {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--white);
+}
+
+/* ── Price stat boxes ── */
+.fairbank-inquiry-module .admin-stat {
+  background: rgba(22, 47, 94, 0.4);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 16px;
+  min-width: 110px;
+}
+
+.fairbank-inquiry-module .admin-stat-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.fairbank-inquiry-module .stat-value {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--gold-lt);
+}
+
+.fairbank-inquiry-module .admin-stat-value {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--off-white);
+}
+
+.fairbank-inquiry-module .admin-margin-value {
+  color: var(--success);
+}
+
+/* ── Animations ── */
+@keyframes fbi-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes fbi-fade-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.fairbank-inquiry-module .animate-in {
+  animation: fbi-fade-up 0.35s ease both;
+}
+
+/* ── Responsive ── */
+@media (max-width: 520px) {
+  .fairbank-inquiry-module .fields      { grid-template-columns: 1fr; }
+  .fairbank-inquiry-module .search-card { padding: 24px 20px; }
+  .fairbank-inquiry-module h1           { font-size: 32px; }
+}
