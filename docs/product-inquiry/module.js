@@ -9,9 +9,7 @@
 
   // ── Config ──────────────────────────────────────────────────
   var HS_BASE     = 'https://app.hubspot.com/contacts/43793456/record/0-2/';
-  var WEBHOOK_URL = 'https://n8n.profitpad.com/webhook/fairbank-product-inquiry';
-//   var isAdmin     = new URLSearchParams(window.location.search).get('admin') === 'true';
-  // var isAdmin = (window.FairBankConfig && window.FairBankConfig.isAdmin) === true;
+  var WEBHOOK_URL = 'https://n8n.fairbankequipment.com/webhook/fairbank-product-inquiry';
   var isAdmin = true;
 
 
@@ -487,4 +485,3 @@
   })();
 
 })();
-
