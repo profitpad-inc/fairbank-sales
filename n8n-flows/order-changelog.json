@@ -1,0 +1,197 @@
+{
+  "name": "e-order-placement: order change log",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "e-order-placement/order-changelog",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "420d9cd4-918b-5d0b-b107-b8f19b032030",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "89e50495-0563-5d0b-9626-385b7f873c78"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// GET ?e_sorder_id=S2737684 or S2737684.0001. The change log is read for\n// the whole order (every generation); each entry lists its generations.\nconst q = $input.first().json.query || {};\nconst m = String(q.e_sorder_id || '').trim().toUpperCase().match(/^S?(\\d+)(?:\\.(\\d{1,4}))?$/);\nif (!m) return [{ json: { ok: false, statusCode: 400, body: { success: false, error: 'Missing or invalid e_sorder_id (expected S1234567 or S1234567.0001).', step: 'validate' } } }];\nreturn [{ json: { ok: true, oid: 'S' + m[1] } }];\n"
+      },
+      "id": "c1c1a665-f1e6-56a3-bff0-c50117e7221c",
+      "name": "Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c4e44c94-7788-5ae3-90b4-6ba14df2147d",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "acf686df-e0d0-5c8c-acd2-297b471d96be",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "getOrderChangeLog",
+        "changeLogOrderId": "={{ $json.oid }}",
+        "changeLogGenerationId": ""
+      },
+      "id": "1fec79e4-4bbe-5b23-8eb0-67774d1072de",
+      "name": "Eclipse: change log",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        720,
+        0
+      ],
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Eclipse answers { comments: [{ generationIds: ['1'] | ['ALL'], date, time,\n// userId, comment }] } (per the get_sorder_history.py reference script).\n// date + time are UTC; `at` is sent as ISO with a Z so the page can show it\n// in the rep's own time zone. Entries keep Eclipse's order.\nconst v = $('Validate').first().json;\nconst env = $input.first().json;\nif (env.error) return [{ json: { statusCode: 502, body: { success: false, step: 'getOrderChangeLog',\n  error: 'Eclipse GET /SalesOrders/' + v.oid + '/OrderChangeLog failed: ' + env.error + ' ' + JSON.stringify(env.message || '').substring(0, 500) } } }];\nconst list = Array.isArray(env.comments) ? env.comments : (Array.isArray(env.results) && env.results[0] && Array.isArray(env.results[0].comments) ? env.results[0].comments : []);\nconst iso = (d, t) => {\n  if (!d) return '';\n  let s = String(d).slice(0, 10) + 'T' + String(t || '00:00:00');\n  if (!/(Z|[+-]\\d{2}:?\\d{2})$/.test(s)) s += 'Z';\n  return s;\n};\nconst entries = list.map((c) => ({\n  gens: (Array.isArray(c.generationIds) ? c.generationIds : [c.generationIds]).filter((g) => g != null && g !== '').map(String),\n  at: iso(c.date, c.time),\n  date: c.date || '', time: c.time || '',\n  user: c.userId || '',\n  comment: String(c.comment || ''),\n}));\nreturn [{ json: { statusCode: 200, body: { success: true, order_id: v.oid, entries } } }];\n"
+      },
+      "id": "1047f60f-37f8-51d2-a02c-cc5582248ef6",
+      "name": "Shape",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode || 200 }}"
+        }
+      },
+      "id": "b1b75e90-fd70-59e2-822e-6c4c2cceef41",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        600,
+        220
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: change log",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: change log": {
+      "main": [
+        [
+          {
+            "node": "Shape",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "active": false
+}

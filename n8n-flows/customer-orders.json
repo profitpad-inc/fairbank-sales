@@ -1,0 +1,204 @@
+{
+  "name": "e-order-placement: customer orders",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "e-order-placement/customer-orders",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "f89beeb0-e4aa-5b8b-847f-4d5c9c8f991f",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "2881ff87-cdf9-5f9d-bb3c-8b1d977c16a0"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// GET ?e_customer_id=<bill-to id>: the bill-to's most recent orders.\nconst q = $input.first().json.query || {};\nconst id = String(q.e_customer_id || '').trim();\nif (!/^\\d+$/.test(id)) return [{ json: { ok: false, statusCode: 400, body: { success: false, error: 'Missing or invalid e_customer_id.', step: 'validate' } } }];\nreturn [{ json: { ok: true, customerId: id, pageSize: 100 } }];\n"
+      },
+      "id": "db62a470-6cae-55ea-88e5-988541d7d35d",
+      "name": "Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "527e8d51-fcff-5764-9341-797ba4b7e566",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ff5f05d6-7078-5b95-a128-415367683eb7",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "getMany",
+        "returnAll": false,
+        "pageSize": "={{ $json.pageSize }}",
+        "fieldsFilterMode": "selected",
+        "fieldsToInclude": "id,lastUpdateDateTime,generations.generationId,generations.invoiceNumber,generations.status,generations.orderDate,generations.shipToId,generations.shipToName,generations.poNumber,generations.salesTotal",
+        "dateFilterOptions": {},
+        "additionalOptions": {
+          "billTo": "={{ $json.customerId }}",
+          "sort": "-orderDate"
+        }
+      },
+      "id": "0393d787-425b-5ecc-8a7b-0a690a3a4baa",
+      "name": "Eclipse: find orders",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        720,
+        0
+      ],
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Eclipse Get Many returns one row per generation (ids like S2659464.0002)\n// or per order; either way rows are grouped by base order id here.\nconst v = $('Validate').first().json;\nconst env = $input.first().json;\nif (env.error) return [{ json: { statusCode: 502, body: { success: false, step: 'getSalesOrders',\n  error: 'Eclipse GET /SalesOrders?BillTo=' + v.customerId + ' failed: ' + env.error + ' ' + JSON.stringify(env.message || '').substring(0, 500) } } }];\nconst rows = Array.isArray(env.results) ? env.results : [];\nconst pad = (g) => String(g).padStart(4, '0');\nconst money = (m) => (m && m.value != null ? Number(m.value) : null);\nconst byOrder = {};\nconst order = [];\nfor (const r of rows) {\n  const base = String(r.id || '').split('.')[0];\n  if (!base) continue;\n  if (!byOrder[base]) { byOrder[base] = { order_id: base, last_modified: r.lastUpdateDateTime || '', generations: [] }; order.push(base); }\n  const o = byOrder[base];\n  for (const g of (Array.isArray(r.generations) ? r.generations : [])) {\n    const gid = String(g.generationId);\n    if (o.generations.some((x) => String(x.generation_id) === gid)) continue;\n    o.generations.push({\n      e_sorder_id: base + '.' + pad(gid), generation_id: Number(gid),\n      invoice_number: g.invoiceNumber != null ? Number(g.invoiceNumber) : null,\n      status: String(g.status || ''), order_date: g.orderDate || '',\n      ship_to_id: String(g.shipToId || ''), ship_to_name: g.shipToName || '',\n      po: g.poNumber || '', sales_total: money(g.salesTotal),\n    });\n  }\n}\nconst orders = order.map((k) => byOrder[k]);\nfor (const o of orders) {\n  o.generations.sort((a, b) => a.generation_id - b.generation_id);\n  o.order_date = o.generations.reduce((d, g) => (g.order_date > d ? g.order_date : d), '');\n}\norders.sort((a, b) => (b.order_date || '').localeCompare(a.order_date || ''));\nreturn [{ json: { statusCode: 200, body: {\n  success: true, e_customer_id: v.customerId, orders,\n  // A full page means there may be older orders not listed.\n  truncated: rows.length >= v.pageSize, page_size: v.pageSize,\n} } }];\n"
+      },
+      "id": "e56c3715-b6aa-57cf-bf59-db09152c2dda",
+      "name": "Shape",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode || 200 }}"
+        }
+      },
+      "id": "09c9b7a6-2eb0-5355-80e5-09a7fc404c39",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        600,
+        220
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: find orders",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: find orders": {
+      "main": [
+        [
+          {
+            "node": "Shape",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "active": false
+}

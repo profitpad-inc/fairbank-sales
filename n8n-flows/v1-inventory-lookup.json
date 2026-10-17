@@ -1,0 +1,647 @@
+{
+  "name": "e-order-placement: v1 inventory lookup",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "e-order-placement/v1/inventory-lookup",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "59e2ea36-c40f-5bf9-b90d-dab526e4f27f",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "52240efa-41d2-5146-9d6a-729dce543891"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const body = $input.first().json.body || {};\nconst dealId = String(body.dealId || '').trim();\nif (!dealId) return [{ json: { ok: false, statusCode: 400, body: { error: 'No dealId provided.' } } }];\nreturn [{ json: { ok: true, dealId } }];\n"
+      },
+      "id": "00509ccd-7444-5fb7-8f68-044103111004",
+      "name": "Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "57a3eb47-eff8-5729-aa01-0967c365dd1a",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "64b14ec0-b4b9-5c0b-b450-55a8720cba32",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "objects",
+        "objectType": "0-3",
+        "operation": "get",
+        "objectId": "={{ $json.dealId }}",
+        "properties": [
+          "latitude",
+          "longitude",
+          "dealname",
+          "e_sorder_id",
+          "dealstage",
+          "pipeline"
+        ],
+        "additionalOptions": {
+          "errorWhenNotFound": false
+        }
+      },
+      "id": "abbebc38-e0eb-59f4-9411-544271d2b3ec",
+      "name": "HubSpot: get deal",
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        720,
+        0
+      ],
+      "credentials": {
+        "hubspotApi": {
+          "id": "4HKK5aFFmTGesa3H",
+          "name": "HubSpot account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "resource": "properties",
+        "objectType": "0-3",
+        "operation": "getProperty",
+        "getPropertyName": "dealstage"
+      },
+      "id": "7bba3e00-07c4-5140-967f-f7378df6f276",
+      "name": "HubSpot: dealstage options",
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        960,
+        0
+      ],
+      "credentials": {
+        "hubspotApi": {
+          "id": "4HKK5aFFmTGesa3H",
+          "name": "HubSpot account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Same gates as the app function: blocked deal stage first, then a\n// missing [E] Order ID. Both short-circuit before any Eclipse call.\n// The stage label comes from the dealstage property's options (the\n// HubSpot node has no pipelines resource); options are matched by id.\nconst BLOCKED_STAGE_TOKENS = ['lost', 'delivered', 'invoiced', 'qualified', 'discovery'];\nconst deal = $('HubSpot: get deal').first().json;\nconst prop = $input.first().json;\nconst dealId = $('Validate').first().json.dealId;\n\nif (deal.error || deal.objectFound === false) {\n  return [{ json: { ok: false, statusCode: 500, body: { error: deal.error ? ('HubSpot deal fetch failed: ' + deal.error) : ('Deal ' + dealId + ' not found.') } } }];\n}\nconst props = deal.properties || {};\nconst stageId = props.dealstage || null;\nconst options = Array.isArray(prop.options) ? prop.options : [];\nconst opt = options.find((o) => String(o.value) === String(stageId));\nconst stageLabel = opt ? opt.label : null;\n\nconst l = String(stageLabel || '').toLowerCase();\nconst token = stageLabel ? BLOCKED_STAGE_TOKENS.find((t) => l.includes(t)) : null;\nif (token) {\n  const displayStage = stageLabel || stageId || '(unknown)';\n  return [{ json: { ok: false, statusCode: 200, body: { blocked: {\n    reason: 'stage', stageLabel: displayStage,\n    message: 'Cannot modify this order as it is in stage ' + displayStage,\n  } } } }];\n}\nif (!props.e_sorder_id) {\n  return [{ json: { ok: false, statusCode: 200, body: { blocked: { reason: 'missing_oid', message: 'Eclipse order ID missing' } } } }];\n}\nreturn [{ json: {\n  ok: true,\n  dealId,\n  dealName: props.dealname || '',\n  eclipseOrderId: props.e_sorder_id,\n  latitude: parseFloat(props.latitude) || null,\n  longitude: parseFloat(props.longitude) || null,\n} }];\n"
+      },
+      "id": "84566268-2ac5-5351-97e0-0d3d57d355c8",
+      "name": "Stage + OID gate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "1039a1ac-cfc4-5a95-b5b7-2d3f4a0fe7a0",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a487aad1-8d91-5daf-a7cf-3e26d4125212",
+      "name": "Not blocked?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "associations",
+        "operation": "assocBatchRead",
+        "fromObjectType": "0-3",
+        "toObjectType": "0-8",
+        "fromIds": "={{ $json.dealId }}",
+        "assocBatchReadReturnAllMode": "allInOne"
+      },
+      "id": "879be31e-91b0-5ba2-a75e-b1ae8954fdba",
+      "name": "HubSpot: deal line item ids",
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        1680,
+        0
+      ],
+      "credentials": {
+        "hubspotApi": {
+          "id": "4HKK5aFFmTGesa3H",
+          "name": "HubSpot account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const r = $input.first().json;\nif (r.error) {\n  return [{ json: { ok: false, statusCode: 500, body: { error: 'HubSpot associations error: ' + r.error } } }];\n}\nconst ids = [];\nconst results = Array.isArray(r.results) ? r.results : [];\nfor (const res of results) {\n  for (const t of (res.to || [])) ids.push(String(t.toObjectId || t.id));\n}\nif (!ids.length) {\n  // No line items: same empty payload the app function returned.\n  return [{ json: { ok: false, statusCode: 200, body: {\n    lineItems: [], productIds: [],\n    fulfillmentOptions: { closestCombo: null, allBranchesWithStock: [] },\n    branchMatrix: [],\n  } } }];\n}\nreturn [{ json: { ok: true, ids: [...new Set(ids)] } }];\n"
+      },
+      "id": "4e647473-e67a-5c95-b2d4-20a098dbe933",
+      "name": "Collect line item ids",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "8c05b3f6-7a2f-5fc5-827f-7498322c9ac9",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "1b89e0e3-2009-5577-9841-4d4b2bb656a8",
+      "name": "Has line items?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "objects",
+        "objectType": "0-8",
+        "operation": "batchRead",
+        "batchReadInputMode": "ui",
+        "batchReadObjectIds": "={{ $json.ids.join(',') }}",
+        "batchReadReturnAllMode": "allInOne",
+        "batchReadOptions": {
+          "properties": [
+            "name",
+            "quantity",
+            "price",
+            "e_product_id_",
+            "hs_product_id",
+            "hs_sku"
+          ]
+        }
+      },
+      "id": "eee657c1-9234-50c1-ba8a-e45e8ff20659",
+      "name": "HubSpot: read line items",
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        2400,
+        0
+      ],
+      "credentials": {
+        "hubspotApi": {
+          "id": "4HKK5aFFmTGesa3H",
+          "name": "HubSpot account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const r = $input.first().json;\nif (r.error) {\n  return [{ json: { ok: false, statusCode: 500, body: { error: 'HubSpot line items error: ' + r.error } } }];\n}\nconst lineItems = (Array.isArray(r.results) ? r.results : []).map((row) => {\n  const p = row.properties || {};\n  return {\n    id: row.id,\n    name: p.name || 'Unknown Product',\n    quantity: parseFloat(p.quantity) || 1,\n    eclipseProductId: p.e_product_id_ || p.hs_sku || '',\n    price: parseFloat(p.price) || 0,\n  };\n});\nconst missing = lineItems.filter((li) => !li.eclipseProductId);\nif (missing.length) {\n  const noun = missing.length === 1 ? 'line item' : 'line items';\n  return [{ json: { ok: false, statusCode: 200, body: { blocked: {\n    reason: 'missing_product_ids',\n    missingItems: missing.map((li) => li.name || ('Line item ' + li.id)),\n    message: missing.length + ' ' + noun + ' missing an Eclipse Product ID. Map every line item on the deal before placing the order.',\n  } } } }];\n}\nconst gate = $('Stage + OID gate').first().json;\nconst productIds = [...new Set(lineItems.map((i) => String(i.eclipseProductId)))];\nreturn [{ json: { ok: true, lineItems, productIds, eclipseOrderId: gate.eclipseOrderId } }];\n"
+      },
+      "id": "3f6d99bf-7491-5650-8a2f-f89d71fda36b",
+      "name": "Line item gate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "5a163bed-27b8-5ad9-88f1-0f14a8a17c97",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "146aeae5-d253-5a8b-b713-72cb0e6b9466",
+      "name": "Products mapped?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "get",
+        "salesOrderId": "={{ $json.eclipseOrderId }}"
+      },
+      "id": "db61dbbb-64f9-5f63-8c91-7c5196b23dae",
+      "name": "Eclipse: get sales order",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        3120,
+        0
+      ],
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Pricing inquiry needs a customer id; the deal only carries the order id.\n// Eclipse SO Get keeps the bill-to per generation (generations[].billToId),\n// so use the generation from the deal's [E] Order ID (S0920344.0001 \u2192 gen 1),\n// falling back to the first generation.\nconst env = $input.first().json;\nconst order = (Array.isArray(env.results) ? env.results[0] : env) || {};\nconst gens = Array.isArray(order.generations) ? order.generations : [];\nconst li = $('Line item gate').first().json;\nconst oid = String(li.eclipseOrderId || '');\nconst genNo = oid.includes('.') ? Number(oid.split('.')[1]) : null;\nconst gen = gens.find((g) => Number(g.generationId) === genNo) || gens[0] || {};\nconst customerId = String(gen.billToId || gen.shipToId || '');\nreturn [{ json: {\n  customerId,\n  productIds: li.productIds.join(','),\n  orderError: env.error ? String(env.error) : (customerId ? '' : 'No billToId on Eclipse order ' + oid),\n} }];\n"
+      },
+      "id": "2eac8e77-0fdd-5fc5-ba6b-4f3d9ed84256",
+      "name": "Pick pricing customer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3360,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "product",
+        "operation": "getProductInventoryPricingInquiry",
+        "pricingCustomerId": "={{ $json.customerId }}",
+        "pricingProductId": "={{ $json.productIds }}",
+        "pricingPageSize": 100,
+        "pricingReturnAllMode": "allInOne",
+        "considerUserAuthBranch": false
+      },
+      "id": "b5ea6ed0-b9da-53ad-b16f-2273086bfc69",
+      "name": "Eclipse: inventory pricing inquiry",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        3600,
+        0
+      ],
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Port of STEP 4-6 of eclipseInventoryLookup.js. Branch coordinates,\n// distance math, the branch matrix, unavailable products and the\n// closest-combination algorithm are carried over unchanged.\n//\n// Per-branch stock: the old function read\n// /ProductInventoryInquiry \u2192 branchAvailableQuantity[{warehouse, warehouseQty}].\n// The Eclipse node's pricing inquiry is used instead; its per-branch field\n// is UNVERIFIED (expected stockInfo[{warehouse, warehouseQty}], which is\n// what the product-inquiry page renders), so several shapes are accepted.\nconst BRANCH_COORDS = {\n  \"1\":  { name: \"Wichita\",       lat: 37.6369, lng: -97.3503  },\n  \"2\":  { name: \"Grand Island\",  lat: 40.8755, lng: -98.3492  },\n  \"3\":  { name: \"Yankton\",       lat: 42.8943, lng: -97.4106  },\n  \"4\":  { name: \"El Reno\",       lat: 35.5335, lng: -97.9549  },\n  \"5\":  { name: \"Grain Valley\",  lat: 39.0189, lng: -94.2255  },\n  \"6\":  { name: \"Garden City\",   lat: 37.9546, lng: -100.8354 },\n  \"7\":  { name: \"Caldwell\",      lat: 43.6749, lng: -116.7025 },\n  \"8\":  { name: \"Evans\",         lat: 40.3775, lng: -104.7214 },\n  \"9\":  { name: \"Brush\",         lat: 40.2694, lng: -103.6214 },\n  \"12\": { name: \"Pasco\",         lat: 46.2378, lng: -119.0906 },\n  \"14\": { name: \"Stockton\",      lat: 37.9392, lng: -121.3115 },\n  \"15\": { name: \"Fresno\",        lat: 36.6975, lng: -119.7423 },\n  \"16\": { name: \"Salinas\",       lat: 36.6433, lng: -121.5898 },\n  \"17\": { name: \"Yuma\",          lat: 32.6841, lng: -114.5683 },\n};\n\nfunction haversineKm(lat1, lng1, lat2, lng2) {\n  const R = 6371;\n  const dLat = ((lat2 - lat1) * Math.PI) / 180;\n  const dLng = ((lng2 - lng1) * Math.PI) / 180;\n  const a = Math.sin(dLat / 2) ** 2 +\n    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;\n  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));\n}\n\nfunction parseBranchId(warehouseStr) {\n  const s = String(warehouseStr || '').trim();\n  if (/^\\d+$/.test(s)) return s;\n  const match = s.match(/^(\\d+)\\s*-/);\n  return match ? match[1] : null;\n}\n\nfunction branchEntries(r) {\n  const arr = r.branchAvailableQuantity || r.stockInfo || r.inventory || [];\n  if (!Array.isArray(arr)) return [];\n  return arr.map((e) => ({\n    warehouse: String(e.warehouse || e.branch || e.branchName || e.branchId || ''),\n    qty: Number(e.warehouseQty ?? e.availableQty ?? e.availableQuantity ?? e.quantity ?? e.qty ?? 0) || 0,\n  }));\n}\n\nfunction findClosestCombination(sortedBranches, productIds, requiredQty) {\n  const combo = [];\n  const assignments = {};\n  const remainingQty = {};\n  for (const pid of productIds) {\n    remainingQty[pid] = requiredQty[pid] || 1;\n    assignments[pid] = [];\n  }\n  const pool = [...sortedBranches];\n  while (Object.values(remainingQty).some((q) => q > 0)) {\n    if (pool.length === 0) break;\n    let bestIdx = -1;\n    let bestTakeSum = 0;\n    let bestBreakdown = null;\n    for (let i = 0; i < pool.length; i++) {\n      const b = pool[i];\n      let takeSum = 0;\n      const breakdown = {};\n      for (const pid of productIds) {\n        const need = remainingQty[pid];\n        const have = b.products[pid] || 0;\n        if (need > 0 && have > 0) {\n          const take = Math.min(need, have);\n          breakdown[pid] = take;\n          takeSum += take;\n        }\n      }\n      if (takeSum > bestTakeSum) {\n        bestTakeSum = takeSum;\n        bestIdx = i;\n        bestBreakdown = breakdown;\n      }\n    }\n    if (bestIdx === -1) break;\n    const chosen = pool.splice(bestIdx, 1)[0];\n    combo.push(chosen);\n    for (const [pid, take] of Object.entries(bestBreakdown)) {\n      remainingQty[pid] -= take;\n      assignments[pid].push({ branchId: chosen.branchId, quantity: take });\n    }\n  }\n  if (Object.values(remainingQty).some((q) => q > 0)) return null;\n  const maxDistance = combo.length ? Math.max(...combo.map((b) => b.distanceKm)) : 0;\n  return { branches: combo, maxDistance, assignments };\n}\n\nconst gate = $('Stage + OID gate').first().json;\nconst li = $('Line item gate').first().json;\nconst lineItems = li.lineItems;\nconst productIds = li.productIds;\nconst custLat = gate.latitude;\nconst custLng = gate.longitude;\nconst pricing = $input.first().json;\n\n// Inventory results keyed by product id\nconst failedProducts = [];\nconst stockByPid = {};\nif (pricing.error) {\n  const msg = String(pricing.error) + (pricing.message ? ': ' + JSON.stringify(pricing.message) : '');\n  for (const pid of productIds) failedProducts.push({ productId: pid, error: msg });\n} else {\n  const results = Array.isArray(pricing.results) ? pricing.results : [];\n  for (const r of results) {\n    if (r && r.productId != null) stockByPid[String(r.productId)] = branchEntries(r);\n  }\n  for (const pid of productIds) {\n    if (!stockByPid[pid]) failedProducts.push({ productId: pid, error: 'No inventory returned' });\n  }\n}\n\nconst branchMatrix = {};\nfor (const [branchId, coords] of Object.entries(BRANCH_COORDS)) {\n  const distance = custLat !== null && custLng !== null\n    ? haversineKm(custLat, custLng, coords.lat, coords.lng) : 9999;\n  branchMatrix[branchId] = {\n    branchId, branchName: branchId + ' - ' + coords.name,\n    lat: coords.lat, lng: coords.lng,\n    distanceKm: Math.round(distance * 10) / 10,\n    products: {},\n  };\n}\nfor (const [pid, entries] of Object.entries(stockByPid)) {\n  for (const entry of entries) {\n    const branchId = parseBranchId(entry.warehouse);\n    if (!branchId) continue;\n    if (!branchMatrix[branchId]) {\n      const rawName = entry.warehouse.replace(/^\\d+\\s*-\\s*/, '').trim() || ('Branch ' + branchId);\n      branchMatrix[branchId] = {\n        branchId, branchName: branchId + ' - ' + rawName,\n        lat: null, lng: null, distanceKm: 9999, products: {},\n      };\n    }\n    branchMatrix[branchId].products[pid] = (branchMatrix[branchId].products[pid] || 0) + entry.qty;\n  }\n}\nconst sortedBranches = Object.values(branchMatrix).sort((a, b) => a.distanceKm - b.distanceKm);\n\nconst unavailableProducts = [];\nconst availableProductIds = [];\nfor (const pid of productIds) {\n  const totalQty = sortedBranches.reduce((sum, b) => sum + (b.products[pid] || 0), 0);\n  if (totalQty <= 0) {\n    const item = lineItems.find((x) => String(x.eclipseProductId) === String(pid));\n    unavailableProducts.push({ productId: pid, name: item ? item.name : ('Product ' + pid) });\n  } else {\n    availableProductIds.push(pid);\n  }\n}\nconst fulfillProductIds = availableProductIds.length > 0 ? availableProductIds : productIds;\n\nconst requiredQty = {};\nfor (const item of lineItems) {\n  if (item.eclipseProductId) {\n    requiredQty[item.eclipseProductId] = (requiredQty[item.eclipseProductId] || 0) + (item.quantity || 1);\n  }\n}\nconst closestCombo = findClosestCombination(sortedBranches, fulfillProductIds, requiredQty);\nconst allBranchesWithStock = sortedBranches.filter((b) =>\n  fulfillProductIds.some((pid) => (b.products[pid] || 0) > 0));\n\nreturn [{ json: { statusCode: 200, body: {\n  lineItems,\n  productIds: fulfillProductIds,\n  unavailableProducts,\n  failedProducts,\n  deal: { eclipseOrderId: gate.eclipseOrderId || null, dealName: gate.dealName || '' },\n  fulfillmentOptions: { closestCombo, allBranchesWithStock },\n  branchMatrix: sortedBranches,\n} } }];\n"
+      },
+      "id": "94e99056-19f4-5101-be47-355197e4f23c",
+      "name": "Build branch matrix",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3840,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode || 200 }}"
+        }
+      },
+      "id": "e67e834f-b023-51e4-be69-070d10524dec",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1920,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: get deal",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: get deal": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: dealstage options",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: dealstage options": {
+      "main": [
+        [
+          {
+            "node": "Stage + OID gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stage + OID gate": {
+      "main": [
+        [
+          {
+            "node": "Not blocked?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Not blocked?": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: deal line item ids",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: deal line item ids": {
+      "main": [
+        [
+          {
+            "node": "Collect line item ids",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect line item ids": {
+      "main": [
+        [
+          {
+            "node": "Has line items?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has line items?": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: read line items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: read line items": {
+      "main": [
+        [
+          {
+            "node": "Line item gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Line item gate": {
+      "main": [
+        [
+          {
+            "node": "Products mapped?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Products mapped?": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: get sales order",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: get sales order": {
+      "main": [
+        [
+          {
+            "node": "Pick pricing customer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick pricing customer": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: inventory pricing inquiry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: inventory pricing inquiry": {
+      "main": [
+        [
+          {
+            "node": "Build branch matrix",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build branch matrix": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "active": false
+}

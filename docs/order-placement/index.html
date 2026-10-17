@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <script src="../auth.js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fairbank | Order Placement</title>
+  <link rel="icon" href="../favicon.png" type="image/png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700&family=Barlow:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="vendor/flatpickr.min.css">
+  <link rel="stylesheet" href="styles.css">
+  <script src="vendor/flatpickr.min.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <!--
+    Keyboard-first order entry. Open with ?e_customer_id=<Eclipse customer id>
+    (the HubSpot customer card link), or without it to search for a customer.
+    All behaviour lives in app.js. This page uses the side layout (the default):
+    stock and qty breaks for every line in a box on the right.
+  -->
+  <main id="app" class="fop-app fop-app--side" data-layout="side">
+    <noscript>
+      <div class="fop-alert fop-alert--error">
+        This tool requires JavaScript. Enable JavaScript and reload the page.
+      </div>
+    </noscript>
+  </main>
+</body>
+</html>

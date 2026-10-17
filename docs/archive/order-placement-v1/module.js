@@ -16,9 +16,10 @@
 // Differences from the app card, all forced by the surface change:
 //   • Deal context comes from the page URL (?dealId=...) instead of the CRM
 //     record; a small picker renders when the parameter is absent.
-//   • Backend calls go over fetch() to the CMS serverless endpoints
-//     (eclipse-inventory-lookup / eclipse-place-order) instead of
-//     runServerless(). Payloads and responses are identical.
+//   • Backend calls go over fetch() to the n8n webhooks
+//     (e-order-placement/v1/inventory-lookup and /v1/place-order, see
+//     n8n-flows/) instead of runServerless(). Payloads and responses are
+//     identical to the old app functions.
 //   • Dates are plain YYYY-MM-DD strings from native <input type="date">
 //     elements, exactly the format Eclipse expects, so no DateInput
 //     {year, month, date} conversion layer is needed.
@@ -98,8 +99,8 @@
   function initApp(root) {
     var cfg = {
       title: root.getAttribute("data-title") || "Branch Fulfillment",
-      apiBase: (root.getAttribute("data-api-base") || "/_hcms/api/fairbank").replace(/\/+$/, ""),
-      apiKey: root.getAttribute("data-api-key") || "",
+      apiBase: (root.getAttribute("data-api-base") ||
+        "https://n8n.fairbankequipment.com/webhook/e-order-placement/v1").replace(/\/+$/, ""),
       dealParam: root.getAttribute("data-deal-param") || "dealId",
       portalId: root.getAttribute("data-portal-id") || "",
       viewId: root.getAttribute("data-view-id") || "",
@@ -131,14 +132,9 @@
     // ── Backend calls ──────────────────────────────────────────────────────
 
     function callApi(endpoint, payload) {
-      var headers = { "Content-Type": "application/json" };
-      // Shared access key for the external backend; matches its
-      // API_ACCESS_KEY env var. Empty when the backend is HubSpot-hosted.
-      if (cfg.apiKey) headers["X-Api-Key"] = cfg.apiKey;
       return fetch(cfg.apiBase + "/" + endpoint, {
         method: "POST",
-        headers: headers,
-        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       }).then(function (res) {
         return res
@@ -153,7 +149,7 @@
       state.error = null;
       render();
 
-      callApi("eclipse-inventory-lookup", { dealId: String(state.dealId) })
+      callApi("inventory-lookup", { dealId: String(state.dealId) })
         .then(function (res) {
           var data = res.data || {};
           // The endpoint returns errors in-band as { error }; a `blocked`
@@ -247,7 +243,7 @@
       }
       var generations = Object.keys(genMap).map(function (k) { return genMap[k]; });
 
-      callApi("eclipse-place-order", {
+      callApi("place-order", {
         dealId: String(state.dealId),
         eclipseOrderId: String(eclipseOrderId()),
         generations: generations,

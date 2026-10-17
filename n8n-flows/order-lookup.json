@@ -1,0 +1,268 @@
+{
+  "name": "e-order-placement: order lookup",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "e-order-placement/order",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "ea66958c-ef96-5ae2-abea-fdd291a8673e",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "f554f7dc-6774-5035-842c-2165688a0bcc"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// GET ?e_sorder_id=S2737687.0001 or S2737687. Without a gen suffix the\n// lowest generation on the order is the selected one (genId '').\nconst q = $input.first().json.query || {};\nconst m = String(q.e_sorder_id || '').trim().toUpperCase().match(/^S?(\\d+)(?:\\.(\\d{1,4}))?$/);\nif (!m) return [{ json: { ok: false, statusCode: 400, body: { success: false, error: 'Missing or invalid e_sorder_id (expected S1234567 or S1234567.0001).', step: 'validate' } } }];\nreturn [{ json: { ok: true, oid: 'S' + m[1], genId: m[2] ? String(Number(m[2])) : '' } }];\n"
+      },
+      "id": "e39c590e-50a3-5625-93c8-1c0359119569",
+      "name": "Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "63725f89-4e70-5cd8-a697-bef14fb3aef0",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "10793b8c-31d1-5e23-a5ac-d7b82473865c",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "get",
+        "salesOrderId": "={{ $json.oid }}"
+      },
+      "id": "6196bbe0-0185-515c-bea1-c02316b1d2ec",
+      "name": "Eclipse: get order",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        720,
+        0
+      ],
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Every generation's e_sorder_id (S2659464.0002, ...) for one HubSpot deal\n// Batch Read; the Eclipse response is read again by name in Shape.\nconst env = $input.first().json;\nconst so = (Array.isArray(env.results) ? env.results[0] : env) || {};\nconst oid = $('Validate').first().json.oid;\nconst ids = (Array.isArray(so.generations) ? so.generations : [])\n  .map((g) => oid + '.' + String(g.generationId).padStart(4, '0'));\nreturn [{ json: { ids: ids.join(',') } }];\n"
+      },
+      "id": "dc25a087-e9b5-56fa-921d-7f35a5946d7b",
+      "name": "Deal ids",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "objects",
+        "objectType": "0-3",
+        "operation": "batchRead",
+        "batchReadInputMode": "ui",
+        "batchReadObjectIds": "={{ $json.ids }}",
+        "batchReadReturnAllMode": "allInOne",
+        "batchReadOptions": {
+          "idProperty": "e_sorder_id",
+          "properties": [
+            "e_sorder_id",
+            "dealname",
+            "delivery_details",
+            "delivery_tracking_link"
+          ]
+        }
+      },
+      "id": "1340d63e-01a5-54bb-a0b7-c04dff77b5ca",
+      "name": "HubSpot: get deals",
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        0
+      ],
+      "credentials": {
+        "hubspotApi": {
+          "id": "4HKK5aFFmTGesa3H",
+          "name": "HubSpot account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Every generation of the order, each with its own header and lines; the\n// requested (or lowest) generation's fields are also at the top level.\n// Each generation also gets its HubSpot deal (matched on e_sorder_id).\nconst v = $('Validate').first().json;\nconst env = $('Eclipse: get order').first().json;\nconst fail = (statusCode, error, step) => [{ json: { ok: false, statusCode, body: { success: false, error, step } } }];\nif (env.error) return fail(502, 'Eclipse GET /SalesOrders?id=' + v.oid + ' failed: ' + env.error + ' ' + JSON.stringify(env.message || '').substring(0, 500), 'getSalesOrder');\nconst so = (Array.isArray(env.results) ? env.results[0] : env) || {};\nif (!Array.isArray(so.generations) || !so.generations.length) return fail(404, 'Eclipse order ' + v.oid + ' not found.', 'getSalesOrder');\nconst money = (m) => (m && m.value != null ? Number(m.value) : null);\nconst pad = (g) => String(g).padStart(4, '0');\n\n// HubSpot deals by e_sorder_id (Batch Read, allInOne → { results: [...] }).\nconst hsResp = $input.first().json || {};\nconst deals = {};\nfor (const row of (Array.isArray(hsResp.results) ? hsResp.results : [])) {\n  const p = row.properties || {};\n  if (p.e_sorder_id) deals[String(p.e_sorder_id).trim().toUpperCase()] = row;\n}\n\n// Lines with a quantity, per generation id.\nconst linesByGen = {};\nfor (const line of (Array.isArray(so.lines) ? so.lines : [])) {\n  for (const lg of (Array.isArray(line.generations) ? line.generations : [])) {\n    const qty = (Number(lg.stockQty) || 0) + (Number(lg.nonstockQty) || 0);\n    if (qty <= 0) continue;\n    const gid = String(lg.generationId);\n    (linesByGen[gid] = linesByGen[gid] || []).push({\n      line_id: line.lineId, product_id: String(line.productId), qty,\n      description: String(line.productDescription || line.productDecription || '').replace(/\\s*\\n\\s*/g, ' ').trim(),\n      unit_price: lg.price && lg.price.value != null ? Number(lg.price.value) : null,\n      // Line cost and COGS as saved on the order (null when restricted / missing).\n      unit_cost: lg.cost && lg.cost.value != null ? Number(lg.cost.value) : null,\n      unit_cogs: lg.cogs && lg.cogs.value != null ? Number(lg.cogs.value) : null,\n      um: line.displayUom || line.smallestUom || 'ea', um_qty: Number(line.displayUomQty) || 1,\n      line_status: String(line.status || ''),\n    });\n  }\n}\n\nconst genBody = (gen) => {\n  const status = String(gen.status || '');\n  const gid = String(gen.generationId);\n  return {\n    e_sorder_id: v.oid + '.' + pad(gid),\n    generation_id: Number(gid),\n    // Eclipse's invoice number for this generation (invoiceNumber; invoiceId\n    // is null in live responses). Cancelled gens can carry one too.\n    invoice_number: gen.invoiceNumber != null ? Number(gen.invoiceNumber) : null,\n    full_invoice_id: gen.fullInvoiceID || '',\n    status,\n    // Only a Bid can have its lines changed; Invoice and Cancel are final.\n    editable: status === 'Bid',\n    cancellable: status !== 'Invoice' && status !== 'Cancel',\n    bill_to_id: String(gen.billToId || ''),\n    ship_to_id: String(gen.shipToId || ''),\n    ship_to_name: gen.shipToName || '',\n    ship_branch: String(gen.shipBranch || ''),\n    price_branch: String(gen.priceBranch || ''),\n    ship_via: gen.shipVia || '',\n    order_date: gen.orderDate || '',\n    ship_date: gen.shipDate || '',\n    required_date: gen.requiredDate || '',\n    po: gen.poNumber || '',\n    release: gen.releaseNumber || '',\n    internal_notes: gen.internalNotes || '',\n    shipping_instructions: gen.shippingInstructions || '',\n    writer: gen.writer || '',\n    outside_sales: gen.outsideSalesperson || '',\n    inside_sales: gen.insideSalesperson || '',\n    // Eclipse print status code as stored (values seen: N, Q, H, P, A; meanings unconfirmed).\n    print_status: gen.printStatus || '',\n    sales_total: money(gen.salesTotal),\n    // Billable freight, tax and the order total, as Eclipse shows them\n    // (salesTotal + freight + handling + tax = total on 99% of 2026 gens).\n    freight_in: money(gen.freightInBillable),\n    freight_out: money(gen.freightOutBillable),\n    handling: (money(gen.handlingInBillable) || 0) + (money(gen.handlingOutBillable) || 0),\n    tax_total: money(gen.taxTotal),\n    order_total: money(gen.total),\n    lines: linesByGen[gid] || [],\n    // HubSpot deal for this generation ('' when there is none or the read failed).\n    hs_deal_id: (deals[v.oid + '.' + pad(gid)] || {}).id || '',\n    hs_deal_name: ((deals[v.oid + '.' + pad(gid)] || {}).properties || {}).dealname || '',\n    tracking_details: ((deals[v.oid + '.' + pad(gid)] || {}).properties || {}).delivery_details || '',\n    tracking_link: ((deals[v.oid + '.' + pad(gid)] || {}).properties || {}).delivery_tracking_link || '',\n  };\n};\n\nconst generations = so.generations.map(genBody).sort((a, b) => a.generation_id - b.generation_id);\nconst selected = v.genId ? generations.find((g) => String(g.generation_id) === v.genId) : generations[0];\nif (!selected) return fail(404, 'Order ' + v.oid + ' has no generation ' + v.genId + '.', 'getSalesOrder');\nreturn [{ json: { ok: true, statusCode: 200, body: {\n  success: true,\n  ...selected,\n  order_id: v.oid,\n  // Order-level last change (Eclipse has no per-generation timestamp).\n  last_modified: so.lastUpdateDateTime || '',\n  last_modified_by: so.lastUpdateUser || '',\n  // Set when the HubSpot deal read failed (the order still loads).\n  hubspot_error: hsResp.error ? String(hsResp.error) : '',\n  generations,\n} } }];\n"
+      },
+      "id": "8e3f8727-d10a-5960-969c-93c107554cc1",
+      "name": "Shape",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode || 200 }}"
+        }
+      },
+      "id": "8d99b781-dcb7-5cb4-bff6-58bde9d2af2c",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        840,
+        220
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: get order",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: get order": {
+      "main": [
+        [
+          {
+            "node": "Deal ids",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deal ids": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: get deals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: get deals": {
+      "main": [
+        [
+          {
+            "node": "Shape",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "active": false
+}

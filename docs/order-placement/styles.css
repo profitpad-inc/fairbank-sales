@@ -1,0 +1,738 @@
+/* ============================================================
+   Fairbank: Order Placement
+   Page styles; app rules are scoped to .fop-app. Same navy / gold palette and Barlow fonts as
+   product-inquiry. Desktop: dense e-term style chart. Phone (<768px):
+   cards per line, sticky action bar.
+   ============================================================ */
+
+html, body { margin: 0; min-height: 100%; }
+body {
+  min-height: 100vh;
+  background: linear-gradient(to bottom right, #081529, #003057);
+}
+
+.fop-app {
+  --navy:      #0e2245;
+  --navy-mid:  #162f5e;
+  --navy-dark: #091529;
+  --gold:      #c8962a;
+  --gold-lt:   #e0aa38;
+  --white:     #ffffff;
+  --text:      #f0f4fa;
+  --muted:     #8fa4c2;
+  /* Gold is reserved for the primary action, focus / active states and the
+     order total. Card, grid and button borders are steel blue-gray. */
+  --steel:     rgba(143, 164, 194, 0.28);
+  --border:    var(--steel);
+  --line:      rgba(143, 164, 194, 0.18);
+  --card-bg:   rgba(22, 47, 94, 0.55);
+  --input-bg:  rgba(9, 21, 41, 0.75);
+  --row-hover: rgba(200, 150, 42, 0.07);
+  --success:   #3ecf8e;
+  --warning:   #f0c46a;
+  --error:     #ff5f5f;
+
+  font-family: 'Barlow', sans-serif;
+  font-size: 15px;
+  color: var(--text);
+  padding: 24px 16px 96px;
+}
+
+.fop-app *,
+.fop-app *::before,
+.fop-app *::after { box-sizing: border-box; }
+
+.fop-wrap { max-width: 1280px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.fop-wrap--narrow { max-width: 640px; }
+
+.fop-kicker {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 13px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--muted);
+}
+.fop-h1 {
+  margin: 2px 0 0;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 34px; font-weight: 700; letter-spacing: .02em;
+  color: var(--white);
+}
+.fop-h2 {
+  margin: 0 0 12px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 24px; font-weight: 700; color: var(--white);
+}
+
+.fop-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.fop-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.fop-row--end { justify-content: flex-end; }
+.fop-muted { color: var(--muted); }
+.fop-block { display: block; }
+.fop-num { text-align: right; font-variant-numeric: tabular-nums; }
+.fop-warn-text { color: var(--warning); font-size: 13px; }
+
+.fop-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px;
+}
+
+.fop-hint { margin-top: 10px; font-size: 13px; color: var(--muted); }
+
+/* ── Badges, keys ── */
+.fop-badge {
+  display: inline-block; padding: 1px 7px;
+  font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: .04em;
+  color: var(--text); background: rgba(143, 164, 194, 0.12);
+  border: 1px solid var(--border); border-radius: 4px;
+}
+.fop-key {
+  display: inline-block; min-width: 20px; padding: 0 5px; margin-left: 4px;
+  font: 600 11px/18px 'Barlow', sans-serif; text-align: center;
+  color: var(--muted); border: 1px solid var(--line); border-radius: 4px;
+}
+.fop-key--dark { color: var(--navy-dark); border-color: rgba(9, 21, 41, .35); }
+
+/* ── Buttons ── */
+.fop-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 10px 18px;
+  font-family: 'Barlow Condensed', sans-serif; font-size: 17px; font-weight: 700;
+  letter-spacing: .05em; text-transform: uppercase; text-decoration: none;
+  color: var(--navy-dark); background: var(--gold);
+  border: 1px solid var(--gold); border-radius: 6px;
+  cursor: pointer;
+}
+.fop-btn:hover:not([disabled]) { background: var(--gold-lt); }
+/* Secondary buttons: steel outline, gold only on hover / focus. */
+.fop-btn--ghost { color: var(--text); background: transparent; border-color: var(--steel); }
+.fop-btn--ghost:hover:not([disabled]) { color: var(--gold-lt); border-color: var(--gold); background: rgba(200, 150, 42, 0.08); }
+.fop-btn--sm { padding: 6px 12px; font-size: 14px; }
+/* External-link icon after links that open a new tab (EXT_ICON in app.js). */
+.fop-ext { width: .9em; height: .9em; flex: none; fill: currentColor; vertical-align: -.1em; }
+/* Tracking links: margin instead of a space before the icon, so the
+   underline stops at the end of the tracking number. */
+.fop-pkg__trk .fop-ext { margin-left: .3em; }
+.fop-btn[disabled] { opacity: .45; cursor: not-allowed; }
+.fop-app :focus-visible { outline: 2px solid var(--gold-lt); outline-offset: 2px; }
+
+.fop-icon-btn {
+  width: 28px; height: 28px; font-size: 18px; line-height: 1;
+  color: var(--muted); background: none; border: 0; border-radius: 4px; cursor: pointer;
+}
+.fop-icon-btn:hover { color: var(--error); background: rgba(255, 95, 95, .1); }
+
+/* ── Inputs ── */
+.fop-label {
+  display: block; margin-bottom: 5px;
+  font-size: 13px; font-weight: 500;
+  color: var(--muted);
+}
+.fop-input {
+  width: 100%; padding: 8px 10px;
+  font: inherit; color: var(--white);
+  background: var(--input-bg);
+  border: 1px solid var(--line); border-radius: 5px;
+}
+.fop-input:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 2px rgba(200, 150, 42, .25); }
+.fop-input--err { border-color: var(--error); }
+.fop-input--override { color: var(--gold-lt); }
+/* Custom chevron instead of the native arrow: a little further from the
+   edge than the native one (8px), slightly bolder, same muted colour as the date fields' calendar
+   icon (gold when focused). */
+select.fop-input {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 38px;
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 14px 14px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238fa4c2' stroke-width='2.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+}
+select.fop-input:focus {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23e0aa38' stroke-width='2.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+}
+select.fop-input option, select.fop-input optgroup { color: #000; }
+/* Notes start at about 1.5 lines (the half line hints there is room for
+   more) and grow with their text (autosize() in app.js). */
+textarea.fop-notes { display: block; min-height: calc(2.1em + 18px); line-height: 1.4; resize: none; overflow: hidden; }
+
+/* ── Alerts ── */
+.fop-alert { padding: 12px 14px; border-radius: 8px; border: 1px solid; font-size: 14px; }
+.fop-alert--error   { color: #ffd2d2; background: rgba(255, 95, 95, .12);  border-color: rgba(255, 95, 95, .45); }
+.fop-alert--warning { color: #fbe7bd; background: rgba(240, 196, 106, .1); border-color: rgba(240, 196, 106, .45); }
+.fop-alert--success { color: #c9f5e2; background: rgba(62, 207, 142, .1);  border-color: rgba(62, 207, 142, .45); }
+
+/* ── Loading ── */
+.fop-center { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 80px 0; color: var(--muted); }
+.fop-spinner {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 3px solid rgba(200, 150, 42, .2); border-top-color: var(--gold);
+  animation: fop-spin .8s linear infinite;
+}
+.fop-dots { color: var(--muted); animation: fop-pulse 1s ease-in-out infinite; }
+@keyframes fop-spin { to { transform: rotate(360deg); } }
+@keyframes fop-pulse { 50% { opacity: .3; } }
+
+/* ── Autocomplete ── */
+.fop-ac { position: relative; }
+.fop-ac__list {
+  display: none; position: absolute; z-index: 50; left: 0; top: calc(100% + 4px);
+  min-width: 100%; width: max-content; max-width: min(560px, 92vw); max-height: 300px; overflow-y: auto;
+  background: var(--navy-dark); border: 1px solid var(--border); border-radius: 6px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .45);
+}
+.fop-ac__list--open { display: block; }
+.fop-ac__item { padding: 8px 12px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fop-ac__item--active, .fop-ac__item:hover { background: rgba(200, 150, 42, .15); }
+.fop-ac__msg { padding: 10px 12px; color: var(--muted); }
+
+/* ── Customer summary + ship-to picker ── */
+.fop-parties { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.fop-party {
+  padding: 12px 16px 14px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.fop-party__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 24px; margin-bottom: 6px; }
+.fop-party__lbl {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--muted);
+}
+.fop-party__name { font-size: 17px; font-weight: 600; color: var(--white); margin-bottom: 4px; }
+.fop-party__addr { font-size: 14px; line-height: 1.45; color: var(--muted); }
+.fop-party__body { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.fop-party__corner { display: flex; flex-direction: column; align-items: flex-end; text-align: right; white-space: nowrap; }
+/* Secondary labels are sentence case; caps are kept for section titles and
+   grid column headers only. */
+.fop-party__lbl2 { font-size: 13px; font-weight: 500; color: var(--muted); }
+.fop-party__amt { font-family: 'Barlow Condensed', sans-serif; font-size: 20px; font-weight: 700; color: var(--white); line-height: 1.1; font-variant-numeric: tabular-nums; }
+.fop-linkbtn {
+  padding: 0; font: 600 13px 'Barlow', sans-serif; color: var(--gold-lt);
+  background: none; border: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
+}
+.fop-level {
+  display: inline-block; padding: 1px 8px;
+  font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 700; letter-spacing: .04em;
+  color: var(--navy-dark); background: var(--gold); border-radius: 4px;
+}
+
+.fop-picklist { display: flex; flex-direction: column; gap: 6px; }
+.fop-pick {
+  display: flex; gap: 12px; align-items: flex-start; width: 100%; padding: 10px 12px;
+  font: inherit; text-align: left; color: var(--text);
+  background: rgba(9, 21, 41, .5); border: 1px solid var(--line); border-radius: 6px; cursor: pointer;
+}
+.fop-pick:hover, .fop-pick:focus { border-color: var(--gold); background: var(--row-hover); outline: none; }
+.fop-pick__num { width: 18px; color: var(--gold); font-weight: 700; }
+.fop-pick__main { flex: 1; }
+.fop-pick__branch { display: flex; flex-direction: column; align-items: flex-end; align-self: flex-end; text-align: right; white-space: nowrap; }
+
+/* ── Order header ── */
+.fop-head { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; }
+.fop-head__sum {
+  padding: 12px 16px;
+  font-family: 'Barlow Condensed', sans-serif; font-size: 17px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+}
+.fop-head__grid {
+  display: grid; gap: 12px 14px; padding: 0 16px 16px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+/* Header fields sit three to a row (each spans 2 of the 6 columns);
+   --row starts a new row, so a short row leaves the rest empty. */
+.fop-head__grid > .fop-field { grid-column: span 2; }
+.fop-head__grid > .fop-field--row { grid-column: 1 / span 2; }
+.fop-head__grid > .fop-field--end { grid-column: 5 / span 2; }
+.fop-field--half, .fop-head__grid > .fop-field--half { grid-column: span 3; }
+.fop-field--full, .fop-head__grid > .fop-field--full { grid-column: 1 / -1; }
+
+/* ── Line chart ── */
+.fop-grid { border: 1px solid var(--border); border-radius: 10px; background: rgba(9, 21, 41, .55); font-variant-numeric: tabular-nums; }
+.fop-line {
+  display: grid; align-items: center;
+  grid-template-columns: 36px 150px minmax(160px, 1fr) 120px 110px 100px 110px 64px 64px 36px;
+  border-top: 1px solid var(--line);
+}
+.fop-line:first-child { border-top: 0; }
+/* Alternating line shading (every second line). */
+.fop-line--alt { background: rgba(255, 255, 255, 0.035); }
+.fop-line:not(.fop-line--head):focus-within { background: var(--row-hover); box-shadow: inset 3px 0 0 var(--gold); }
+.fop-line--head {
+  font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+  background: rgba(9, 21, 41, .6); border-radius: 10px 10px 0 0;
+}
+.fop-line--head .fop-cell--qty,
+.fop-line--head .fop-cell--price,
+.fop-line--head .fop-cell--cost,
+.fop-line--head .fop-cell--ext,
+.fop-line--head .fop-cell--stock { text-align: right; }
+.fop-cell { padding: 6px 8px; min-width: 0; }
+.fop-cell--num { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+.fop-cell--desc { font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
+.fop-line--head .fop-cell--desc { font-size: inherit; }
+.fop-cell--del { text-align: center; }
+/* Read-only columns are muted; the editable ones (qty, unit price) stay white. */
+.fop-cell--cost, .fop-cell--ext { color: var(--muted); }
+.fop-grid .fop-input { padding: 6px 8px; border-color: transparent; background: transparent; }
+.fop-grid .fop-input:hover { border-color: var(--line); }
+.fop-grid .fop-input:focus { background: var(--input-bg); border-color: var(--gold); }
+.fop-grid .fop-num { text-align: right; }
+/* Desktop: the editable cells (product, qty, unit price) drop their own
+   padding so the input text sits 8px from the cell edge, the same as the
+   plain cells and the column headers. Digits then line up down each column. */
+@media (min-width: 768px) {
+  .fop-grid .fop-cell--product { padding-left: 0; }
+  .fop-grid .fop-cell--qty,
+  .fop-grid .fop-cell--price { padding-left: 0; padding-right: 0; }
+  .fop-grid .fop-input { padding-left: 7px; padding-right: 7px; }
+}
+.fop-mlabel { display: none; }
+
+.fop-qty { display: flex; align-items: center; }
+.fop-step { display: none; }
+
+.fop-stock { display: inline-block; min-width: 30px; padding: 1px 6px; border-radius: 4px; font-weight: 600; text-align: center; }
+.fop-stock--ok   { color: var(--success); background: rgba(62, 207, 142, .12); }
+.fop-stock--low  { color: var(--warning); background: rgba(240, 196, 106, .12); }
+.fop-stock--none { color: var(--error);   background: rgba(255, 95, 95, .12); }
+
+.fop-gridtools { gap: 8px; }
+/* Under the lines: grid buttons left, totals summary box right. */
+/* 8px under the lines (the column's 16px gap less 8). */
+.fop-gridfoot { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-top: -8px; }
+.fop-sum {
+  width: 340px; max-width: 100%; margin-left: auto;
+  border: 1px solid var(--border); border-radius: 10px; background: rgba(9, 21, 41, .55);
+  font-variant-numeric: tabular-nums;
+}
+.fop-sum__row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 8px 14px; border-top: 1px solid var(--line); }
+.fop-sum__row:first-child { border-top: 0; }
+.fop-sum__lbl { font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.fop-sum__val { text-align: right; }
+/* Editable freight in (new orders): compact, right-aligned like the values. */
+.fop-sum__row:has(.fop-sum__in) { align-items: center; padding: 5px 8px 5px 14px; }
+.fop-sum__in { width: 120px; padding: 5px 8px; text-align: right; font-variant-numeric: tabular-nums; }
+.fop-confirm-freight { font-size: 15px; color: var(--muted); }
+.fop-sum__row--total { border-top: 2px solid var(--steel); padding: 10px 14px; }
+.fop-sum__row--total .fop-sum__lbl { font-size: 13px; color: var(--text); }
+.fop-sum__row--total .fop-sum__val { font-family: 'Barlow Condensed', sans-serif; font-size: 22px; font-weight: 700; color: var(--gold-lt); }
+.fop-sum__cost { display: block; font-family: 'Barlow', sans-serif; font-size: 13px; font-weight: 400; color: var(--muted); }
+@media (max-width: 767px) { .fop-sum { width: 100%; } }
+.fop-btn--on { background: rgba(143, 164, 194, 0.16); }
+.fop-confirm-status { max-width: 320px; }
+
+/* ── Per-branch stock (on demand: F4 or click the "All" count) ── */
+.fop-stockbtn {
+  padding: 1px 6px; font: inherit; color: var(--text); background: none;
+  border: 0; border-bottom: 1px dotted var(--muted); border-radius: 0; cursor: pointer;
+}
+.fop-stockbtn:hover, .fop-stockbtn--open { color: var(--gold-lt); border-bottom-color: var(--gold-lt); }
+/* Stock + qty breaks sit together in one slightly blue-tinted panel under
+   the line: stock strip is the top half, breaks the bottom (they toggle
+   together with F4). */
+.fop-stockstrip {
+  grid-column: 1 / -1;
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin: 0 12px 0 44px;
+  padding: 6px 12px;
+  font-size: 13px;
+  color: #c4d4ea;
+  background: rgba(74, 128, 196, 0.12);
+}
+.fop-stockstrip[data-cell="strip"] { border-radius: 8px 8px 0 0; padding-top: 8px; }
+.fop-stockstrip[data-cell="breaks"] { border-radius: 0 0 8px 8px; padding-bottom: 8px; margin-bottom: 10px; }
+.fop-stockstrip[hidden] { display: none; }
+.fop-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 4px 2px 8px; border: 1px solid var(--line); border-radius: 999px;
+}
+.fop-chip__br { color: var(--muted); }
+/* Qty break chips end in plain text (no stock badge), so even padding. */
+.fop-chip--break { padding-right: 8px; }
+.fop-strip__lbl {
+  align-self: center; min-width: 76px;
+  font-size: 13px; font-weight: 600; color: var(--muted);
+}
+.fop-stockstrip .fop-chip { border-color: rgba(143, 164, 194, 0.28); background: rgba(9, 21, 41, 0.35); }
+.fop-stockstrip .fop-chip--ship { border-color: var(--gold); }
+.fop-stockstrip .fop-strip__lbl { color: #9fb6d6; }
+.fop-chip--ship { border-color: var(--gold); }
+.fop-chip--ship .fop-chip__br { color: var(--gold-lt); }
+
+/* ── Action bar ── */
+.fop-bar {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 16px; background: var(--navy-dark); border: 1px solid var(--border); border-radius: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.fop-total { font-family: 'Barlow Condensed', sans-serif; font-size: 22px; color: var(--gold-lt); }
+.fop-legend { margin-top: -6px; padding: 0 4px; font-size: 12px; color: var(--muted); }
+.fop-legend .fop-key { margin: 0 2px 0 8px; }
+.fop-bar__actions { display: flex; gap: 10px; }
+
+/* ── Confirm dialog ── */
+.fop-modal {
+  position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
+  padding: 16px; background: rgba(5, 12, 24, .72);
+}
+.fop-modal__box {
+  width: 100%; max-width: 640px; max-height: calc(100vh - 32px); overflow-y: auto;
+  padding: 22px; background: var(--navy); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, .5);
+  display: flex; flex-direction: column; gap: 14px;
+}
+.fop-confirm-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 18px; font-size: 14px; }
+.fop-confirm-meta span { display: inline-block; min-width: 76px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+.fop-confirm-total { text-align: right; font-family: 'Barlow Condensed', sans-serif; font-size: 22px; color: var(--gold-lt); }
+.fop-table-wrap { overflow-x: auto; }
+.fop-table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+.fop-table th { padding: 6px 8px; text-align: left; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); }
+.fop-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); }
+
+/* ── Phone ── */
+@media (max-width: 767px) {
+  .fop-app { padding: 16px 16px 120px; font-size: 16px; }
+  .fop-h1 { font-size: 28px; }
+  .fop-head__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fop-parties { grid-template-columns: 1fr; }
+  .fop-head__grid > .fop-field, .fop-head__grid > .fop-field--row, .fop-head__grid > .fop-field--end { grid-column: auto; }
+  .fop-field--half, .fop-head__grid > .fop-field--half { grid-column: span 2; }
+  .fop-head__grid > .fop-field--full { grid-column: 1 / -1; }
+
+  .fop-grid { border: 0; background: none; display: flex; flex-direction: column; gap: 10px; }
+  .fop-line--head { display: none; }
+  .fop-line {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "product product"
+      "desc    desc"
+      "qty     price"
+      "cost    ext"
+      "avail   total"
+      "del     del";
+    gap: 2px 10px; padding: 10px 6px 8px;
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px;
+  }
+  .fop-line:first-child { border-top: 1px solid var(--border); }
+  .fop-cell--num { display: none; }
+  .fop-cell--product { grid-area: product; }
+  .fop-cell--desc { grid-area: desc; white-space: normal; color: var(--muted); }
+  .fop-cell--qty { grid-area: qty; }
+  .fop-cell--price { grid-area: price; }
+  .fop-cell--cost { grid-area: cost; text-align: left; }
+  .fop-cell--ext { grid-area: ext; text-align: right; }
+  .fop-line [data-cell="avail"] { grid-area: avail; text-align: left; }
+  .fop-line [data-cell="total"] { grid-area: total; text-align: right; color: var(--muted); font-size: 13px; }
+  .fop-cell--del { grid-area: del; text-align: right; }
+  .fop-stockstrip { margin: 0 2px; padding: 6px 8px; }
+  .fop-stockstrip[data-cell="strip"] { margin-top: 6px; }
+  .fop-stockstrip[data-cell="breaks"] { margin-bottom: 2px; }
+
+  .fop-mlabel { display: inline; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  label.fop-mlabel { display: block; margin-bottom: 3px; }
+  .fop-grid .fop-input { padding: 10px; font-size: 16px; background: var(--input-bg); border-color: var(--line); }
+  .fop-grid .fop-cell--price .fop-num { text-align: left; }
+
+  .fop-step {
+    display: inline-flex; align-items: center; justify-content: center;
+    flex: 0 0 44px; height: 44px; font-size: 22px; color: var(--gold-lt);
+    background: rgba(200, 150, 42, .12); border: 1px solid var(--border); cursor: pointer;
+  }
+  .fop-step:first-child { border-radius: 6px 0 0 6px; }
+  .fop-step:last-child { border-radius: 0 6px 6px 0; }
+  .fop-qty .fop-input { border-radius: 0; text-align: center; height: 44px; }
+
+  /* Product search opens as a bottom sheet. */
+  .fop-grid .fop-ac__list {
+    position: fixed; left: 0; right: 0; top: auto; bottom: 0;
+    width: 100%; max-width: none; max-height: 55vh; border-radius: 12px 12px 0 0;
+  }
+  .fop-ac__item { padding: 12px 14px; white-space: normal; }
+
+  .fop-legend { display: none; }
+  .fop-bar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    border-radius: 0; border-width: 1px 0 0; padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  }
+  .fop-bar__totals { width: 100%; }
+  .fop-bar__actions { width: 100%; }
+  .fop-bar__actions .fop-btn { flex: 1; justify-content: center; }
+  .fop-bar .fop-key, .fop-gridtools .fop-key, .fop-modal .fop-key { display: none; }
+  .fop-confirm-meta { grid-template-columns: 1fr; }
+}
+
+/* ── Flatpickr calendar (ship / required date) ──
+   Ported from the camo-cpq quote expiration picker and re-themed navy and
+   gold. Loaded after vendor/flatpickr.min.css so these rules win. The
+   calendar is appended to <body>, outside .fop-app, so colours are literal
+   values from the palette above rather than the scoped variables. */
+/* Calendar icon on the right of the date fields (the native date input
+   had one; Flatpickr's text input doesn't). Muted by default, gold on focus. */
+.fop-date-alt {
+  cursor: pointer;
+  padding-right: 38px;
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 16px 16px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238fa4c2' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4.5' width='18' height='16.5' rx='2'/%3E%3Cpath d='M3 9.5h18M8 2.5v4M16 2.5v4'/%3E%3C/svg%3E");
+}
+.fop-date-alt[readonly] { background-color: rgba(9, 21, 41, 0.75); }
+.fop-date-alt:focus,
+.fop-date-alt.active {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23e0aa38' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4.5' width='18' height='16.5' rx='2'/%3E%3Cpath d='M3 9.5h18M8 2.5v4M16 2.5v4'/%3E%3C/svg%3E");
+}
+
+/* No padding or border on the outer box: when flatpickr opens the
+   calendar above the field it positions it by the summed height of its
+   children only, so outer padding/border made it overlap the input. The
+   spacing lives on .flatpickr-months / .flatpickr-innerContainer instead,
+   and the outline is a box-shadow, which takes no space. */
+.flatpickr-calendar {
+  font-family: 'Barlow', sans-serif;
+  background: #0e2245;
+  border: 0;
+  border-radius: 0.75rem;
+  box-shadow: 0 0 0 1px rgba(200, 150, 42, 0.35), 0 18px 50px rgba(0, 0, 0, 0.5);
+  padding: 0;
+}
+.flatpickr-innerContainer { padding-bottom: 0.75rem; }
+.flatpickr-calendar.arrowTop:before { border-bottom-color: rgba(200, 150, 42, 0.35); }
+.flatpickr-calendar.arrowTop:after  { border-bottom-color: #0e2245; }
+.flatpickr-calendar.arrowBottom:before { border-top-color: rgba(200, 150, 42, 0.35); }
+.flatpickr-calendar.arrowBottom:after  { border-top-color: #0e2245; }
+
+/* Padding without touching widths (flatpickr sizes the calendar from the
+   fixed .dayContainer width; see the camo-cpq notes). */
+.flatpickr-weekdays,
+.dayContainer { padding: 0 0.75rem; box-sizing: border-box; }
+.flatpickr-months { padding: 0.75rem 0.75rem 0; box-sizing: border-box; }
+/* The prev/next arrows are absolutely positioned at top: 0 of
+   .flatpickr-months; shift them down by the new top padding. */
+.flatpickr-months .flatpickr-prev-month,
+.flatpickr-months .flatpickr-next-month { top: 0.75rem; }
+
+.flatpickr-months .flatpickr-month,
+.flatpickr-current-month .flatpickr-monthDropdown-months,
+.flatpickr-current-month input.cur-year {
+  color: #ffffff;
+  fill: #ffffff;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.flatpickr-current-month .flatpickr-monthDropdown-months { background: #0e2245; }
+.flatpickr-current-month .flatpickr-monthDropdown-months option { background: #091529; color: #ffffff; }
+.flatpickr-current-month .flatpickr-monthDropdown-months:hover,
+.numInputWrapper:hover { background: rgba(200, 150, 42, 0.12); }
+.numInputWrapper span.arrowUp:after { border-bottom-color: #e0aa38; }
+.numInputWrapper span.arrowDown:after { border-top-color: #e0aa38; }
+
+.flatpickr-months .flatpickr-prev-month,
+.flatpickr-months .flatpickr-next-month { color: #8fa4c2; fill: #8fa4c2; }
+.flatpickr-months .flatpickr-prev-month:hover svg,
+.flatpickr-months .flatpickr-next-month:hover svg { fill: #e0aa38; }
+
+span.flatpickr-weekday {
+  color: #8fa4c2;
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.flatpickr-day {
+  color: #f0f4fa;
+  border-radius: 9999px;
+}
+.flatpickr-day.prevMonthDay,
+.flatpickr-day.nextMonthDay { color: rgba(143, 164, 194, 0.45); }
+.flatpickr-day.flatpickr-disabled,
+.flatpickr-day.flatpickr-disabled:hover { color: rgba(143, 164, 194, 0.3); background: none; border-color: transparent; }
+.flatpickr-day:hover,
+.flatpickr-day:focus {
+  background: rgba(200, 150, 42, 0.15);
+  border-color: rgba(200, 150, 42, 0.15);
+}
+.flatpickr-day.today { border-color: #c8962a; color: #e0aa38; }
+.flatpickr-day.today:hover,
+.flatpickr-day.today:focus { background: rgba(200, 150, 42, 0.2); border-color: #c8962a; color: #ffffff; }
+.flatpickr-day.selected,
+.flatpickr-day.selected:hover,
+.flatpickr-day.selected:focus,
+.flatpickr-day.selected.prevMonthDay,
+.flatpickr-day.selected.nextMonthDay {
+  background: #c8962a;
+  border-color: #c8962a;
+  color: #091529;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+/* ── Side layout (index.html, default): stock + qty breaks box right of the lines ── */
+.fop-wrap--sideopen { max-width: 1640px; }
+.fop-split { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+.fop-split--closed { grid-template-columns: minmax(0, 1fr); }
+.fop-split__main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.fop-side {
+  position: sticky; top: 16px;
+  max-height: calc(100vh - 32px); overflow-y: auto;
+  /* Scrolls on its own: reaching the end does not hand the scroll to the page. */
+  overscroll-behavior: contain;
+  padding: 12px 14px 14px;
+  background: rgba(74, 128, 196, 0.12);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: #c4d4ea; font-size: 15px; font-variant-numeric: tabular-nums;
+}
+.fop-side__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.fop-side__line { position: relative; padding: 12px 10px 2px; margin: 0 -10px; border: 1px solid transparent; border-radius: 8px; }
+/* Divider above each product's name (between products in the card).
+   It sits on the line's top border: 14px above it (4 section padding +
+   2 line padding + 1 border + 7 margin), 12px below (line padding-top). */
+.fop-side__line::before {
+  content: ""; position: absolute; left: 10px; right: 10px; top: -1px;
+  border-top: 1px solid var(--line);
+}
+.fop-side__line + .fop-side__line { margin-top: 7px; }
+/* No divider above the first product (the card title is already there). */
+.fop-side__head + .fop-side__line::before { display: none; }
+.fop-side__line--active { border-color: var(--gold); background: rgba(200, 150, 42, 0.06); }
+.fop-side__item { font-weight: 600; color: var(--white); margin-bottom: 2px; }
+.fop-side__desc { font-weight: 400; color: var(--white); }
+.fop-side__empty { padding: 4px 0 2px; }
+/* No "All" column in the side layout. */
+.fop-grid--noall .fop-line { grid-template-columns: 36px 150px minmax(160px, 1fr) 120px 110px 100px 110px 64px 36px; }
+@media (max-width: 767px) {
+  .fop-grid--noall .fop-line { grid-template-columns: 1fr 1fr; }
+}
+.fop-side__cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 2px; }
+.fop-side__sec { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 8px 0 4px; min-width: 0; }
+.fop-side__sec .fop-chip { max-width: 100%; }
+.fop-side__sec .fop-strip__lbl { width: 100%; font-size: 14px; }
+.fop-side .fop-chip { border-color: rgba(143, 164, 194, 0.28); background: rgba(9, 21, 41, 0.35); }
+.fop-side .fop-chip--ship { border-color: var(--gold); }
+@media (max-width: 1199px) {
+  .fop-split { grid-template-columns: minmax(0, 1fr); }
+  .fop-side { position: static; }
+}
+
+/* ── Existing order (?e_sorder_id) ──
+   Status badge beside the order id, a steel info note, read-only header
+   (and lines on a non-bid order), the red Cancel button and its dialog. */
+.fop-status {
+  display: inline-block; margin-left: 8px; padding: 2px 9px; vertical-align: middle;
+  font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 700; letter-spacing: .04em;
+  color: var(--text); background: rgba(143, 164, 194, 0.16); border: 1px solid var(--steel); border-radius: 4px;
+}
+.fop-status--invoice { color: #c9f5e2; border-color: rgba(62, 207, 142, .45); background: rgba(62, 207, 142, .1); }
+.fop-status--cancel  { color: #ffd2d2; border-color: rgba(255, 95, 95, .45); background: rgba(255, 95, 95, .12); }
+.fop-alert--info { color: var(--text); background: rgba(143, 164, 194, 0.08); border-color: var(--steel); }
+/* Locked header (existing order): every box (selects, date fields, text
+   inputs, notes, the read-only order info) looks the same: the normal
+   input background and text colour, icons kept (background-color only, so
+   the chevron / calendar images stay), with a not-allowed cursor. */
+.fop-input:disabled { cursor: not-allowed; }
+.fop-head--locked .fop-input,
+.fop-head .fop-input:disabled,
+.fop-head--locked .fop-date-alt[readonly] {
+  color: var(--text); background-color: var(--input-bg);
+  opacity: 1; -webkit-text-fill-color: var(--text); cursor: not-allowed;
+}
+/* Locked header: no dropdown chevron on Ship via / Ship branch and no
+   calendar icon on the dates, since none of them open. */
+.fop-head--locked select.fop-input,
+.fop-head--locked select.fop-input:focus,
+.fop-head--locked .fop-date-alt,
+.fop-head--locked .fop-date-alt:focus,
+.fop-head--locked .fop-date-alt.active { background-image: none; padding-right: 10px; }
+.fop-grid-in[readonly] { color: var(--text); background: transparent; border-color: transparent; }
+.fop-grid-in[readonly]:focus { border-color: var(--steel); box-shadow: none; }
+.fop-btn--danger { color: #ffb3b3; background: transparent; border-color: rgba(255, 95, 95, .45); }
+.fop-btn--danger:hover:not([disabled]) { color: #ffd2d2; background: rgba(255, 95, 95, .12); border-color: var(--error); }
+.fop-btn--danger-solid { color: var(--white); background: #c43c3c; border-color: #c43c3c; }
+.fop-btn--danger-solid:hover:not([disabled]) { background: #d94b4b; }
+.fop-modal__box--sm { max-width: 460px; }
+.fop-cancel-desc { margin: 0; font-size: 15px; line-height: 1.5; color: var(--text); }
+.fop-row--removed td { color: var(--muted); text-decoration: line-through; }
+.fop-row--removed td:last-child { text-decoration: none; }
+.fop-bar__actions { align-items: center; }
+.fop-lastmod { font-size: 13px; color: var(--text); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fop-lastmod__lbl { margin-right: 6px; color: var(--muted); }
+@media (max-width: 767px) { .fop-lastmod { width: 100%; } .fop-bar__actions { flex-wrap: wrap; } }
+
+/* ── Switcher: "Other orders" + one tab per generation ── */
+.fop-switch { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; border-bottom: 1px solid var(--steel); padding-bottom: 0; }
+.fop-switch > .fop-btn { margin-bottom: 8px; }
+.fop-switch__end { margin-left: auto; }
+.fop-tabs { display: flex; gap: 2px; flex-wrap: wrap; }
+.fop-tab {
+  padding: 8px 14px; margin-bottom: -1px;
+  font: 600 14px 'Barlow', sans-serif; color: var(--muted); white-space: nowrap;
+  background: transparent; border: 1px solid transparent; border-bottom: 2px solid transparent; border-radius: 6px 6px 0 0;
+  cursor: pointer; font-variant-numeric: tabular-nums;
+}
+.fop-tab:hover { color: var(--text); background: rgba(143, 164, 194, 0.08); }
+.fop-tab--active { color: var(--white); background: var(--card-bg); border-color: var(--steel); border-bottom: 2px solid var(--gold); }
+
+/* ── Other orders dialog ── */
+/* Thin steel scrollbar in its own gutter, 8px clear of the order cards'
+   right edge, so it never sits on their borders. */
+.fop-orders {
+  display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow-y: auto;
+  padding-right: 8px; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: var(--steel) transparent;
+}
+.fop-order {
+  display: flex; flex-direction: column; gap: 4px; width: 100%; padding: 10px 12px;
+  font: inherit; text-align: left; color: var(--text);
+  background: rgba(9, 21, 41, .5); border: 1px solid var(--line); border-radius: 6px; cursor: pointer;
+}
+.fop-order:hover, .fop-order:focus { border-color: var(--gold); background: var(--row-hover); outline: none; }
+.fop-order--open { border-color: var(--steel); }
+.fop-order__top, .fop-order__mid { display: flex; align-items: baseline; gap: 6px; }
+.fop-order__date, .fop-order__total { margin-left: auto; font-variant-numeric: tabular-nums; }
+.fop-order__mid { font-size: 13px; }
+.fop-order__total { color: var(--text); }
+.fop-order__gens { display: flex; gap: 6px; flex-wrap: wrap; }
+.fop-status--sm { margin-left: 0; padding: 0 6px; font-size: 13px; }
+.fop-center--sm { padding: 24px 0; }
+
+/* Tracking link box: same look as the locked inputs, link wraps. */
+.fop-linkbox, .fop-head--locked .fop-linkbox { min-height: 40px; overflow-wrap: anywhere; cursor: default; }
+.fop-linkbox a { color: var(--gold-lt); -webkit-text-fill-color: var(--gold-lt); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+/* Tracking details: HubSpot text as written (line breaks kept), links clickable. */
+.fop-trackbox { white-space: pre-wrap; line-height: 1.45; }
+
+/* Tracking details parsed into packages: summary line, then one card per
+   package (auto-fill grid, ~260px min), same steel / navy look as the cards. */
+.fop-pkgs { display: flex; flex-direction: column; gap: 8px; }
+.fop-pkgs__sum { font-size: 14px; font-weight: 600; color: var(--text); }
+.fop-pkgs__grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.fop-pkg {
+  display: flex; flex-direction: column; gap: 6px; padding: 10px 12px;
+  background: var(--input-bg); border: 1px solid var(--line); border-radius: 6px; font-size: 14px;
+}
+.fop-pkg__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.fop-pkg__n { font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 700; letter-spacing: .04em; color: var(--muted); text-transform: uppercase; }
+.fop-pkg__trk { color: var(--gold-lt); font-variant-numeric: tabular-nums; text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.fop-pkg__dates { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 0; font-variant-numeric: tabular-nums; }
+.fop-pkg__dates dt { color: var(--muted); }
+.fop-pkg__dates dd { margin: 0; }
+.fop-pkg__upd { color: var(--text); }
+.fop-pkg__lbl { color: var(--muted); margin-right: 4px; }
+.fop-pkg__extra { color: var(--muted); overflow-wrap: anywhere; }
+.fop-pkg__extra a, .fop-trackbox a { color: var(--gold-lt); }
+
+/* ── Change log dialog ── */
+.fop-modal__box--wide { max-width: 1100px; }
+.fop-log__head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.fop-log__head .fop-h2 { margin: 0; }
+.fop-check { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); cursor: pointer; }
+.fop-check input { accent-color: var(--gold); }
+.fop-log-wrap { max-height: 65vh; overflow-y: auto; }
+.fop-log th { position: sticky; top: 0; background: var(--navy); }
+.fop-log td { vertical-align: top; }
+.fop-log__gens, .fop-log__at { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fop-log__c { overflow-wrap: anywhere; }
+.fop-log--other td { color: var(--muted); }
+.fop-log__count { font-size: 13px; }

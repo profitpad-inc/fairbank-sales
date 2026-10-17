@@ -1,0 +1,363 @@
+{
+  "name": "e-order-placement: customer lookup",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "e-order-placement/customer",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "4d2b66d3-62d3-5f14-b50d-21a41382cdd4",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "70f49f09-e0b4-5ac9-9c0f-732b3b28cf02"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const q = $input.first().json.query || {};\nconst id = String(q.e_customer_id || '').trim();\nif (!/^\\d+$/.test(id)) return [{ json: { ok: false, statusCode: 400, body: { error: 'Missing or invalid e_customer_id' } } }];\nreturn [{ json: { ok: true, id } }];\n"
+      },
+      "id": "3eab4848-7200-519a-9ff0-59121820e712",
+      "name": "Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "48b8565a-4e3a-5938-8b36-6aba1d8704c0",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f4ee8c87-3896-592a-be0b-9fa10fe81e95",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "customer",
+        "operation": "getMany",
+        "returnAll": false,
+        "pageSize": 1,
+        "fieldsFilterMode": "selected",
+        "fieldsToInclude": "isBillTo,isShipTo,billToId,shipToLists",
+        "additionalOptions": {
+          "id": "={{ $json.id }}"
+        }
+      },
+      "id": "9490461c-4601-5169-95a1-e55e209d5f1d",
+      "name": "Eclipse: get customer",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        720,
+        0
+      ],
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Field names billToId and shipToLists[{ shipToId }] come from the Eclipse\n// node's customer create/update fields (UNVERIFIED against a live GET).\nconst id = $('Validate').first().json.id;\nconst r = $input.first().json;\nif (r.error) {\n  return [{ json: { ok: false, statusCode: 502, body: { error: 'Eclipse customer lookup failed: ' + r.error + (r.message ? ' ' + JSON.stringify(r.message).substring(0, 300) : '') } } }];\n}\nconst c = (Array.isArray(r.results) ? r.results : []).find((x) => String(x.id) === id);\nif (!c) return [{ json: { ok: false, statusCode: 404, body: { error: 'No Eclipse customer with id ' + id } } }];\n\nconst val = (v) => (v && typeof v === 'object') ? String(v.id || v.shipToId || v.billToId || '') : (v == null ? '' : String(v));\nconst isBillTo = c.isBillTo === true;\nconst isShipTo = c.isShipTo === true;\nconst billToId = isBillTo ? id : (val(c.billToId) || id);\nlet shipToIds = [id];\nif (isBillTo) {\n  shipToIds = (Array.isArray(c.shipToLists) ? c.shipToLists : []).map((s) => val(s.shipToId != null ? s.shipToId : s)).filter((s) => s && s !== id);\n  if (isShipTo) shipToIds.unshift(id);\n}\nshipToIds = [...new Set(shipToIds)];\nconst allIds = [...new Set([id, billToId, ...shipToIds])];\n\n// Eclipse's id filter goes in the query string; keep each call to 100 ids.\nconst chunks = [];\nfor (let i = 0; i < allIds.length; i += 100) chunks.push(allIds.slice(i, i + 100).join(','));\nreturn chunks.map((ids, i) => ({ json: {\n  ok: true, ids,\n  plan: i === 0 ? { id, billToId, shipToIds, allIds, isBillTo, isShipTo } : undefined,\n} }));\n"
+      },
+      "id": "4c8e793a-a939-54e5-9267-de72b30d46af",
+      "name": "Resolve",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c4d88ecd-7435-53bd-b594-df60665516ff",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d828ba57-1a53-5e21-b716-06c6fb0f2d7b",
+      "name": "Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "customer",
+        "operation": "getMany",
+        "returnAll": true,
+        "returnAllMode": "allInOne",
+        "pageSize": 100,
+        "fieldsFilterMode": "selected",
+        "fieldsToInclude": "name,addressLine1,addressLine2,city,state,postalCode,countryCode,isBillTo,isShipTo,homeBranch,defaultPriceClass,creditLimit",
+        "additionalOptions": {
+          "id": "={{ $json.ids }}"
+        }
+      },
+      "id": "5e1cfc4a-308c-51bc-b985-117b79f54aa7",
+      "name": "Eclipse: get customers",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        1440,
+        0
+      ],
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "resource": "objects",
+        "objectType": "0-2",
+        "operation": "batchRead",
+        "batchReadInputMode": "ui",
+        "batchReadObjectIds": "={{ $('Resolve').first().json.plan.allIds.join(',') }}",
+        "batchReadReturnAllMode": "allInOne",
+        "batchReadOptions": {
+          "idProperty": "e_customer_id",
+          "properties": [
+            "e_customer_id",
+            "latitude",
+            "longitude"
+          ]
+        }
+      },
+      "id": "1628a0d7-338c-52e3-894f-fcbc82b4a838",
+      "name": "HubSpot: get companies",
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        1680,
+        0
+      ],
+      "credentials": {
+        "hubspotApi": {
+          "id": "4HKK5aFFmTGesa3H",
+          "name": "HubSpot account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Eclipse field names here are confirmed against live responses\n// (2026-10-17). HubSpot only adds the record id and coordinates; it is\n// best-effort, so a failure leaves hs_id / latitude / longitude empty.\nconst plan = $('Resolve').first().json.plan;\nconst s = (v) => (v == null ? '' : (typeof v === 'object' ? String(v.id || v.code || v.name || '') : String(v)).trim());\n\nconst eclipse = {};\nlet eclipseError = '';\nfor (const it of $('Eclipse: get customers').all()) {\n  const r = it.json;\n  if (r.error) { eclipseError = String(r.error); continue; }\n  for (const c of (Array.isArray(r.results) ? r.results : [])) eclipse[s(c.id)] = c;\n}\nif (!eclipse[plan.id]) {\n  return [{ json: { statusCode: 502, body: { error: 'Eclipse customer details failed' + (eclipseError ? ': ' + eclipseError : '') } } }];\n}\n\nconst hs = {};\nconst hsResp = $input.first().json;\nfor (const row of (Array.isArray(hsResp.results) ? hsResp.results : [])) {\n  const p = row.properties || {};\n  if (p.e_customer_id) hs[String(p.e_customer_id)] = row;\n}\n\nconst party = (id) => {\n  const c = eclipse[id] || {};\n  const row = hs[id];\n  const p = (row && row.properties) || {};\n  const lat = parseFloat(p.latitude), lng = parseFloat(p.longitude);\n  return {\n    e_customer_id: id,\n    name: s(c.name) || ('Customer ' + id),\n    hs_id: (row && row.id) || '',\n    address_line1: s(c.addressLine1),\n    address_line2: s(c.addressLine2),\n    city: s(c.city),\n    state: s(c.state),\n    postal_code: s(c.postalCode),\n    country: s(c.countryCode),\n    is_bill_to: c.isBillTo === true,\n    is_ship_to: c.isShipTo === true,\n    home_branch: s(c.homeBranch),\n    price_class: s(c.defaultPriceClass),\n    release_number: s(c.defaultReleaseNumber),\n    credit_limit: c.creditLimit && c.creditLimit.value != null && isFinite(Number(c.creditLimit.value))\n      ? { value: Number(c.creditLimit.value), currency: s(c.creditLimit.currency) || 'USD' } : null,\n    latitude: isFinite(lat) ? lat : null,\n    longitude: isFinite(lng) ? lng : null,\n    missing: !eclipse[id],\n  };\n};\n\nconst shipTos = plan.shipToIds.map(party);\nconst needsChoice = plan.isBillTo && (shipTos.length > 1 || (shipTos.length === 1 && shipTos[0].e_customer_id !== plan.id));\nreturn [{ json: { statusCode: 200, body: {\n  customer: party(plan.id),\n  bill_to: party(plan.billToId),\n  ship_tos: shipTos,\n  ship_to: needsChoice ? null : (shipTos[0] || null),\n  needs_ship_to_choice: needsChoice,\n} } }];\n"
+      },
+      "id": "8fbe3090-8c4f-57f8-a422-e23d87927f0f",
+      "name": "Shape",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode || 200 }}"
+        }
+      },
+      "id": "ed81be28-24cc-5cec-8b56-315c7ce1bbfc",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1440,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: get customer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: get customer": {
+      "main": [
+        [
+          {
+            "node": "Resolve",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve": {
+      "main": [
+        [
+          {
+            "node": "Found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Found?": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: get customers",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: get customers": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: get companies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: get companies": {
+      "main": [
+        [
+          {
+            "node": "Shape",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "active": false
+}

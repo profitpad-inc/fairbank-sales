@@ -1,0 +1,446 @@
+{
+  "name": "e-order-placement: create order",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "e-order-placement/create-order",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "cdcf2295-8a54-5bf2-a072-900116453bc8",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "e9754ce7-8396-5370-9b46-02292b8a48b3"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Expected body:\n// { bill_to_id, ship_to_id, ship_branch, price_branch, order_status,\n//   ship_via, ship_date, required_date, po, release, internal_notes,\n//   shipping_instructions, freight_in, writer, outside_sales, email,\n//   lines: [{ productId, quantity, um?, umQuantity?, unitPrice? }] }\nconst b = $input.first().json.body || {};\nconst lines = (Array.isArray(b.lines) ? b.lines : [])\n  .map((l) => ({\n    productId: Number(l.productId),\n    quantity: Math.round(Number(l.quantity) || 0),\n    um: l.um || 'ea',\n    umQuantity: Number(l.umQuantity) || 1,\n    unitPrice: l.unitPrice != null && l.unitPrice !== '' ? Number(l.unitPrice) : null,\n  }))\n  .filter((l) => l.productId && l.quantity > 0);\nconst fail = (msg) => [{ json: { ok: false, statusCode: 400, body: { success: false, error: msg, step: 'validate' } } }];\nif (!b.bill_to_id) return fail('Missing bill_to_id');\nif (!b.ship_to_id) return fail('Missing ship_to_id');\nif (!b.writer) return fail('Missing writer (e_user_id)');\nif (!lines.length) return fail('Add at least one line with a quantity.');\n// Freight in, dollars; blank, invalid or negative → 0 (not sent).\nconst freight = Number(b.freight_in);\nconst isoDate = (v) => /^\\d{4}-\\d{2}-\\d{2}$/.test(String(v || '')) ? String(v) : '';\nreturn [{ json: { ok: true, input: {\n  billToId: String(b.bill_to_id), shipToId: String(b.ship_to_id),\n  shipBranch: String(b.ship_branch || ''), priceBranch: String(b.price_branch || ''),\n  orderStatus: String(b.order_status || 'Bid'), shipVia: String(b.ship_via || ''),\n  shipDate: isoDate(b.ship_date), requiredDate: isoDate(b.required_date),\n  po: String(b.po || ''), release: String(b.release || ''),\n  internalNotes: String(b.internal_notes || ''), shippingInstructions: String(b.shipping_instructions || ''),\n  writer: String(b.writer).toUpperCase(), outsideSales: String(b.outside_sales || ''),\n  email: String(b.email || ''), lines,\n  freightIn: isFinite(freight) && freight > 0 ? Math.round(freight * 100) / 100 : 0,\n} } }];\n"
+      },
+      "id": "c0d1c297-0732-565b-9d02-4d365e4b14ac",
+      "name": "Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "81943f15-29a5-5b55-9e7e-65117f6e9f5b",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3fde191c-0963-5c3f-980d-10ab20c8d23c",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "customer",
+        "operation": "get",
+        "customerId": "={{ $json.input.billToId }}"
+      },
+      "id": "13f66b25-9064-55cb-ba42-a3627c483951",
+      "name": "Eclipse: get bill-to",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        720,
+        0
+      ],
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "resource": "customer",
+        "operation": "get",
+        "customerId": "={{ $('Validate').first().json.input.shipToId }}"
+      },
+      "id": "3877743e-4982-50c3-a1c1-d4ee6b8c09f4",
+      "name": "Eclipse: get ship-to",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        960,
+        0
+      ],
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Field names follow the post_sorder() reference script. Rep-entered\n// values win; customer defaults fill the gaps.\nconst inp = $('Validate').first().json.input;\nconst billEnv = $('Eclipse: get bill-to').first().json;\nconst shipEnv = $input.first().json;\nconst fail = (msg, step) => [{ json: { ok: false, statusCode: 502, body: { success: false, error: msg, step } } }];\nif (billEnv.error) return fail('Eclipse bill-to lookup failed: ' + billEnv.error + ' ' + JSON.stringify(billEnv.message || ''), 'getBillTo');\nif (shipEnv.error) return fail('Eclipse ship-to lookup failed: ' + shipEnv.error + ' ' + JSON.stringify(shipEnv.message || ''), 'getShipTo');\nconst bill = (Array.isArray(billEnv.results) ? billEnv.results[0] : billEnv) || {};\nconst ship = (Array.isArray(shipEnv.results) ? shipEnv.results[0] : shipEnv) || {};\nif (!bill.id) return fail('Eclipse customer ' + inp.billToId + ' not found.', 'getBillTo');\nif (!ship.id) return fail('Eclipse customer ' + inp.shipToId + ' not found.', 'getShipTo');\nif (bill.isBillTo === false) return fail('Customer ' + bill.id + ' is not a Bill-To customer.', 'validate');\nif (ship.isShipTo === false) return fail('Customer ' + ship.id + ' is not a Ship-To customer.', 'validate');\n\nconst val = (v) => (v && typeof v === 'object') ? (v.id || v.code || v.name || '') : (v == null ? '' : String(v));\n// Defaults when the page sends blank dates: ship today, required 7 days\n// out, pushed to Monday if that lands on a weekend.\nconst ymd = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');\nconst today = new Date();\nconst req = new Date(); req.setDate(req.getDate() + 7);\nif (req.getDay() === 6) req.setDate(req.getDate() + 2);\nelse if (req.getDay() === 0) req.setDate(req.getDate() + 1);\nconst homeBranch = val(bill.homeBranch);\n\nconst order = {\n  priceBranch: inp.priceBranch || homeBranch,\n  shipBranch: inp.shipBranch || homeBranch,\n  billToCustomer: bill.id,\n  shipToCustomer: ship.id,\n  orderStatus: inp.orderStatus,\n  salesSource: val(bill.salesSourceOverride) || 'Default Sales', // bill-to's, else 'Default Sales'\n  shipDate: inp.shipDate || ymd(today),\n  requiredDate: inp.requiredDate || ymd(req),\n  customerPONumber: inp.po || val(bill.defaultPoNumber),\n  customerReleaseNumber: inp.release,\n  insideSalesPerson: '',\n  outsideSalesPerson: inp.outsideSales || val(bill.outsideSalesperson) || 'WIHOUSE',\n  writer: inp.writer,\n  orderType: 'MOE',\n  email: inp.email,\n  street1: ship.addressLine1 || '',\n  street2: ship.addressLine2 || '',\n  city: ship.city || '',\n  state: ship.state || '',\n  postalCode: ship.postalCode || '',\n  country: ship.countryCode || '',\n  internalNotes: inp.internalNotes,\n  shippingInstructions: inp.shippingInstructions,\n  shipIds: [ship.id],\n  lines: inp.lines.map((l) => {\n    const p = { productId: l.productId, quantity: l.quantity, um: l.um, umQuantity: l.umQuantity };\n    if (l.unitPrice != null && isFinite(l.unitPrice)) p.unitPrice = l.unitPrice;\n    return { lineItemProduct: p };\n  }),\n};\n// Ship via only when the rep picked one (a bid may leave it blank); no\n// customer-default fallback, Eclipse decides what a missing shipVia means.\nif (inp.shipVia) order.shipVia = inp.shipVia;\n// Freight in from the page's totals box, as Eclipse's freightCharges (the\n// only freight field in the post_sorder() reference body). UNVERIFIED that\n// Eclipse books it as freight in (freightInBillable) and not freight out.\nif (inp.freightIn > 0) order.freightCharges = inp.freightIn;\n// Terms from the bill-to; left out when the bill-to has none.\nif (val(bill.defaultTerms)) order.termsCode = val(bill.defaultTerms);\nreturn [{ json: { ok: true, order } }];\n"
+      },
+      "id": "3e3d9774-309c-5c82-bcb7-5c7dc949d848",
+      "name": "Build order",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "ae662e2c-51c1-582e-83cd-e1e146786e5e",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a0e403cb-156e-5d3f-9816-8464951345dd",
+      "name": "Built?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "create",
+        "salesOrderInputMode": "json",
+        "salesOrderCustomJson": "={{ $json.order }}"
+      },
+      "id": "2f7d02cd-e98a-5ee8-bb1f-5f0473cef3d8",
+      "name": "Eclipse: create sales order",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        1680,
+        0
+      ],
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Eclipse returns the created order wrapped as { results: [order] }, with\n// id \"S2737687\" and generations[].generationId (verified 2026-10-17). The\n// e_sorder_id is <id>.<first generation, 4-digit padded>, e.g. S2737687.0001.\nconst env = $input.first().json;\nconst r = Array.isArray(env.results) ? (env.results[0] || {}) : env;\nconst order = $('Build order').first().json.order;\nif (env.error) {\n  return [{ json: { ok: false, statusCode: 502, body: { success: false, step: 'createSalesOrder',\n    error: 'Eclipse POST /SalesOrders failed: ' + env.error + ' ' + JSON.stringify(env.message || '').substring(0, 800), request: order } } }];\n}\nconst rawId = String(r.id || r.eclipseOid || '');\nconst base = rawId.split('.')[0];\nconst gens = Array.isArray(r.generations) ? r.generations : [];\nconst genFromId = rawId.includes('.') ? rawId.split('.')[1] : '';\nconst gen = String(genFromId || (gens[0] && gens[0].generationId) || 1).padStart(4, '0');\nif (!base) {\n  return [{ json: { ok: false, statusCode: 502, body: { success: false, step: 'createSalesOrder',\n    error: 'Eclipse created the order but returned no order id: ' + JSON.stringify(env).substring(0, 500) } } }];\n}\nreturn [{ json: { ok: true, orderId: base, e_sorder_id: base + '.' + gen, e_sorder_ids: [base + '.' + gen], eclipse: r } }];\n"
+      },
+      "id": "ce2f76e6-be32-5abf-9670-bdff0065936b",
+      "name": "Check order",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "a6d3ecf8-db1d-5fed-9f76-3675581ab37a",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c121eb42-f177-507e-a064-c5a706af8845",
+      "name": "Created?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://n8n.fairbankequipment.com/webhook/update-hs-deal",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ e_sorder_ids: $json.e_sorder_ids }) }}",
+        "options": {}
+      },
+      "id": "d1d58726-b488-51cf-a473-2e3850f1cc2f",
+      "name": "Trigger HubSpot deal sync",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2400,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const c = $('Check order').first().json;\nlet r = $input.first().json || {};\n// A non-JSON content type lands the body in `data` as text; parse it.\nif (!r.orders && typeof r.data === 'string') { try { r = JSON.parse(r.data); } catch (e) {} }\n// update-hs-deal answers { message, source, orders: [{ <hs_deal_id>: <e_sorder_id> }] }\n// (verified 2026-10-17); pick the deal whose order id is the one just created\n// (exact, or same order ignoring the gen suffix), else the only deal returned.\nconst pairs = [];\nfor (const o of (Array.isArray(r.orders) ? r.orders : [])) {\n  for (const [dealId, soId] of Object.entries(o || {})) pairs.push([String(dealId), String(soId)]);\n}\nconst base = (id) => String(id || '').split('.')[0].toUpperCase();\nconst hit = pairs.find((p) => p[1] === c.e_sorder_id) || pairs.find((p) => base(p[1]) === base(c.e_sorder_id)) || (pairs.length === 1 ? pairs[0] : null);\nconst hsDealId = hit ? hit[0] : '';\nreturn [{ json: { statusCode: 200, body: {\n  success: true,\n  e_sorder_id: c.e_sorder_id,\n  order_id: c.orderId,\n  hs_deal_id: hsDealId,\n  // orders: what update-hs-deal returned, kept for troubleshooting a missing deal link.\n  hubspot_sync: r.error ? { ok: false, error: String(r.error) } : { ok: true, orders: r.orders || null },\n} } }];\n"
+      },
+      "id": "535e130b-7e4b-5fa2-aed7-7aede20a885b",
+      "name": "Final",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode || 200 }}"
+        }
+      },
+      "id": "7f5cb2a9-cb36-5f61-8ca6-bf730b64bd2c",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1680,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: get bill-to",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: get bill-to": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: get ship-to",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: get ship-to": {
+      "main": [
+        [
+          {
+            "node": "Build order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build order": {
+      "main": [
+        [
+          {
+            "node": "Built?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Built?": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: create sales order",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: create sales order": {
+      "main": [
+        [
+          {
+            "node": "Check order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check order": {
+      "main": [
+        [
+          {
+            "node": "Created?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Created?": {
+      "main": [
+        [
+          {
+            "node": "Trigger HubSpot deal sync",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger HubSpot deal sync": {
+      "main": [
+        [
+          {
+            "node": "Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "active": false
+}

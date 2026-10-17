@@ -1,0 +1,413 @@
+{
+  "name": "e-order-placement: cancel order",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "e-order-placement/cancel-order",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "76924d07-698c-5ad3-a516-4087a844b610",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "62bdd15a-5a91-5baf-8b68-edb31074b165"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Body: { e_sorder_id, writer }. Sets that generation's status to Cancel.\nconst parseId = (raw) => {\n  const m = String(raw || '').trim().toUpperCase().match(/^S?(\\d+)(?:\\.(\\d{1,4}))?$/);\n  if (!m) return null;\n  const oid = 'S' + m[1];\n  const genId = String(Number(m[2] || 1));\n  return { oid, genId, eSorderId: oid + '.' + genId.padStart(4, '0') };\n};\nconst b = $input.first().json.body || {};\nconst fail = (msg) => [{ json: { ok: false, statusCode: 400, body: { success: false, error: msg, step: 'validate' } } }];\nconst id = parseId(b.e_sorder_id);\nif (!id) return fail('Missing or invalid e_sorder_id (expected S1234567.0001).');\nif (!b.writer) return fail('Missing writer (e_user_id)');\nreturn [{ json: { ok: true, ...id, writer: String(b.writer).toUpperCase() } }];\n"
+      },
+      "id": "f1f29090-3702-5e4d-8d3a-69de61858f48",
+      "name": "Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "361f627b-8a43-5587-9016-d644ee82362e",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f512bba1-4c89-5d23-83e3-c28956923414",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "get",
+        "salesOrderId": "={{ $json.oid }}"
+      },
+      "id": "80b3238c-5b60-5b97-9f48-f0cf1c15d5d3",
+      "name": "Eclipse: get order",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        720,
+        0
+      ],
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Invoice and Cancel are final; anything else can be cancelled.\nconst v = $('Validate').first().json;\nconst env = $input.first().json;\nconst fail = (statusCode, error, step) => [{ json: { ok: false, statusCode, body: { success: false, error, step } } }];\nif (env.error) return fail(502, 'Eclipse GET /SalesOrders?id=' + v.oid + ' failed: ' + env.error + ' ' + JSON.stringify(env.message || '').substring(0, 500), 'getSalesOrder');\nconst so = (Array.isArray(env.results) ? env.results[0] : env) || {};\nif (!Array.isArray(so.generations) || !so.generations.length) return fail(404, 'Eclipse order ' + v.oid + ' not found.', 'getSalesOrder');\nconst gen = so.generations.find((g) => String(g.generationId) === v.genId);\nif (!gen) return fail(404, 'Order ' + v.oid + ' has no generation ' + v.genId + '.', 'getSalesOrder');\nconst status = String(gen.status || '');\n// Lines on this generation with a quantity: { lineId, productId, qty, price, um }.\nconst genLines = [];\nfor (const line of (Array.isArray(so.lines) ? so.lines : [])) {\n  for (const lg of (Array.isArray(line.generations) ? line.generations : [])) {\n    if (String(lg.generationId) !== v.genId) continue;\n    const qty = (Number(lg.stockQty) || 0) + (Number(lg.nonstockQty) || 0);\n    if (qty <= 0) continue;\n    genLines.push({\n      lineId: line.lineId, productId: String(line.productId), qty,\n      price: lg.price && lg.price.value != null ? Number(lg.price.value) : null,\n      // Line cost and COGS as saved on the order (null when restricted / missing).\n      cost: lg.cost && lg.cost.value != null ? Number(lg.cost.value) : null,\n      cogs: lg.cogs && lg.cogs.value != null ? Number(lg.cogs.value) : null,\n      um: line.displayUom || line.smallestUom || 'ea', umQuantity: Number(line.displayUomQty) || 1,\n      description: String(line.productDescription || line.productDecription || '').replace(/\\s*\\n\\s*/g, ' ').trim(),\n      lineStatus: String(line.status || ''),\n    });\n  }\n}\nif (status === 'Invoice') return fail(409, v.eSorderId + ' is already invoiced and cannot be cancelled.', 'checkStatus');\nif (status === 'Cancel') return fail(409, v.eSorderId + ' is already cancelled.', 'checkStatus');\nreturn [{ json: { ok: true, eSorderId: v.eSorderId, previousStatus: status } }];\n"
+      },
+      "id": "9467276d-23fd-582d-92c9-3789c202e76f",
+      "name": "Check status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "79a96ab3-f850-5469-a69e-ccbb380dd207",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ee0d178a-3d4a-5269-8b2d-29fda117ecb7",
+      "name": "Cancellable?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "updateStatus",
+        "statusOrderId": "={{ $json.eSorderId }}",
+        "statusOrderStatus": "Cancel"
+      },
+      "id": "c7c9d09d-ed79-5e8d-91af-f2a8927f2b6e",
+      "name": "Eclipse: cancel",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        1440,
+        0
+      ],
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const c = $('Check status').first().json;\nconst r = $input.first().json;\nif (r.error) {\n  return [{ json: { ok: false, statusCode: 502, body: { success: false, step: 'updateStatus',\n    error: 'Eclipse PUT /SalesOrders/' + c.eSorderId.split('.')[0] + '/Status failed: ' + r.error + ' ' + JSON.stringify(r.message || '').substring(0, 500) } } }];\n}\nreturn [{ json: { ok: true, e_sorder_ids: [c.eSorderId] } }];\n"
+      },
+      "id": "31e21ed8-ed95-5ba3-b378-4101e3a13708",
+      "name": "Check cancel",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "bcdc14a6-b976-5d85-a120-07603c02ce11",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "089faf69-6d8e-5369-bb62-b174bd916191",
+      "name": "Cancelled?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://n8n.fairbankequipment.com/webhook/update-hs-deal",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ e_sorder_ids: $json.e_sorder_ids }) }}",
+        "options": {}
+      },
+      "id": "937ac6ef-6ae6-5812-b547-2bd8368bd99f",
+      "name": "Trigger HubSpot deal sync",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2160,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const c = $('Check status').first().json;\nconst v = { eSorderId: c.eSorderId };\nlet r = $input.first().json || {};\n// A non-JSON content type lands the body in `data` as text; parse it.\nif (!r.orders && typeof r.data === 'string') { try { r = JSON.parse(r.data); } catch (e) {} }\n// update-hs-deal answers { message, source, orders: [{ <hs_deal_id>: <e_sorder_id> }] }.\nconst pairs = [];\nfor (const o of (Array.isArray(r.orders) ? r.orders : [])) {\n  for (const [dealId, soId] of Object.entries(o || {})) pairs.push([String(dealId), String(soId)]);\n}\nconst base = (id) => String(id || '').split('.')[0].toUpperCase();\nconst hit = pairs.find((p) => p[1] === v.eSorderId) || pairs.find((p) => base(p[1]) === base(v.eSorderId)) || (pairs.length === 1 ? pairs[0] : null);\nconst hubspotSync = r.error ? { ok: false, error: String(r.error) } : { ok: true, orders: r.orders || null };\nreturn [{ json: { statusCode: 200, body: {\n  success: true,\n  e_sorder_id: v.eSorderId,\n  order_id: v.eSorderId.split('.')[0],\n  previous_status: c.previousStatus,\n  status: 'Cancel',\n  hs_deal_id: hit ? hit[0] : '',\n  hubspot_sync: hubspotSync,\n} } }];\n"
+      },
+      "id": "4f18d16c-342a-5d08-8ba0-d51ce77164f5",
+      "name": "Final",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode || 200 }}"
+        }
+      },
+      "id": "dc0585db-c849-5774-9b93-88b5e615fa7d",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        220
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: get order",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: get order": {
+      "main": [
+        [
+          {
+            "node": "Check status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check status": {
+      "main": [
+        [
+          {
+            "node": "Cancellable?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cancellable?": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: cancel",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: cancel": {
+      "main": [
+        [
+          {
+            "node": "Check cancel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check cancel": {
+      "main": [
+        [
+          {
+            "node": "Cancelled?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cancelled?": {
+      "main": [
+        [
+          {
+            "node": "Trigger HubSpot deal sync",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger HubSpot deal sync": {
+      "main": [
+        [
+          {
+            "node": "Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "active": false
+}

@@ -1,0 +1,204 @@
+{
+  "name": "e-order-placement: user lookup",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "e-order-placement/user",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "d1d88083-312b-5126-8fa9-4ac46814ec5d",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "5d8d3c08-23ce-5348-a2f8-39eb5545721e"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Config: HubSpot user property names. Branch and territory property\n// names are UNVERIFIED placeholders, change them here if they differ.\nconst CONFIG = {\n  idProp: 'e_user_id',\n  branchProp: 'e_default_branch',\n  territoryProp: 'e_territory',\n};\nconst q = $input.first().json.query || {};\nconst eUserId = String(q.e_user_id || '').trim().toUpperCase();\nconst userProps = [\n  CONFIG.idProp, CONFIG.branchProp, CONFIG.territoryProp,\n  'hs_given_name', 'hs_family_name', 'hs_email', 'hs_searchable_calculated_name',\n];\nif (!eUserId) {\n  return [{ json: { ok: false, statusCode: 400, body: { error: 'Missing e_user_id' } } }];\n}\nreturn [{ json: { ok: true, eUserId, userProps, ...CONFIG } }];\n"
+      },
+      "id": "ff573ea6-a927-55b4-a313-a374511ef4ac",
+      "name": "Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "b0ad38a7-ce70-501b-acd4-fcaa000e935f",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a803c452-a362-5dcf-90e8-830c23e35fd9",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "owners",
+        "objectType": "users",
+        "operation": "search",
+        "searchInputMode": "json",
+        "filterJson": "={{ JSON.stringify({ filterGroups: [{ filters: [{ propertyName: $json.idProp, operator: 'EQ', value: $json.eUserId }] }] }) }}",
+        "returnAll": false,
+        "limit": 1,
+        "searchOptions": {
+          "errorWhenNotFound": false,
+          "properties": "={{ $json.userProps }}"
+        }
+      },
+      "id": "e7d35551-675b-57d5-b65a-1228542076a3",
+      "name": "HubSpot: find user",
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        720,
+        0
+      ],
+      "credentials": {
+        "hubspotApi": {
+          "id": "4HKK5aFFmTGesa3H",
+          "name": "HubSpot account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const cfg = $('Validate').first().json;\nconst r = $input.first().json;\nif (r.error) {\n  return [{ json: { statusCode: 502, body: { error: 'HubSpot user lookup failed: ' + r.error, step: 'hubspot' } } }];\n}\nconst results = Array.isArray(r.results) ? r.results : (r.id ? [r] : []);\nif (!results.length) {\n  return [{ json: { statusCode: 404, body: { error: 'No HubSpot user found with e_user_id ' + cfg.eUserId } } }];\n}\nconst u = results[0];\nconst p = u.properties || {};\nconst name = [p.hs_given_name, p.hs_family_name].filter(Boolean).join(' ') || p.hs_searchable_calculated_name || '';\nreturn [{ json: { statusCode: 200, body: {\n  e_user_id: String(p[cfg.idProp] || cfg.eUserId).toUpperCase(),\n  name,\n  email: p.hs_email || '',\n  default_branch: p[cfg.branchProp] || '',\n  territory: p[cfg.territoryProp] || '',\n  hs_user_id: u.id || '',\n  hs_owner_id: (u.owner && u.owner.id) || '',\n} } }];\n"
+      },
+      "id": "e3413480-2239-50cc-af68-659b0fcf089d",
+      "name": "Shape",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode || 200 }}"
+        }
+      },
+      "id": "760b90e8-f15a-5ee2-b776-4f275dddf4c9",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        960,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: find user",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: find user": {
+      "main": [
+        [
+          {
+            "node": "Shape",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "active": false
+}
