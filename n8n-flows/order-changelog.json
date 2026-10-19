@@ -22,7 +22,7 @@
       "webhookId": "89e50495-0563-5d0b-9626-385b7f873c78",
       "credentials": {
         "jwtAuth": {
-          "id": "REPLACE_WITH_JWT_CREDENTIAL_ID",
+          "id": "6sDOPAJdRYI8fpxX",
           "name": "Fairbank session (JWT)"
         }
       }

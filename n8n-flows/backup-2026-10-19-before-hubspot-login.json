@@ -1,0 +1,15 @@
+{
+  "note": "Live n8n workflow versions on 2026-10-19, read before HubSpot sign-in changed any of them. Every Webhook node had no authentication. To revert one workflow: in n8n open it, Workflow history, restore versionId below and publish it (or set the Webhook node's Authentication back to None). Recorded through the n8n connector.",
+  "workflows": [
+    { "id": "lGK7gf8HKmO4m2T1", "name": "e-order-placement: customer lookup", "path": "GET e-order-placement/customer", "versionId": "7ae4fe14-0433-4c4f-8435-9640efc62b0d" },
+    { "id": "XWqISrcx7Qwkm6Tt", "name": "e-order-placement: order lookup", "path": "GET e-order-placement/order", "versionId": "7699af1e-812d-4686-a8d7-b000301757aa" },
+    { "id": "bT5AU8qHTdZ7aWiT", "name": "e-order-placement: update bid", "path": "POST e-order-placement/update-bid", "versionId": "ff5481ff-61fb-47bd-ba32-3b5fe55723fe" },
+    { "id": "7CTuJDaU94slnEH3", "name": "e-order-placement: create order", "path": "POST e-order-placement/create-order", "versionId": "28950181-cc71-463a-8b8f-045bc07eae37" },
+    { "id": "u4N7UbnofoahBYSj", "name": "e-order-placement: order change log", "path": "GET e-order-placement/order-changelog", "versionId": "75f77f7e-9ab8-42b1-a0e1-935f1c84b20b" },
+    { "id": "2pbBFSx9klQlgdcW", "name": "e-order-placement: customer orders", "path": "GET e-order-placement/customer-orders", "versionId": "847bbfbb-b181-4dd7-997c-172219b5faf6" },
+    { "id": "hKjsPBvkc9grGtjb", "name": "e-order-placement: v1 inventory lookup", "path": "POST e-order-placement/v1/inventory-lookup", "versionId": "43c7a2d2-b4fa-4774-82ff-732dc6896a0d" },
+    { "id": "O83HqdGGpXiSLEcX", "name": "e-order-placement: v1 place order", "path": "POST e-order-placement/v1/place-order", "versionId": "5da1fa2b-eeb2-401d-9bf6-9a1ff3d87a46" },
+    { "id": "t9cMyVLwlnagtfce", "name": "e-order-placement: cancel order", "path": "POST e-order-placement/cancel-order", "versionId": "4f28d06f-898e-497a-8cd4-239b60a56052" },
+    { "id": "Lpx7KlhvdztpMCWI", "name": "e-order-placement: user lookup", "path": "GET e-order-placement/user", "versionId": "75b4b729-371e-47fd-8ba2-14d2530d7991" }
+  ]
+}

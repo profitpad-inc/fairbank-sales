@@ -21,7 +21,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Config. HUB_ID is Fairbank's HubSpot account (the id in the app's\n// HubSpot record links). RETURN_ORIGINS are the only sites a session\n// token is ever sent back to. Remove the localhost entries once local\n// testing is done.\nconst CONFIG = {\n  HUB_ID: '43793456',\n  REDIRECT_URI: 'https://n8n.fairbankequipment.com/webhook/e-order-placement/auth/hubspot',\n  SESSION_HOURS: 12,\n  DEFAULT_RETURN: 'https://sales.fairbankequipment.com/',\n  RETURN_ORIGINS: [\n    'https://sales.fairbankequipment.com',\n    'https://profitpad-inc.github.io',\n  ],\n  RETURN_LOCAL: /^http:\\/\\/(localhost|127\\.0\\.0\\.1)(:\\d+)?$/,\n};\n\nconst q = $input.first().json.query || {};\n\n// state = base64url(JSON { r: return URL, n: nonce }), made by auth.js.\nlet returnUrl = CONFIG.DEFAULT_RETURN;\nlet nonce = '';\ntry {\n  const b64 = String(q.state || '').replace(/-/g, '+').replace(/_/g, '/');\n  const s = JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));\n  const u = new URL(String(s.r || ''));\n  if (CONFIG.RETURN_ORIGINS.includes(u.origin) || CONFIG.RETURN_LOCAL.test(u.origin)) {\n    u.hash = '';\n    returnUrl = u.toString();\n  }\n  nonce = String(s.n || '').slice(0, 64);\n} catch (e) { /* bad state: fall back to the default page, no nonce */ }\n\nconst fail = (msg) => [{ json: { ok: false,\n  redirect: returnUrl + '#fb_auth_error=' + encodeURIComponent(msg) } }];\n\nif (q.error) return fail('HubSpot sign-in was cancelled or refused (' + String(q.error) + ').');\nif (!nonce) return fail('Sign-in link was invalid. Try again.');\nconst code = String(q.code || '').trim();\nif (!code) return fail('HubSpot did not return a sign-in code. Try again.');\n\nreturn [{ json: { ok: true, code, returnUrl, nonce, ...CONFIG } }];\n"
+        "jsCode": "// Config. HUB_ID is Fairbank's HubSpot account (the id in the app's\n// HubSpot record links). RETURN_ORIGINS are the only sites a session\n// token is ever sent back to. Remove the localhost entries once local\n// testing is done.\nconst CONFIG = {\n  HUB_ID: '43793456',\n  REDIRECT_URI: 'https://n8n.fairbankequipment.com/webhook/e-order-placement/auth/hubspot',\n  SESSION_HOURS: 12,\n  DEFAULT_RETURN: 'https://sales.fairbankequipment.com/',\n  RETURN_ORIGINS: [\n    'https://sales.fairbankequipment.com',\n    'https://profitpad-inc.github.io',\n  ],\n  RETURN_LOCAL: /^http:\\/\\/(localhost|127\\.0\\.0\\.1)(:\\d+)?$/,\n};\n\nconst q = $input.first().json.query || {};\n\n// state = base64url(JSON { r: return URL, n: nonce }), made by auth.js.\n// Plain JS on purpose: Buffer and URL are not available in this n8n's\n// Code sandbox (a first version using them rejected every state).\nfunction b64urlToText(s) {\n  const abc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';\n  let bits = 0, acc = 0, out = '';\n  for (const ch of String(s)) {\n    const v = abc.indexOf(ch);\n    if (v < 0) throw new Error('bad state');\n    acc = (acc << 6) | v; bits += 6;\n    if (bits >= 8) {\n      bits -= 8;\n      const b = (acc >> bits) & 255;\n      if (b > 127) throw new Error('bad state'); // auth.js only sends ASCII\n      out += String.fromCharCode(b);\n    }\n  }\n  return out;\n}\nlet returnUrl = CONFIG.DEFAULT_RETURN;\nlet nonce = '';\ntry {\n  const s = JSON.parse(b64urlToText(q.state || ''));\n  const r = String(s.r || '').split('#')[0];\n  const m = r.match(/^(https?:\\/\\/[^\\/?#\\\\]+)(?:[\\/?]|$)/i);\n  const origin = m ? m[1].toLowerCase() : '';\n  if (origin && (CONFIG.RETURN_ORIGINS.includes(origin) || CONFIG.RETURN_LOCAL.test(origin))) {\n    returnUrl = r;\n  }\n  nonce = String(s.n || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 64);\n} catch (e) { /* bad state: fall back to the default page, no nonce */ }\n\nconst fail = (msg) => [{ json: { ok: false,\n  redirect: returnUrl + '#fb_auth_error=' + encodeURIComponent(msg) } }];\n\nif (q.error) return fail('HubSpot sign-in was cancelled or refused (' + String(q.error) + ').');\nif (!nonce) return fail('Sign-in link was invalid. Try again.');\nconst code = String(q.code || '').trim();\nif (!code) return fail('HubSpot did not return a sign-in code. Try again.');\n\nreturn [{ json: { ok: true, code, returnUrl, nonce, ...CONFIG } }];\n"
       },
       "id": "7063eb6c-db99-511a-8219-98635948a9c2",
       "name": "Validate",
@@ -69,12 +69,18 @@
       "parameters": {
         "method": "POST",
         "url": "https://api.hubspot.com/oauth/2026-09/token",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpCustomAuth",
         "sendBody": true,
         "contentType": "form-urlencoded",
         "bodyParameters": {
           "parameters": [
+            {
+              "name": "client_id",
+              "value": "b839eeb0-59fe-4ee0-9515-6fef13f9846d"
+            },
+            {
+              "name": "client_secret",
+              "value": "PASTE_CLIENT_SECRET_IN_N8N_ONLY"
+            },
             {
               "name": "grant_type",
               "value": "authorization_code"
@@ -99,12 +105,6 @@
         720,
         0
       ],
-      "credentials": {
-        "httpCustomAuth": {
-          "id": "REPLACE_WITH_OAUTH_CREDENTIAL_ID",
-          "name": "HubSpot sign-in app (OAuth client)"
-        }
-      },
       "onError": "continueRegularOutput",
       "alwaysOutputData": true
     },
@@ -159,12 +159,18 @@
       "parameters": {
         "method": "POST",
         "url": "https://api.hubspot.com/oauth/2026-09/token/introspect",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpCustomAuth",
         "sendBody": true,
         "contentType": "form-urlencoded",
         "bodyParameters": {
           "parameters": [
+            {
+              "name": "client_id",
+              "value": "b839eeb0-59fe-4ee0-9515-6fef13f9846d"
+            },
+            {
+              "name": "client_secret",
+              "value": "PASTE_CLIENT_SECRET_IN_N8N_ONLY"
+            },
             {
               "name": "token_type_hint",
               "value": "access_token"
@@ -185,12 +191,6 @@
         1440,
         0
       ],
-      "credentials": {
-        "httpCustomAuth": {
-          "id": "REPLACE_WITH_OAUTH_CREDENTIAL_ID",
-          "name": "HubSpot sign-in app (OAuth client)"
-        }
-      },
       "onError": "continueRegularOutput",
       "alwaysOutputData": true
     },
@@ -266,7 +266,7 @@
       "credentials": {
         "hubspotApi": {
           "id": "4HKK5aFFmTGesa3H",
-          "name": "HubSpot account"
+          "name": "fairbank"
         }
       },
       "onError": "continueRegularOutput"
@@ -337,7 +337,7 @@
       ],
       "credentials": {
         "jwtAuth": {
-          "id": "REPLACE_WITH_JWT_CREDENTIAL_ID",
+          "id": "6sDOPAJdRYI8fpxX",
           "name": "Fairbank session (JWT)"
         }
       },
