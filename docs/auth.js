@@ -95,8 +95,17 @@
     var btn = wrap.querySelector('button');
     var errEl = wrap.querySelector('.fb-gate-error');
 
-    idEl.value = lsGet(KEY_LAST_ID) || '';
+    idEl.value = (lsGet(KEY_LAST_ID) || '').toUpperCase();
     (idEl.value ? passEl : idEl).focus();
+
+    // Eclipse user IDs are uppercase: capitalise as the rep types or pastes.
+    idEl.addEventListener('input', function () {
+      var up = idEl.value.toUpperCase();
+      if (up === idEl.value) return;
+      var start = idEl.selectionStart, end = idEl.selectionEnd;
+      idEl.value = up;
+      idEl.setSelectionRange(start, end);
+    });
 
     form.addEventListener('submit', function (e) {
       e.preventDefault();

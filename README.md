@@ -8,7 +8,7 @@ Internal sales tools for Fairbank Equipment reps, served as a static site from G
 |---|---|
 | `docs/product-inquiry/` | Customer-specific pricing, quantity breaks and stock by branch for one product. |
 | `docs/order-placement/` | New keyboard-first order entry. Open with `?e_customer_id=<Eclipse customer id>` (the HubSpot customer card link), optionally with `&e_product_ids=106331,110723&quantities=50,1` to prefill lines, pick a ship-to if needed, build the order, place it as a Bid (Alt+B, Control+B on a Mac) or an Order (Alt+O). Works on phones with a card layout. Open with `?e_sorder_id=S1234567.0001` to load an existing order: a Bid can have its lines changed (Update Bid), and any order that is not invoiced or cancelled can be cancelled. |
-| `docs/order-placement/inline.html` | Same order page with stock, qty breaks and a line comment in a strip under the focused line instead of in the box on the right (the default `index.html` layout). |
+| `docs/order-placement/side.html` | Same order page with stock and qty breaks for every line in a box on the right, instead of in a strip under the focused line (the default `index.html` layout). |
 | `docs/order-placement/details.html` | Same order page with no stock box: a Details button on each line opens its stock, qty breaks and line comment. |
 | `docs/archive/order-placement-v1/` | Port of the original deal-based "Branch Fulfillment" card. Open with `?dealId=<HubSpot deal id>`. |
 | `docs/index.html` | Redirects to product inquiry. |

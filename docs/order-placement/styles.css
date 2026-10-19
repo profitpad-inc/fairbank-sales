@@ -103,10 +103,19 @@ body {
   border: 1px solid var(--gold); border-radius: 6px;
   cursor: pointer;
 }
-.fop-btn:hover:not([disabled]):not([aria-disabled="true"]) { background: var(--gold-lt); }
+/* Hover only where there is a real pointer: on a phone a tap leaves :hover
+   stuck, so after Exit the button drawn in its place (Change customer) stayed
+   lit. */
+@media (hover: hover) {
+  .fop-btn:hover:not([disabled]):not([aria-disabled="true"]) { background: var(--gold-lt); }
+}
 /* Secondary buttons: steel outline, gold only on hover / focus. */
 .fop-btn--ghost { color: var(--text); background: transparent; border-color: var(--steel); }
-.fop-btn--ghost:hover:not([disabled]) { color: var(--gold-lt); border-color: var(--gold); background: rgba(200, 150, 42, 0.08); }
+/* Same :not()s as the .fop-btn hover rule, so this one wins; with fewer, the
+   solid gold background won and hid the gold label. */
+@media (hover: hover) {
+  .fop-btn--ghost:hover:not([disabled]):not([aria-disabled="true"]) { color: var(--gold-lt); border-color: var(--gold); background: rgba(200, 150, 42, 0.08); }
+}
 .fop-btn--sm { padding: 6px 12px; font-size: 14px; }
 /* External-link icon after links that open a new tab (EXT_ICON in app.js). */
 .fop-ext { width: .9em; height: .9em; flex: none; fill: currentColor; vertical-align: -.1em; }
@@ -386,11 +395,15 @@ textarea.fop-notes { display: block; min-height: calc(2.1em + 18px); line-height
 
 /* ── Confirm dialog ── */
 .fop-modal {
-  position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
+  /* Above the sign-in chip (auth.js, z-index 9000), below the gate (9999).
+     safe center: a box taller than the screen starts at the top instead of
+     being cut off above it. */
+  position: fixed; inset: 0; z-index: 9500; display: flex; align-items: safe center; justify-content: center;
   padding: 16px; background: rgba(5, 12, 24, .72);
 }
 .fop-modal__box {
-  width: 100%; max-width: 640px; max-height: calc(100vh - 32px); overflow-y: auto;
+  box-sizing: border-box; /* max-height includes the padding, so the bottom stays on screen */
+  width: 100%; max-width: 640px; max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); overflow-y: auto;
   padding: 22px; background: var(--navy); border: 1px solid var(--border); border-radius: 12px;
   box-shadow: 0 30px 80px rgba(0, 0, 0, .5);
   display: flex; flex-direction: column; gap: 14px;
@@ -663,9 +676,13 @@ span.flatpickr-weekday {
 .fop-grid-in[readonly] { color: var(--text); background: transparent; border-color: transparent; }
 .fop-grid-in[readonly]:focus { border-color: var(--steel); box-shadow: none; }
 .fop-btn--danger { color: #ffb3b3; background: transparent; border-color: rgba(255, 95, 95, .45); }
-.fop-btn--danger:hover:not([disabled]) { color: #ffd2d2; background: rgba(255, 95, 95, .12); border-color: var(--error); }
+@media (hover: hover) {
+  .fop-btn--danger:hover:not([disabled]):not([aria-disabled="true"]) { color: #ffd2d2; background: rgba(255, 95, 95, .12); border-color: var(--error); }
+}
 .fop-btn--danger-solid { color: var(--white); background: #c43c3c; border-color: #c43c3c; }
-.fop-btn--danger-solid:hover:not([disabled]) { background: #d94b4b; }
+@media (hover: hover) {
+  .fop-btn--danger-solid:hover:not([disabled]):not([aria-disabled="true"]) { background: #d94b4b; }
+}
 .fop-modal__box--sm { max-width: 460px; }
 .fop-cancel-desc { margin: 0; font-size: 15px; line-height: 1.5; color: var(--text); }
 .fop-row--removed td { color: var(--muted); text-decoration: line-through; }
@@ -1047,7 +1064,7 @@ span.flatpickr-weekday {
      order clear of it). */
   .fop-fab {
     position: fixed; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 40;
-    padding: 14px 20px; border-radius: 999px;
+    padding: 14px 20px; border-radius: 6px; /* same corners as every other button */
     box-shadow: 0 10px 28px rgba(0, 0, 0, .45), 0 0 0 1px rgba(9, 21, 41, .4);
   }
   .fop-fab .fop-key { display: none; }
@@ -1081,7 +1098,9 @@ span.flatpickr-weekday {
 
   /* Dialogs: a little more room for content. */
   .fop-modal { padding: 10px; }
-  .fop-modal__box { padding: 16px 14px; gap: 12px; max-height: calc(100vh - 20px); }
+  /* 100dvh: on iPhone 100vh is the height with the toolbars hidden, so the
+     box outgrew the visible screen and its top (title, checkbox) was cut off. */
+  .fop-modal__box { padding: 16px 14px; gap: 12px; max-height: calc(100vh - 20px); max-height: calc(100dvh - 20px); }
 
   /* Generation tabs scroll sideways instead of wrapping into rows. */
   .fop-tabs { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; scrollbar-width: none; }

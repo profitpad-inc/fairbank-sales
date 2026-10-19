@@ -295,12 +295,12 @@
 
   function initApp(root) {
     var user = window.FB_USER || {};
-    // Layout variant: <main id="app" data-layout="side"> (index.html,
-    // the default) shows stock + qty breaks for every line in a box to the
+    // Layout variant: <main id="app" data-layout="side"> (side.html)
+    // shows stock + qty breaks for every line in a box to the
     // right of the lines, open by default. data-layout="details"
     // (details.html) has no box: a Details button on each line opens a dialog
-    // with its stock, qty breaks and comment. inline.html has no data-layout
-    // and shows stock, qty breaks and the comment in a strip under the
+    // with its stock, qty breaks and comment. index.html (the default) has no
+    // data-layout and shows stock, qty breaks and the comment in a strip under the
     // focused line.
     var layout = root.getAttribute("data-layout") || "inline";
     var sideLayout = layout === "side";

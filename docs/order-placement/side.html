@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <script src="../auth.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Fairbank | Order Placement (inline)</title>
+  <title>Fairbank | Order Placement (side)</title>
   <link rel="icon" href="../favicon.png" type="image/png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700&family=Barlow:wght@400;500;600&display=swap">
@@ -17,11 +17,10 @@
   <!--
     Keyboard-first order entry. Open with ?e_customer_id=<Eclipse customer id>
     (the HubSpot customer card link), or without it to search for a customer.
-    All behaviour lives in app.js. This copy (inline.html) uses the inline
-    layout: stock, qty breaks and the line comment in a strip under the
-    focused line.
+    All behaviour lives in app.js. This copy (side.html) uses the side layout:
+    stock and qty breaks for every line in a box on the right.
   -->
-  <main id="app" class="fop-app">
+  <main id="app" class="fop-app fop-app--side" data-layout="side">
     <noscript>
       <div class="fop-alert fop-alert--error">
         This tool requires JavaScript. Enable JavaScript and reload the page.
