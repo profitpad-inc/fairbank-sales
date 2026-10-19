@@ -29,9 +29,16 @@
 (function () {
   'use strict';
 
-  var CLIENT_ID = 'REPLACE_WITH_HUBSPOT_CLIENT_ID';
+  var CLIENT_ID = 'b839eeb0-59fe-4ee0-9515-6fef13f9846d';
   var HUB_ID = '43793456';
-  var SCOPES = 'oauth';
+  // Must list every scope the HubSpot app marks as required, or HubSpot's
+  // consent page shows an error. Sign-in itself only needs 'oauth'.
+  var SCOPES = [
+    'oauth',
+    'crm.objects.contacts.read', 'crm.objects.contacts.write',
+    'crm.objects.companies.read', 'crm.objects.companies.write',
+    'crm.objects.deals.read', 'crm.objects.deals.write',
+  ].join(' ');
   var N8N = 'https://n8n.fairbankequipment.com/webhook/';
   var REDIRECT_URI = N8N + 'e-order-placement/auth/hubspot';
   // Webhook path prefixes that need the session token. Add a prefix

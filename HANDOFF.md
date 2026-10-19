@@ -54,7 +54,7 @@ Sign in with HubSpot (2026-10-19, on request, branch `feature/hubspot-login`: "c
 
 How it works:
 1. Locked page: `html.fb-locked` hides every `body` child and shows a "Sign in with HubSpot" button (same dark gate style as before).
-2. The button makes a random nonce (kept in `sessionStorage["fb_nonce"]`) and sends the browser to `https://app.hubspot.com/oauth/43793456/authorize` (pinned to Fairbank's account) with `client_id`, `redirect_uri` (the n8n flow), `scope` (`oauth`) and `state` = base64url(JSON `{ r: current URL without the fragment, n: nonce }`).
+2. The button makes a random nonce (kept in `sessionStorage["fb_nonce"]`) and sends the browser to `https://app.hubspot.com/oauth/43793456/authorize` (pinned to Fairbank's account) with `client_id`, `redirect_uri` (the n8n flow), `scope` (the app's seven scopes, space-separated, see below) and `state` = base64url(JSON `{ r: current URL without the fragment, n: nonce }`).
 3. HubSpot logs the rep in (or uses their existing HubSpot login), asks for consent, and sends the browser to the n8n flow `auth-hubspot` with a one-time `code`.
 4. The flow (see below) proves the login with HubSpot and redirects back to `r` with `#fb_session=<JWT>&fb_nonce=<n>`, or `#fb_auth_error=<message>`.
 5. `auth.js` accepts the session only if the nonce matches the one this tab stored (a link with someone else's token is ignored), the token's `hub_id` is `43793456`, it has an `e_user_id` and it has more than 30s left. It stores it in `localStorage["fb_session"]` and strips the fragment with `history.replaceState`.
@@ -70,12 +70,12 @@ Checked in the browser pane (2026-10-19, localhost, with hand-made unsigned toke
 
 ### Going live with HubSpot sign-in
 
-1. **HubSpot app.** Create an app with OAuth in a HubSpot developer account. Redirect URL exactly `https://n8n.fairbankequipment.com/webhook/e-order-placement/auth/hubspot`. Scope `oauth`. UNVERIFIED: which app type allows OAuth for one company's account (HubSpot's older "private apps" use fixed tokens, not OAuth; a public app that is not listed, or a newer project-based app set to OAuth, should work), whether `oauth` alone is accepted as the only scope, and whether reps without admin rights can approve the consent screen (test with one non-admin rep).
+1. **HubSpot app.** Done (2026-10-19, by the user). Client id `b839eeb0-59fe-4ee0-9515-6fef13f9846d` (set in `auth.js`). Scopes the user gave: `oauth`, `crm.objects.contacts.read`, `crm.objects.contacts.write`, `crm.objects.companies.read`, `crm.objects.companies.write`, `crm.objects.deals.read`, `crm.objects.deals.write`; `auth.js` requests all seven, because HubSpot shows an error on the consent page when a scope the app marks as required is missing from the URL. Sign-in itself only needs `oauth` (the site never uses the HubSpot access token). Per HubSpot's docs the user approving must have access to every requested scope, so a rep without write access to contacts, companies or deals may be refused: if that happens, mark those six as optional in the app (or remove them) and request only `oauth`. Still to confirm: that the app's redirect URL is exactly `https://n8n.fairbankequipment.com/webhook/e-order-placement/auth/hubspot`, and that a non-admin rep can approve the consent screen.
 2. **n8n credential "Fairbank session (JWT)"**, type JWT Auth: key type passphrase, algorithm HS256, a long random secret (for example `openssl rand -base64 48`). Used to sign sessions and by every protected webhook.
 3. **n8n credential "HubSpot sign-in app (OAuth client)"**, type Custom Auth, JSON `{ "body": { "client_id": "<id>", "client_secret": "<secret>" } }`. UNVERIFIED that n8n merges Custom Auth `body` fields into a form-urlencoded body; if HubSpot answers that the client id or secret is missing, add `client_id` and `client_secret` as body parameters on the two HTTP nodes in n8n instead (and keep the secret out of any export committed here).
 4. Import `auth-hubspot.json`, pick both credentials, activate it.
 5. On every other flow's Webhook node, pick the JWT credential (the repo has `REPLACE_WITH_JWT_CREDENTIAL_ID`).
-6. Put the app's client id in `CLIENT_ID` at the top of `docs/auth.js` (the client id is public; the secret stays in n8n).
+6. ~~Put the app's client id in `CLIENT_ID`~~ Done 2026-10-19 (the client id is public; the secret stays in n8n).
 7. Deploy the site at the same time as step 5.
 8. After testing, remove the localhost entry (`RETURN_LOCAL`) from the flow's `Validate` config.
 
@@ -365,4 +365,4 @@ The user calls this page "order-placement v2".
 - Import and activate the flows, then run the GET checks (`user`, `customer`, `order?e_sorder_id=`) and test the POST flows (create-order, update-bid, cancel-order) on a throwaway order.
 - Point the HubSpot customer card link at `/order-placement/?e_customer_id=…`.
 - Set up the DNS and custom domain for `sales.fairbankequipment.com`.
-- HubSpot sign-in (branch `feature/hubspot-login`): create the HubSpot app and n8n credentials, set `CLIENT_ID`, import `auth-hubspot.json`, switch the webhooks to the JWT credential and deploy together (see Sign-in → Going live). Then: test with a non-admin rep, move `fairbank-product-inquiry` to the same JWT credential, drop localhost from the allowed return sites, tighten CORS, and decide whether flows should take `writer` from the session instead of the page.
+- HubSpot sign-in (branch `feature/hubspot-login`): HubSpot app created and `CLIENT_ID` set; create the n8n credentials, import `auth-hubspot.json`, switch the webhooks to the JWT credential and deploy together (see Sign-in → Going live). Then: test with a non-admin rep, move `fairbank-product-inquiry` to the same JWT credential, drop localhost from the allowed return sites, tighten CORS, and decide whether flows should take `writer` from the session instead of the page.
