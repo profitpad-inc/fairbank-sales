@@ -1,0 +1,613 @@
+{
+ "name": "e-order-placement: send quote",
+ "nodes": [
+  {
+   "parameters": {
+    "httpMethod": "POST",
+    "path": "e-order-placement/send-quote",
+    "responseMode": "responseNode",
+    "options": {
+     "allowedOrigins": "*"
+    },
+    "authentication": "jwtAuth"
+   },
+   "id": "f62a4567-5fee-59d6-a4ad-b96eac06003f",
+   "name": "Webhook",
+   "type": "n8n-nodes-base.webhook",
+   "typeVersion": 2,
+   "position": [
+    0,
+    0
+   ],
+   "webhookId": "f1d1a8ab-12df-5045-a08d-e4dc736bfdc0",
+   "credentials": {
+    "jwtAuth": {
+     "id": "6sDOPAJdRYI8fpxX",
+     "name": "Fairbank session (JWT)"
+    }
+   }
+  },
+  {
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "// POST { e_sorder_id: \"S2737687.0001\", to_emails: [\"a@b.com\", ...],\n// from_email: \"rep@fairbankequipment.com\" }. Same address rules as the page:\n// lowercase, a-z 0-9 . _ + - before the @, a dotted domain after it.\n// The mail goes out from from_email's own mailbox, so it must be a\n// Fairbank address. (Until the webhook checks the session token, the page\n// is trusted to send the signed-in rep's address.)\nconst b = $input.first().json.body || {};\nconst bad = (error) => [{ json: { ok: false, statusCode: 400, body: { success: false, error, step: 'validate' } } }];\nconst m = String(b.e_sorder_id || '').trim().toUpperCase().match(/^S?(\\d+)\\.(\\d{1,4})$/);\nif (!m) return bad('Missing or invalid e_sorder_id (expected S1234567.0001).');\nconst EMAIL = /^[a-z0-9_+-]+(\\.[a-z0-9_+-]+)*@[a-z0-9-]+(\\.[a-z0-9-]+)*\\.[a-z]{2,}$/;\nconst list = (Array.isArray(b.to_emails) ? b.to_emails : String(b.to_emails || '').split(/[,;\\s]+/))\n  .map((e) => String(e).trim().toLowerCase()).filter(Boolean);\nconst to = [...new Set(list)];\nif (!to.length) return bad('Add at least one email address.');\nif (to.length > 20) return bad('Send to 20 addresses or fewer.');\nconst wrong = to.filter((e) => !EMAIL.test(e));\nif (wrong.length) return bad('Not a valid email address: ' + wrong.join(', '));\nconst from = String(b.from_email || '').trim().toLowerCase();\nif (!EMAIL.test(from) || !/@fairbankequipment\\.com$/.test(from)) return bad('The quote can only be sent from a fairbankequipment.com mailbox.');\nreturn [{ json: { ok: true, e_sorder_id: 'S' + m[1] + '.' + m[2].padStart(4, '0'), to, from } }];\n"
+   },
+   "id": "6c88d0cd-ea26-565f-a3a0-89c07692be6c",
+   "name": "Validate",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    240,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "resource": "objects",
+    "objectType": "0-3",
+    "operation": "get",
+    "objectId": "={{ $json.e_sorder_id }}",
+    "properties": [
+     "e_sorder_id",
+     "dealname"
+    ],
+    "additionalOptions": {
+     "idProperty": "e_sorder_id",
+     "errorWhenNotFound": false,
+     "associations": [
+      "0-14"
+     ]
+    }
+   },
+   "id": "2f8830ab-de29-5737-a36d-c1f017bb52da",
+   "name": "HubSpot: get deal",
+   "type": "CUSTOM.hubspotApi",
+   "typeVersion": 1,
+   "position": [
+    480,
+    0
+   ],
+   "credentials": {
+    "hubspotApi": {
+     "id": "4HKK5aFFmTGesa3H",
+     "name": "HubSpot account"
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "const v = $('Validate').first().json;\nconst d = $input.first().json || {};\nconst stop = (statusCode, body) => [{ json: { ok: false, statusCode, body } }];\nif (d.error) return stop(502, { success: false, error: 'HubSpot deal lookup failed: ' + d.error + ' ' + JSON.stringify(d.message || '').substring(0, 300), step: 'getDeal' });\nif (d.objectFound === false || !d.id) return stop(404, { success: false, error: 'No HubSpot deal for ' + v.e_sorder_id + ' yet.', step: 'getDeal' });\nconst ids = [...new Set(((((d.associations || {}).quotes) || {}).results || []).map((r) => String(r.id)).filter(Boolean))];\nif (!ids.length) return stop(404, { success: false, error: 'No quote for ' + v.e_sorder_id + ' yet.', step: 'getDeal' });\nreturn [{ json: { ok: true, dealId: String(d.id), quoteIds: ids.join(',') } }];\n"
+   },
+   "id": "c3ed5145-79fc-552f-a2d3-047f51abe197",
+   "name": "Check deal",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    720,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "resource": "objects",
+    "objectType": "0-14",
+    "operation": "batchRead",
+    "batchReadInputMode": "ui",
+    "batchReadObjectIds": "={{ $json.quoteIds }}",
+    "batchReadReturnAllMode": "allInOne",
+    "batchReadOptions": {
+     "properties": [
+      "hs_title",
+      "hs_quote_number",
+      "hs_quote_link",
+      "hs_pdf_download_link",
+      "hs_createdate"
+     ]
+    }
+   },
+   "id": "54ce3c45-3bd4-54a2-ad9c-6a2c8e4bf90b",
+   "name": "HubSpot: quotes",
+   "type": "CUSTOM.hubspotApi",
+   "typeVersion": 1,
+   "position": [
+    960,
+    0
+   ],
+   "credentials": {
+    "hubspotApi": {
+     "id": "4HKK5aFFmTGesa3H",
+     "name": "HubSpot account"
+    }
+   },
+   "onError": "continueRegularOutput",
+   "executeOnce": true
+  },
+  {
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "// The same quote View Quote shows: the newest one with a public link.\nconst v = $('Validate').first().json;\nconst r = $input.first().json || {};\nconst stop = (statusCode, body) => [{ json: { ok: false, statusCode, body } }];\nif (r.error) return stop(502, { success: false, error: 'HubSpot quote read failed: ' + r.error, step: 'quotes' });\nconst q = (Array.isArray(r.results) ? r.results : [])\n  .filter((x) => !x.archived && x.properties && x.properties.hs_quote_link)\n  .sort((a, b) => String(b.properties.hs_createdate || '').localeCompare(String(a.properties.hs_createdate || '')))[0];\nif (!q) return stop(404, { success: false, error: 'No published quote for ' + v.e_sorder_id + ' yet.', step: 'quotes' });\nif (!q.properties.hs_pdf_download_link) return stop(409, { success: false, error: 'HubSpot has no PDF for this quote yet. Try again in a minute.', step: 'quotes' });\nreturn [{ json: { ok: true, quoteId: String(q.id), link: q.properties.hs_quote_link, pdfLink: q.properties.hs_pdf_download_link } }];\n"
+   },
+   "id": "8cd2e44d-d697-5859-aec9-7678b88c8fcf",
+   "name": "Pick quote",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1200,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "resource": "owners",
+    "objectType": "users",
+    "operation": "get",
+    "idProperty": "email",
+    "objectId": "={{ $('Validate').first().json.from }}",
+    "additionalOptions": {
+     "errorWhenNotFound": false,
+     "properties": [
+      "hs_given_name",
+      "hs_family_name",
+      "hs_job_title",
+      "mobile_phone"
+     ]
+    }
+   },
+   "id": "463e6b22-d454-5e68-a499-e9141efb861e",
+   "name": "HubSpot: sender",
+   "type": "CUSTOM.hubspotApi",
+   "typeVersion": 1,
+   "position": [
+    1440,
+    0
+   ],
+   "credentials": {
+    "hubspotApi": {
+     "id": "4HKK5aFFmTGesa3H",
+     "name": "HubSpot account"
+    }
+   },
+   "onError": "continueRegularOutput",
+   "executeOnce": true,
+   "alwaysOutputData": true
+  },
+  {
+   "parameters": {
+    "method": "GET",
+    "url": "={{ $('Pick quote').first().json.pdfLink }}",
+    "options": {
+     "response": {
+      "response": {
+       "responseFormat": "file",
+       "outputPropertyName": "data"
+      }
+     }
+    }
+   },
+   "id": "94bb9632-3d50-5313-a4d3-f375a645a296",
+   "name": "Download PDF",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1680,
+    0
+   ],
+   "onError": "continueRegularOutput",
+   "executeOnce": true,
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 3000
+  },
+  {
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "// The email (the user's template, 2026-10-19): a \"View your quote\" button,\n// the PDF attached, and the rep's signature (same layout as\n// email_sig.html: name, job title, Wichita phone + mobile, Wichita address).\nconst v = $('Validate').first().json;\nconst q = $('Pick quote').first().json;\nconst item = $input.first();\nconst bin = item.binary && item.binary.data;\nif (!bin || (item.json && item.json.error)) return [{ json: { ok: false, statusCode: 502, body: { success: false, error: 'Could not download the quote PDF' + (item.json && item.json.error ? ': ' + item.json.error : '.'), step: 'pdf' } } }];\nif (!/pdf/i.test(bin.mimeType || '') && !/\\.pdf$/i.test(bin.fileName || '')) return [{ json: { ok: false, statusCode: 502, body: { success: false, error: 'The quote download was not a PDF (' + (bin.mimeType || 'unknown type') + ').', step: 'pdf' } } }];\n\nconst esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;');\n// Sender: the HubSpot user with this email (users Get, idProperty email).\nconst u = $('HubSpot: sender').first().json || {};\nconst up = u.properties || u;\nconst local = v.from.split('@')[0];\nconst fullName = [up.hs_given_name, up.hs_family_name].filter(Boolean).join(' ') || local;\nconst jobtitle = up.hs_job_title || '';\nconst mobile = up.mobile_phone || '';\nconst phoneLine = '<b>W:</b> 316-943-2247' + (mobile ? ' | <b>M:</b> ' + esc(mobile) : '');\nconst addressLine = '989 W Steeple Bay Pkwy | Wichita, KS 67217';\nconst brandColor = '#1c3a5e';\n\nconst signatureHtml = `<table style=\"width:360px;border-collapse:collapse\">\n  <tbody>\n    <tr>\n      <td colspan=\"2\" style=\"border-bottom:2.25pt solid rgb(1,37,150);padding:5px 10px;vertical-align:top\">\n        <p style=\"margin:0;padding:3px 0;font-family:Aptos,sans-serif;font-size:11pt\"><b>${esc(fullName)}</b></p>\n        ${jobtitle ? `<p style=\"margin:0;padding:3px 0;font-family:Aptos,sans-serif;font-size:11pt\"><i>${esc(jobtitle)} – Fairbank</i></p>` : ''}\n      </td>\n    </tr>\n    <tr>\n      <td style=\"border-right:2.25pt solid rgb(1,37,150);padding:0 10px;vertical-align:top\">\n        <a href=\"http://www.fairbankequipment.com\" target=\"_blank\">\n          <img src=\"https://43793456.fs1.hubspotusercontent-na1.net/hubfs/43793456/Outlook%20Signature%20Logo.png\" style=\"max-width:65px\">\n        </a>\n      </td>\n      <td style=\"padding:0 8px;vertical-align:top\">\n        <p style=\"margin:0;padding-top:10px;font-family:Aptos,sans-serif;font-size:9pt\"><i>${phoneLine}</i></p>\n        <p style=\"margin:0;padding-top:3px;font-family:Aptos,sans-serif;font-size:9pt\"><i>${addressLine}</i></p>\n        <p style=\"margin:0;padding-top:3px;font-family:Aptos,sans-serif;font-size:9pt\">\n          <a style=\"color:rgb(1,37,150)\" href=\"http://www.fairbankequipment.com\" target=\"_blank\">\n            <i><u>www.fairbankequipment.com</u></i>\n          </a>\n        </p>\n        <a href=\"http://www.fairbankequipment.com\" target=\"_blank\">\n          <img style=\"padding-top:10px;max-width:250px\" src=\"https://43793456.fs1.hubspotusercontent-na1.net/hubfs/43793456/fairbank_group_logo.png\">\n        </a>\n      </td>\n    </tr>\n  </tbody>\n</table>`;\n\nconst subject = 'Your Fairbank Quote is Ready';\nconst htmlBody = `\n<div style=\"font-family: Arial, Helvetica, sans-serif; color: #333333; font-size: 15px; line-height: 1.6; max-width: 560px;\">\n  <p style=\"margin: 0 0 16px;\">Hi there,</p>\n  <p style=\"margin: 0 0 16px;\">Thank you for requesting a quote; it's attached as a PDF. You can also view it online using the button below.</p>\n  <p style=\"margin: 0 0 28px;\">\n    <a href=\"${esc(q.link)}\" style=\"background-color: ${brandColor}; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 4px; display: inline-block; font-weight: bold;\">View your quote</a>\n  </p>\n  <p style=\"margin: 0 0 24px;\">Any questions? Just reply to this email and I'll be glad to help.</p>\n  ${signatureHtml}\n</div>`;\n\nconst fileName = 'Quote ' + v.e_sorder_id + '.pdf';\nreturn [{\n  json: { ok: true, mailbox: v.from, subject, htmlBody, to: v.to.map((email) => ({ email })) },\n  binary: { data: Object.assign({}, bin, { fileName, fileExtension: 'pdf', mimeType: 'application/pdf' }) },\n}];\n"
+   },
+   "id": "0b7ffffc-2d2f-58dc-a455-3a0ce5483e8e",
+   "name": "Build email",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1920,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "resource": "message",
+    "operation": "sendMail",
+    "mailboxAddress": "={{ $json.mailbox }}",
+    "subject": "={{ $json.subject }}",
+    "htmlBody": "={{ $json.htmlBody }}",
+    "recipientsMode": "json",
+    "toJson": "={{ $json.to }}",
+    "ccJson": "[]",
+    "bccJson": "[]",
+    "attachmentsMode": "binary",
+    "attachmentsBinaryProperties": "data",
+    "sendMailAdditionalOptions": {
+     "saveToSentItems": true
+    }
+   },
+   "id": "6868ec61-e014-5b8f-a324-3b43d2916d4f",
+   "name": "Outlook: send quote",
+   "type": "CUSTOM.microsoftOutlook",
+   "typeVersion": 1,
+   "position": [
+    2160,
+    0
+   ],
+   "credentials": {
+    "microsoftOutlookApi": {
+     "id": "5ccPkZBNrAsm1Q7M",
+     "name": "fairbank microsoft service account"
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "const v = $('Validate').first().json;\nconst q = $('Pick quote').first().json;\nconst r = $input.first().json || {};\nif (r.error) return [{ json: { ok: false, statusCode: 502, body: { success: false, error: 'Outlook could not send the email: ' + r.error + ' ' + JSON.stringify(r.message || r.description || '').substring(0, 300), step: 'sendMail' } } }];\nreturn [{ json: { ok: true, statusCode: 200, body: { success: true, e_sorder_id: v.e_sorder_id, quote_id: q.quoteId, quote_link: q.link, from: v.from, sent_to: v.to } } }];\n"
+   },
+   "id": "f8ef2966-d885-56a1-a71d-c4e38238f8a6",
+   "name": "Shape",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2400,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "respondWith": "json",
+    "responseBody": "={{ JSON.stringify($json.body) }}",
+    "options": {
+     "responseCode": "={{ $json.statusCode || 200 }}"
+    }
+   },
+   "id": "1feb6978-f46f-5654-acbb-7135c878b0f3",
+   "name": "Respond",
+   "type": "n8n-nodes-base.respondToWebhook",
+   "typeVersion": 1.1,
+   "position": [
+    2640,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose"
+     },
+     "conditions": [
+      {
+       "leftValue": "={{ $json.ok }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   },
+   "id": "e6ad16e7-7ad2-5644-a746-e40088c2c155",
+   "name": "Valid?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    2880,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose"
+     },
+     "conditions": [
+      {
+       "leftValue": "={{ $json.ok }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   },
+   "id": "5690c2bf-a33f-50ea-a798-3bc28cec79fa",
+   "name": "Deal ok?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    3120,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose"
+     },
+     "conditions": [
+      {
+       "leftValue": "={{ $json.ok }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   },
+   "id": "f945008f-6e1d-5430-a0cc-e02df032ab5c",
+   "name": "Quote ok?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    3360,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose"
+     },
+     "conditions": [
+      {
+       "leftValue": "={{ $json.ok }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   },
+   "id": "46c1f1c3-8a56-55ce-aa9c-8288b64a016a",
+   "name": "Email ok?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    3600,
+    0
+   ]
+  }
+ ],
+ "connections": {
+  "Webhook": {
+   "main": [
+    [
+     {
+      "node": "Validate",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Validate": {
+   "main": [
+    [
+     {
+      "node": "Valid?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "HubSpot: get deal": {
+   "main": [
+    [
+     {
+      "node": "Check deal",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Check deal": {
+   "main": [
+    [
+     {
+      "node": "Deal ok?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "HubSpot: quotes": {
+   "main": [
+    [
+     {
+      "node": "Pick quote",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Pick quote": {
+   "main": [
+    [
+     {
+      "node": "Quote ok?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "HubSpot: sender": {
+   "main": [
+    [
+     {
+      "node": "Download PDF",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Download PDF": {
+   "main": [
+    [
+     {
+      "node": "Build email",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Build email": {
+   "main": [
+    [
+     {
+      "node": "Email ok?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Outlook: send quote": {
+   "main": [
+    [
+     {
+      "node": "Shape",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Shape": {
+   "main": [
+    [
+     {
+      "node": "Respond",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Valid?": {
+   "main": [
+    [
+     {
+      "node": "HubSpot: get deal",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Respond",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Deal ok?": {
+   "main": [
+    [
+     {
+      "node": "HubSpot: quotes",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Respond",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Quote ok?": {
+   "main": [
+    [
+     {
+      "node": "HubSpot: sender",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Respond",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Email ok?": {
+   "main": [
+    [
+     {
+      "node": "Outlook: send quote",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Respond",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1"
+ },
+ "pinData": {},
+ "meta": {
+  "templateCredsSetupCompleted": true
+ },
+ "active": false
+}

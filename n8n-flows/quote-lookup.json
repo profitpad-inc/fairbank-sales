@@ -1,0 +1,339 @@
+{
+ "name": "e-order-placement: quote lookup",
+ "nodes": [
+  {
+   "id": "b1ca00b8-61d9-4bff-8229-e3e7e5587a95",
+   "name": "Webhook",
+   "type": "n8n-nodes-base.webhook",
+   "typeVersion": 2,
+   "position": [
+    0,
+    144
+   ],
+   "parameters": {
+    "httpMethod": "GET",
+    "path": "e-order-placement/quote",
+    "responseMode": "responseNode",
+    "options": {
+     "allowedOrigins": "*"
+    },
+    "authentication": "jwtAuth"
+   },
+   "webhookId": "b9d40a3a-e4d3-4024-9834-719eb3fa238b",
+   "credentials": {
+    "jwtAuth": {
+     "id": "6sDOPAJdRYI8fpxX",
+     "name": "Fairbank session (JWT)"
+    }
+   }
+  },
+  {
+   "id": "82fc6a8b-cd54-4f6f-917b-0aad001c4a6a",
+   "name": "Validate",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    224,
+    144
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "// GET ?e_sorder_id=S2737687.0001. Quotes hang off the generation's HubSpot\n// deal (one deal per generation), so the gen suffix is required.\nconst q = $input.first().json.query || {};\nconst m = String(q.e_sorder_id || '').trim().toUpperCase().match(/^S?(\\d+)\\.(\\d{1,4})$/);\nif (!m) return [{ json: { ok: false, statusCode: 400, body: { success: false, error: 'Missing or invalid e_sorder_id (expected S1234567.0001).', step: 'validate' } } }];\nreturn [{ json: { ok: true, e_sorder_id: 'S' + m[1] + '.' + m[2].padStart(4, '0') } }];\n"
+   }
+  },
+  {
+   "id": "d5ecbead-f7de-4253-a815-fd6c123750aa",
+   "name": "Valid?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    448,
+    144
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose"
+     },
+     "conditions": [
+      {
+       "leftValue": "={{ $json.ok }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "98a02ee7-53a6-4ec5-ac42-47e757fdc909",
+   "name": "HubSpot: get deal",
+   "type": "CUSTOM.hubspotApi",
+   "typeVersion": 1,
+   "position": [
+    672,
+    80
+   ],
+   "parameters": {
+    "resource": "objects",
+    "objectType": "0-3",
+    "operation": "get",
+    "objectId": "={{ $json.e_sorder_id }}",
+    "properties": [
+     "e_sorder_id",
+     "dealname"
+    ],
+    "additionalOptions": {
+     "idProperty": "e_sorder_id",
+     "errorWhenNotFound": false,
+     "associations": [
+      "0-14"
+     ]
+    }
+   },
+   "onError": "continueRegularOutput",
+   "credentials": {
+    "hubspotApi": {
+     "id": "4HKK5aFFmTGesa3H",
+     "name": "HubSpot account"
+    }
+   }
+  },
+  {
+   "id": "9d3326aa-3cd5-43f2-918f-54dd6b96dbf3",
+   "name": "Check deal",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    896,
+    80
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "// ok: true goes on to read the deal's quotes. No deal, or a deal with no\n// quotes, is not an error: the answer is \"no quote\" (the page grays out\n// View Quote). Quote ids come from the deal Get's associations\n// (associations.quotes.results[].id; HubSpot leaves the key out when empty).\nconst v = $('Validate').first().json;\nconst d = $input.first().json || {};\nconst stop = (statusCode, body) => [{ json: { ok: false, statusCode, body } }];\nif (d.error) return stop(502, { success: false, error: 'HubSpot deal lookup failed: ' + d.error + ' ' + JSON.stringify(d.message || '').substring(0, 300), step: 'getDeal' });\nif (d.objectFound === false || !d.id) return stop(200, { success: true, e_sorder_id: v.e_sorder_id, hs_deal_id: null, quote: null, quotes: [] });\nconst a = (d.associations && d.associations.quotes && d.associations.quotes.results) || [];\nconst ids = [...new Set(a.map((r) => String(r.id)).filter(Boolean))];\nif (!ids.length) return stop(200, { success: true, e_sorder_id: v.e_sorder_id, hs_deal_id: String(d.id), quote: null, quotes: [] });\nreturn [{ json: { ok: true, dealId: String(d.id), quoteIds: ids.join(',') } }];\n"
+   }
+  },
+  {
+   "id": "044a461e-a34b-4394-89c3-7e6ed98dee72",
+   "name": "Deal found?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    1120,
+    80
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose"
+     },
+     "conditions": [
+      {
+       "leftValue": "={{ $json.ok }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "3880aa21-bf3f-4f77-9ca6-ee6769353a81",
+   "name": "HubSpot: get quotes",
+   "type": "CUSTOM.hubspotApi",
+   "typeVersion": 1,
+   "position": [
+    1344,
+    0
+   ],
+   "parameters": {
+    "resource": "objects",
+    "objectType": "0-14",
+    "operation": "batchRead",
+    "batchReadInputMode": "ui",
+    "batchReadObjectIds": "={{ $json.quoteIds }}",
+    "batchReadReturnAllMode": "allInOne",
+    "batchReadOptions": {
+     "properties": [
+      "hs_title",
+      "hs_quote_number",
+      "hs_status",
+      "hs_quote_link",
+      "hs_expiration_date",
+      "hs_createdate",
+      "hs_lastmodifieddate",
+      "hs_quote_amount"
+     ]
+    }
+   },
+   "executeOnce": true,
+   "alwaysOutputData": true,
+   "onError": "continueRegularOutput",
+   "credentials": {
+    "hubspotApi": {
+     "id": "4HKK5aFFmTGesa3H",
+     "name": "HubSpot account"
+    }
+   }
+  },
+  {
+   "id": "583a40e7-9eba-4d47-97fc-be7a519d9a55",
+   "name": "Shape",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1568,
+    0
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "// The deal's quotes, newest first. quote = the newest one with a public\n// link (a draft has none yet), or null; the page opens quote.link.\nconst v = $('Validate').first().json;\nconst dealId = $('Check deal').first().json.dealId;\nconst items = $input.all().map((i) => i.json || {});\nconst err = items.find((j) => j.error);\nif (err) return [{ json: { ok: false, statusCode: 502, body: { success: false, error: 'HubSpot quote read failed: ' + err.error + ' ' + JSON.stringify(err.message || '').substring(0, 300), step: 'getQuotes' } } }];\n// Batch Read allInOne gives { results: [...] }; cope with one record per item too.\nconst rows = [];\nfor (const j of items) {\n  if (Array.isArray(j.results)) rows.push(...j.results);\n  else if (j.id && j.properties) rows.push(j);\n}\n// HubSpot dates arrive as ISO strings or epoch ms; keep YYYY-MM-DD.\nconst day = (x) => {\n  if (x == null || x === '') return null;\n  const d = /^\\d+$/.test(String(x)) ? new Date(Number(x)) : new Date(String(x));\n  return isNaN(d) ? null : d.toISOString().slice(0, 10);\n};\nconst today = new Date().toISOString().slice(0, 10);\nconst quotes = rows.filter((r) => !r.archived).map((r) => {\n  const p = r.properties || {};\n  const expires = day(p.hs_expiration_date);\n  return {\n    id: String(r.id),\n    title: p.hs_title || '',\n    number: p.hs_quote_number || '',\n    status: p.hs_status || '',\n    link: p.hs_quote_link || null,\n    amount: p.hs_quote_amount != null && p.hs_quote_amount !== '' ? Number(p.hs_quote_amount) : null,\n    created: p.hs_createdate || null,\n    expires,\n    expired: !!expires && expires < today,\n  };\n}).sort((a, b) => String(b.created || '').localeCompare(String(a.created || '')));\nconst quote = quotes.find((q) => q.link) || null;\nreturn [{ json: { ok: true, statusCode: 200, body: { success: true, e_sorder_id: v.e_sorder_id, hs_deal_id: dealId, quote, quotes } } }];\n"
+   }
+  },
+  {
+   "id": "3708db7c-f01a-4360-92d5-d61faf3706e8",
+   "name": "Respond",
+   "type": "n8n-nodes-base.respondToWebhook",
+   "typeVersion": 1.1,
+   "position": [
+    1792,
+    144
+   ],
+   "parameters": {
+    "respondWith": "json",
+    "responseBody": "={{ JSON.stringify($json.body) }}",
+    "options": {
+     "responseCode": "={{ $json.statusCode || 200 }}"
+    }
+   }
+  }
+ ],
+ "connections": {
+  "Webhook": {
+   "main": [
+    [
+     {
+      "node": "Validate",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Validate": {
+   "main": [
+    [
+     {
+      "node": "Valid?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Valid?": {
+   "main": [
+    [
+     {
+      "node": "HubSpot: get deal",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Respond",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "HubSpot: get deal": {
+   "main": [
+    [
+     {
+      "node": "Check deal",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Check deal": {
+   "main": [
+    [
+     {
+      "node": "Deal found?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Deal found?": {
+   "main": [
+    [
+     {
+      "node": "HubSpot: get quotes",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Respond",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "HubSpot: get quotes": {
+   "main": [
+    [
+     {
+      "node": "Shape",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Shape": {
+   "main": [
+    [
+     {
+      "node": "Respond",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1"
+ },
+ "pinData": {},
+ "meta": {
+  "templateCredsSetupCompleted": true
+ },
+ "active": false
+}

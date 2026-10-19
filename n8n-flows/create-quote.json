@@ -1,0 +1,686 @@
+{
+ "name": "e-order-placement: create quote",
+ "nodes": [
+  {
+   "parameters": {
+    "httpMethod": "POST",
+    "path": "e-order-placement/create-quote",
+    "responseMode": "responseNode",
+    "options": {
+     "allowedOrigins": "*"
+    },
+    "authentication": "jwtAuth"
+   },
+   "id": "a04ec4a5-387f-5ad8-a6c5-2767efa3f32c",
+   "name": "Webhook",
+   "type": "n8n-nodes-base.webhook",
+   "typeVersion": 2,
+   "position": [
+    0,
+    0
+   ],
+   "webhookId": "840b9e76-b6d8-5f00-a7fa-27b5f391d1d7",
+   "credentials": {
+    "jwtAuth": {
+     "id": "6sDOPAJdRYI8fpxX",
+     "name": "Fairbank session (JWT)"
+    }
+   }
+  },
+  {
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "// POST { e_sorder_id: \"S2737687.0001\" }. Quotes hang off the generation's\n// HubSpot deal, so the gen suffix is required.\nconst b = $input.first().json.body || {};\nconst m = String(b.e_sorder_id || '').trim().toUpperCase().match(/^S?(\\d+)\\.(\\d{1,4})$/);\nif (!m) return [{ json: { ok: false, statusCode: 400, body: { success: false, error: 'Missing or invalid e_sorder_id (expected S1234567.0001).', step: 'validate' } } }];\nreturn [{ json: { ok: true, e_sorder_id: 'S' + m[1] + '.' + m[2].padStart(4, '0') } }];\n"
+   },
+   "id": "5c07016d-ce32-5a8f-aea6-5cc7abd6ece2",
+   "name": "Validate",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    240,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "resource": "objects",
+    "objectType": "0-3",
+    "operation": "get",
+    "objectId": "={{ $json.e_sorder_id }}",
+    "properties": [
+     "e_sorder_id",
+     "dealname",
+     "hubspot_owner_id",
+     "e_price_expire_date"
+    ],
+    "additionalOptions": {
+     "idProperty": "e_sorder_id",
+     "errorWhenNotFound": false,
+     "associations": [
+      "0-14",
+      "0-8"
+     ]
+    }
+   },
+   "id": "459fdc12-aa19-5ebb-a6ba-75ab5e92bcef",
+   "name": "HubSpot: get deal",
+   "type": "CUSTOM.hubspotApi",
+   "typeVersion": 1,
+   "position": [
+    480,
+    0
+   ],
+   "credentials": {
+    "hubspotApi": {
+     "id": "4HKK5aFFmTGesa3H",
+     "name": "HubSpot account"
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "// Needs a deal with line items (the Eclipse sync puts them on the deal; the\n// quote gets copies). Its quote ids go to the existing-quote check.\nconst v = $('Validate').first().json;\nconst d = $input.first().json || {};\nconst stop = (statusCode, body) => [{ json: { ok: false, statusCode, body } }];\nif (d.error) return stop(502, { success: false, error: 'HubSpot deal lookup failed: ' + d.error + ' ' + JSON.stringify(d.message || '').substring(0, 300), step: 'getDeal' });\nif (d.objectFound === false || !d.id) return stop(404, { success: false, error: 'No HubSpot deal for ' + v.e_sorder_id + ' yet.', step: 'getDeal' });\nconst ids = (key) => [...new Set((((d.associations || {})[key] || {}).results || []).map((r) => String(r.id)).filter(Boolean))];\nconst lineIds = ids('line items');\nif (!lineIds.length) return stop(409, { success: false, error: 'The HubSpot deal for ' + v.e_sorder_id + ' has no line items yet.', step: 'getDeal' });\nconst p = d.properties || {};\nreturn [{ json: { ok: true, dealId: String(d.id), ownerId: p.hubspot_owner_id || '', priceExpires: p.e_price_expire_date || '', lineIds: lineIds.join(','), quoteIds: ids('quotes').join(',') } }];\n"
+   },
+   "id": "a9b0cb50-c1e0-571e-aed6-61738f4124ed",
+   "name": "Check deal",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    720,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "resource": "objects",
+    "objectType": "0-14",
+    "operation": "batchRead",
+    "batchReadInputMode": "ui",
+    "batchReadObjectIds": "={{ $json.quoteIds || \"0\" }}",
+    "batchReadReturnAllMode": "allInOne",
+    "batchReadOptions": {
+     "properties": [
+      "hs_title",
+      "hs_quote_number",
+      "hs_status",
+      "hs_quote_link",
+      "hs_expiration_date",
+      "hs_createdate",
+      "hs_quote_amount"
+     ]
+    }
+   },
+   "id": "343bbafc-1727-53a1-a7e8-f55c770b3b94",
+   "name": "HubSpot: existing quotes",
+   "type": "CUSTOM.hubspotApi",
+   "typeVersion": 1,
+   "position": [
+    960,
+    0
+   ],
+   "credentials": {
+    "hubspotApi": {
+     "id": "4HKK5aFFmTGesa3H",
+     "name": "HubSpot account"
+    }
+   },
+   "onError": "continueRegularOutput",
+   "executeOnce": true,
+   "alwaysOutputData": true
+  },
+  {
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "// A quote with a public link already on the deal: return it, make nothing\n// (a double click or two reps at once must not make two quotes).\nconst day = (x) => {\n  if (x == null || x === '') return null;\n  const d = /^\\d+$/.test(String(x)) ? new Date(Number(x)) : new Date(String(x));\n  return isNaN(d) ? null : d.toISOString().slice(0, 10);\n};\nconst today = new Date().toISOString().slice(0, 10);\nconst toQuote = (r) => {\n  const p = r.properties || {};\n  const expires = day(p.hs_expiration_date);\n  const link = p.hs_quote_link || (p.hs_proposal_domain && p.hs_proposal_slug ? 'https://' + p.hs_proposal_domain + '/' + p.hs_proposal_slug : null);\n  return {\n    id: String(r.id), title: p.hs_title || '', number: p.hs_quote_number || '', status: p.hs_status || '', link,\n    amount: p.hs_quote_amount != null && p.hs_quote_amount !== '' ? Number(p.hs_quote_amount) : null,\n    created: p.hs_createdate || null, expires, expired: !!expires && expires < today,\n  };\n};\nconst c = $('Check deal').first().json;\nconst v = $('Validate').first().json;\nconst rows = c.quoteIds ? $input.all().flatMap((i) => Array.isArray(i.json.results) ? i.json.results : []) : [];\nconst quotes = rows.filter((r) => !r.archived).map(toQuote).sort((a, b) => String(b.created || '').localeCompare(String(a.created || '')));\nconst q = quotes.find((x) => x.link);\nif (q) return [{ json: { ok: false, statusCode: 200, body: { success: true, created: false, e_sorder_id: v.e_sorder_id, hs_deal_id: c.dealId, quote: q, quotes } } }];\nreturn [{ json: { ok: true } }];\n"
+   },
+   "id": "dac54a5c-ca27-592f-ab79-f1cdc5be2dcb",
+   "name": "Existing quote?",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1200,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "resource": "objects",
+    "objectType": "0-8",
+    "operation": "batchRead",
+    "batchReadInputMode": "ui",
+    "batchReadObjectIds": "={{ $('Check deal').first().json.lineIds }}",
+    "batchReadReturnAllMode": "allInOne",
+    "batchReadOptions": {
+     "properties": [
+      "name",
+      "description",
+      "hs_sku",
+      "quantity",
+      "price",
+      "hs_cost_of_goods_sold",
+      "hs_product_id",
+      "e_uom",
+      "e_uom_qty",
+      "e_product_id_",
+      "e_sorder_line_number"
+     ]
+    }
+   },
+   "id": "1755577a-ab14-5821-af84-aba83f5dc1fb",
+   "name": "HubSpot: deal lines",
+   "type": "CUSTOM.hubspotApi",
+   "typeVersion": 1,
+   "position": [
+    1440,
+    0
+   ],
+   "credentials": {
+    "hubspotApi": {
+     "id": "4HKK5aFFmTGesa3H",
+     "name": "HubSpot account"
+    }
+   },
+   "onError": "continueRegularOutput",
+   "executeOnce": true
+  },
+  {
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "// Copies of the deal's line items for the quote (a quote needs its own),\n// in Eclipse line order, skipping lines with no quantity. Same fields as\n// Fairbank's existing quotes; the template reads name, description,\n// quantity, e_uom, price, amount and the product id.\nconst r = $input.first().json || {};\nif (r.error) return [{ json: { ok: false, statusCode: 502, body: { success: false, error: 'HubSpot line item read failed: ' + r.error, step: 'dealLines' } } }];\nconst COPY = ['name', 'description', 'hs_sku', 'quantity', 'price', 'hs_cost_of_goods_sold', 'hs_product_id', 'e_uom', 'e_uom_qty', 'e_product_id_'];\nconst num = (x) => (x == null || x === '' || isNaN(Number(x)) ? Infinity : Number(x));\nconst rows = (Array.isArray(r.results) ? r.results : [])\n  .filter((l) => !l.archived && Number((l.properties || {}).quantity) > 0)\n  .sort((a, b) => num(a.properties.e_sorder_line_number) - num(b.properties.e_sorder_line_number));\nif (!rows.length) return [{ json: { ok: false, statusCode: 409, body: { success: false, error: 'The HubSpot deal has no line items with a quantity.', step: 'dealLines' } } }];\nconst inputs = rows.map((l, i) => {\n  const props = { hs_position_on_quote: String(i) };\n  for (const k of COPY) { const val = l.properties[k]; if (val != null && val !== '') props[k] = val; }\n  return { properties: props };\n});\nreturn [{ json: { ok: true, body: { inputs } } }];\n"
+   },
+   "id": "9dec57e3-221b-5843-afdd-25e0811ecd41",
+   "name": "Build lines",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1680,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "resource": "objects",
+    "objectType": "0-8",
+    "operation": "batchCreate",
+    "batchCreateBody": "={{ $json.body }}"
+   },
+   "id": "06d27732-977a-5f27-aa35-a2d88ddaff4c",
+   "name": "HubSpot: create lines",
+   "type": "CUSTOM.hubspotApi",
+   "typeVersion": 1,
+   "position": [
+    1920,
+    0
+   ],
+   "credentials": {
+    "hubspotApi": {
+     "id": "4HKK5aFFmTGesa3H",
+     "name": "HubSpot account"
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "// The quote: Fairbank's quote template (558349092401), linked to the deal\n// (its header comes from deal properties) and to the new line items.\n// Association type ids: quote→template 286, quote→deal 64, quote→line item 67.\nconst TEMPLATE_ID = '558349092401';\nconst v = $('Validate').first().json;\nconst c = $('Check deal').first().json;\nconst r = $input.first().json || {};\nif (r.error) return [{ json: { ok: false, statusCode: 502, body: { success: false, error: 'HubSpot line item create failed: ' + r.error + ' ' + JSON.stringify(r.message || '').substring(0, 300), step: 'createLines' } } }];\nconst lineIds = (Array.isArray(r.results) ? r.results : []).map((x) => String(x.id));\nif (!lineIds.length) return [{ json: { ok: false, statusCode: 502, body: { success: false, error: 'HubSpot created no line items.', step: 'createLines' } } }];\n// Expiry: the deal's price expiry (Eclipse), or 10 days out when that is\n// missing or already past (\"Price is firm for 10 days\" on the template).\nconst today = new Date().toISOString().slice(0, 10);\nconst plus10 = new Date(Date.now() + 10 * 864e5).toISOString().slice(0, 10);\nconst pe = String(c.priceExpires || '').slice(0, 10);\nconst expires = /^\\d{4}-\\d{2}-\\d{2}$/.test(pe) && pe >= today ? pe : plus10;\nconst assoc = (id, typeId) => ({ to: { id }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: typeId }] });\nconst properties = {\n  hs_title: 'Quote ' + v.e_sorder_id,\n  hs_status: 'APPROVAL_NOT_NEEDED',\n  hs_expiration_date: expires,\n  hs_currency: 'USD',\n  hs_language: 'en',\n  hs_locale: 'en-us',\n};\nif (c.ownerId) properties.hubspot_owner_id = c.ownerId;\nreturn [{ json: { ok: true, body: { inputs: [{ properties, associations: [assoc(TEMPLATE_ID, 286), assoc(c.dealId, 64), ...lineIds.map((id) => assoc(id, 67))] }] } } }];\n"
+   },
+   "id": "3c88613c-86e6-5873-a66c-e9ea18470f04",
+   "name": "Build quote",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2160,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "resource": "objects",
+    "objectType": "0-14",
+    "operation": "batchCreate",
+    "batchCreateBody": "={{ $json.body }}"
+   },
+   "id": "15526587-e2ec-5e60-afce-a4a4c71bbc21",
+   "name": "HubSpot: create quote",
+   "type": "CUSTOM.hubspotApi",
+   "typeVersion": 1,
+   "position": [
+    2400,
+    0
+   ],
+   "credentials": {
+    "hubspotApi": {
+     "id": "4HKK5aFFmTGesa3H",
+     "name": "HubSpot account"
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "// The new quote, same shape as the quote lookup flow. Its public link is\n// hs_quote_link, else https://<hs_proposal_domain>/<hs_proposal_slug>.\nconst day = (x) => {\n  if (x == null || x === '') return null;\n  const d = /^\\d+$/.test(String(x)) ? new Date(Number(x)) : new Date(String(x));\n  return isNaN(d) ? null : d.toISOString().slice(0, 10);\n};\nconst today = new Date().toISOString().slice(0, 10);\nconst toQuote = (r) => {\n  const p = r.properties || {};\n  const expires = day(p.hs_expiration_date);\n  const link = p.hs_quote_link || (p.hs_proposal_domain && p.hs_proposal_slug ? 'https://' + p.hs_proposal_domain + '/' + p.hs_proposal_slug : null);\n  return {\n    id: String(r.id), title: p.hs_title || '', number: p.hs_quote_number || '', status: p.hs_status || '', link,\n    amount: p.hs_quote_amount != null && p.hs_quote_amount !== '' ? Number(p.hs_quote_amount) : null,\n    created: p.hs_createdate || null, expires, expired: !!expires && expires < today,\n  };\n};\nconst v = $('Validate').first().json;\nconst c = $('Check deal').first().json;\nconst r = $input.first().json || {};\nif (r.error) return [{ json: { ok: false, statusCode: 502, body: { success: false, error: 'HubSpot quote create failed: ' + r.error + ' ' + JSON.stringify(r.message || '').substring(0, 300), step: 'createQuote' } } }];\nconst row = (Array.isArray(r.results) ? r.results : [])[0];\nif (!row) return [{ json: { ok: false, statusCode: 502, body: { success: false, error: 'HubSpot returned no quote.', step: 'createQuote' } } }];\nconst quote = toQuote(row);\nreturn [{ json: { ok: true, statusCode: 200, body: { success: true, created: true, e_sorder_id: v.e_sorder_id, hs_deal_id: c.dealId, quote, quotes: [quote] } } }];\n"
+   },
+   "id": "80a9af62-449d-52d7-abc7-7f1c6bab5ec5",
+   "name": "Shape",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2640,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "respondWith": "json",
+    "responseBody": "={{ JSON.stringify($json.body) }}",
+    "options": {
+     "responseCode": "={{ $json.statusCode || 200 }}"
+    }
+   },
+   "id": "5863c3b8-a659-5b96-a7ff-e4664b73588b",
+   "name": "Respond",
+   "type": "n8n-nodes-base.respondToWebhook",
+   "typeVersion": 1.1,
+   "position": [
+    2880,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose"
+     },
+     "conditions": [
+      {
+       "leftValue": "={{ $json.ok }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   },
+   "id": "c8df0832-8345-5c2a-af30-b48148e89abd",
+   "name": "Valid?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    3120,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose"
+     },
+     "conditions": [
+      {
+       "leftValue": "={{ $json.ok }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   },
+   "id": "c3cd45ec-d4fc-5551-a7ed-1e5031df168d",
+   "name": "Deal ok?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    3360,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose"
+     },
+     "conditions": [
+      {
+       "leftValue": "={{ $json.ok }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   },
+   "id": "df158fb8-0c1a-58df-a5c7-03b72084a9bd",
+   "name": "Make one?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    3600,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose"
+     },
+     "conditions": [
+      {
+       "leftValue": "={{ $json.ok }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   },
+   "id": "69a68102-2a36-50d5-abea-831e0322edb8",
+   "name": "Lines ok?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    3840,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose"
+     },
+     "conditions": [
+      {
+       "leftValue": "={{ $json.ok }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   },
+   "id": "857e9803-db69-5639-ae84-b17a83ee78d0",
+   "name": "Quote ready?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    4080,
+    0
+   ]
+  }
+ ],
+ "connections": {
+  "Webhook": {
+   "main": [
+    [
+     {
+      "node": "Validate",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Validate": {
+   "main": [
+    [
+     {
+      "node": "Valid?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "HubSpot: get deal": {
+   "main": [
+    [
+     {
+      "node": "Check deal",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Check deal": {
+   "main": [
+    [
+     {
+      "node": "Deal ok?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "HubSpot: existing quotes": {
+   "main": [
+    [
+     {
+      "node": "Existing quote?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Existing quote?": {
+   "main": [
+    [
+     {
+      "node": "Make one?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "HubSpot: deal lines": {
+   "main": [
+    [
+     {
+      "node": "Build lines",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Build lines": {
+   "main": [
+    [
+     {
+      "node": "Lines ok?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "HubSpot: create lines": {
+   "main": [
+    [
+     {
+      "node": "Build quote",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Build quote": {
+   "main": [
+    [
+     {
+      "node": "Quote ready?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "HubSpot: create quote": {
+   "main": [
+    [
+     {
+      "node": "Shape",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Shape": {
+   "main": [
+    [
+     {
+      "node": "Respond",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Valid?": {
+   "main": [
+    [
+     {
+      "node": "HubSpot: get deal",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Respond",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Deal ok?": {
+   "main": [
+    [
+     {
+      "node": "HubSpot: existing quotes",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Respond",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Make one?": {
+   "main": [
+    [
+     {
+      "node": "HubSpot: deal lines",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Respond",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Lines ok?": {
+   "main": [
+    [
+     {
+      "node": "HubSpot: create lines",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Respond",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Quote ready?": {
+   "main": [
+    [
+     {
+      "node": "HubSpot: create quote",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Respond",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1"
+ },
+ "pinData": {},
+ "meta": {
+  "templateCredsSetupCompleted": true
+ },
+ "active": false
+}
