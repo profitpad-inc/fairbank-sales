@@ -2305,6 +2305,8 @@
         (sideLayout ? '<div class="fop-split' + (stockShown() ? "" : " fop-split--closed") + '"><div class="fop-split__main">' : "") +
         customerSummaryHtml() +
         '<div class="fop-grid' + (inlineLayout ? "" : " fop-grid--noall") + (detailsLayout ? " fop-grid--details" : "") + (noStock() ? " fop-grid--nostock" : "") + (linesLocked() ? " fop-grid--locked" : "") + '" role="table" aria-label="Order lines">' +
+        // "Lines" title like the Bill to / Ship to cards (phones, locked orders only).
+        '<div class="fop-lines-lbl" aria-hidden="true"><span class="fop-party__lbl">Lines</span></div>' +
         '<div class="fop-line fop-line--head" role="row">' +
         '<div class="fop-cell fop-cell--num">#</div><div class="fop-cell fop-cell--product">Product</div>' +
         '<div class="fop-cell fop-cell--desc">Description</div><div class="fop-cell fop-cell--qty">Qty</div>' +

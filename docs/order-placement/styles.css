@@ -297,7 +297,9 @@ textarea.fop-notes { display: block; min-height: calc(2.1em + 18px); line-height
   grid-template-columns: 36px 150px minmax(160px, 1fr) 120px 110px 100px 110px 64px 64px 36px;
   border-top: 1px solid var(--line);
 }
-.fop-line:first-child { border-top: 0; }
+.fop-line:first-child, .fop-lines-lbl + .fop-line { border-top: 0; }
+/* "Lines" title: phones on a locked order only (see the phone pass). */
+.fop-lines-lbl { display: none; }
 /* Alternating line shading (every second line). */
 .fop-line--alt { background: var(--alt-row); }
 .fop-line:not(.fop-line--head):focus-within { background: var(--row-hover); box-shadow: inset 3px 0 0 var(--gold); }
@@ -992,6 +994,8 @@ span.flatpickr-weekday {
   }
   .fop-grid--locked .fop-line { background: none; border: 0; border-radius: 0; }
   .fop-grid--locked .fop-line:not(.fop-line--head) ~ .fop-line { border-top: 1px solid var(--line); }
+  /* "Lines" title at the top of that card, set like Bill to / Ship to. */
+  .fop-grid--locked .fop-lines-lbl { display: flex; align-items: center; min-height: 24px; padding: 10px 12px 0; }
   .fop-party__top { margin-bottom: 4px; }
   .fop-party__name { font-size: 16px; margin-bottom: 2px; }
   .fop-party__amt { font-size: 18px; }
@@ -1084,7 +1088,11 @@ span.flatpickr-weekday {
   .fop-stockstrip--comment .fop-strip__lbl { padding-top: 0; }
 
   /* Totals box and the buttons beside it. */
-  .fop-gridfoot { margin-top: -4px; gap: 8px; }
+  /* 6px under the lines (the column's 12px gap less 6), half the gap
+     between the other sections. An empty button row (locked orders) is
+     dropped, or its row gap would add 8px. */
+  .fop-gridfoot { margin-top: -6px; gap: 8px; }
+  .fop-gridtools:empty { display: none; }
   .fop-sum__row { padding: 7px 12px; }
 
   /* Orders list: "New order" floats fixed in the bottom right of the
