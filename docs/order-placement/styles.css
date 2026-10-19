@@ -103,7 +103,7 @@ body {
   border: 1px solid var(--gold); border-radius: 6px;
   cursor: pointer;
 }
-.fop-btn:hover:not([disabled]) { background: var(--gold-lt); }
+.fop-btn:hover:not([disabled]):not([aria-disabled="true"]) { background: var(--gold-lt); }
 /* Secondary buttons: steel outline, gold only on hover / focus. */
 .fop-btn--ghost { color: var(--text); background: transparent; border-color: var(--steel); }
 .fop-btn--ghost:hover:not([disabled]) { color: var(--gold-lt); border-color: var(--gold); background: rgba(200, 150, 42, 0.08); }
@@ -113,7 +113,7 @@ body {
 /* Tracking links: margin instead of a space before the icon, so the
    underline stops at the end of the tracking number. */
 .fop-pkg__trk .fop-ext { margin-left: .3em; }
-.fop-btn[disabled] { opacity: .45; cursor: not-allowed; }
+.fop-btn[disabled], .fop-btn[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
 .fop-app :focus-visible { outline: 2px solid var(--gold-lt); outline-offset: 2px; }
 
 .fop-icon-btn {
@@ -201,6 +201,12 @@ textarea.fop-notes { display: block; min-height: calc(2.1em + 18px); line-height
   letter-spacing: .14em; text-transform: uppercase; color: var(--muted);
 }
 .fop-party__name { font-size: 17px; font-weight: 600; color: var(--white); margin-bottom: 4px; }
+/* Top right of each card: the Eclipse id tile (after the ship-to's "Change"
+   link); the bill-to's price level follows the name. */
+.fop-party__topr { display: flex; align-items: center; gap: 10px; }
+/* Same size as the product id tile on phone line cards. */
+.fop-party__topr .fop-badge { font-size: 14px; }
+.fop-party__name .fop-level { margin-left: 2px; vertical-align: 1px; }
 .fop-party__addr { font-size: 14px; line-height: 1.45; color: var(--muted); }
 .fop-party__body { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
 .fop-party__corner { display: flex; flex-direction: column; align-items: flex-end; text-align: right; white-space: nowrap; }
@@ -288,6 +294,13 @@ textarea.fop-notes { display: block; min-height: calc(2.1em + 18px); line-height
   .fop-grid .fop-input { padding-left: 7px; padding-right: 7px; }
 }
 .fop-mlabel { display: none; }
+/* Product id tile on read-only lines: phones only (desktop has the column). */
+.fop-line__id { display: none; }
+/* "No lines on this order." on a locked order with no lines (every width). */
+.fop-grid .fop-line--empty { display: block; }
+.fop-line--empty .fop-cell { padding: 14px 12px; }
+/* "Add line comment" (inline strip): phones only, while the box is folded. */
+.fop-addcmt { display: none; }
 
 .fop-qty { display: flex; align-items: center; }
 .fop-step { display: none; }
@@ -417,7 +430,7 @@ textarea.fop-notes { display: block; min-height: calc(2.1em + 18px); line-height
   .fop-line:first-child { border-top: 1px solid var(--border); }
   .fop-cell--num { display: none; }
   .fop-cell--product { grid-area: product; }
-  .fop-cell--desc { grid-area: desc; white-space: normal; color: var(--muted); }
+  .fop-cell--desc { grid-area: desc; white-space: normal; color: var(--white); }
   .fop-cell--qty { grid-area: qty; }
   .fop-cell--price { grid-area: price; }
   .fop-cell--cost { grid-area: cost; text-align: left; }
@@ -443,10 +456,11 @@ textarea.fop-notes { display: block; min-height: calc(2.1em + 18px); line-height
   .fop-step:last-child { border-radius: 0 6px 6px 0; }
   .fop-qty .fop-input { border-radius: 0; text-align: center; height: 44px; }
 
-  /* Product search opens as a bottom sheet. */
+  /* Product search drops down right under the product box, as wide as the
+     box (it was a bottom sheet, which opened far from the box and covered
+     the action bar). Above the action bar (z-index 50 vs 40). */
   .fop-grid .fop-ac__list {
-    position: fixed; left: 0; right: 0; top: auto; bottom: 0;
-    width: 100%; max-width: none; max-height: 55vh; border-radius: 12px 12px 0 0;
+    width: 100%; max-width: none; max-height: 45vh;
   }
   .fop-ac__item { padding: 12px 14px; white-space: normal; }
 
@@ -661,7 +675,7 @@ span.flatpickr-weekday {
 .fop-lastmod__lbl { margin-right: 6px; color: var(--muted); }
 @media (max-width: 767px) { .fop-lastmod { width: 100%; } .fop-bar__actions { flex-wrap: wrap; } }
 
-/* ── Switcher: "Other orders" + one tab per generation ── */
+/* ── Switcher: one tab per generation + "Change log" ── */
 .fop-switch { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; border-bottom: 1px solid var(--steel); padding-bottom: 0; }
 .fop-switch > .fop-btn { margin-bottom: 8px; }
 .fop-switch__end { margin-left: auto; }
@@ -674,8 +688,9 @@ span.flatpickr-weekday {
 }
 .fop-tab:hover { color: var(--text); background: rgba(143, 164, 194, 0.08); }
 .fop-tab--active { color: var(--white); background: var(--card-bg); border-color: var(--steel); border-bottom: 2px solid var(--gold); }
+.fop-tab__short { display: none; }
 
-/* ── Other orders dialog ── */
+/* ── Orders list ── */
 /* Thin steel scrollbar in its own gutter, 8px clear of the order cards'
    right edge, so it never sits on their borders. */
 .fop-orders {
@@ -736,3 +751,365 @@ span.flatpickr-weekday {
 .fop-log__c { overflow-wrap: anywhere; }
 .fop-log--other td { color: var(--muted); }
 .fop-log__count { font-size: 13px; }
+.fop-log__gshort { display: none; }
+/* Phones: each entry stacks. Generation, time and user on one line, the
+   comment under them at full width; the dialog scrolls, not the table. */
+@media (max-width: 767px) {
+  .fop-log__head .fop-h2 { font-size: 21px; }
+  .fop-log-wrap { max-height: none; overflow: visible; }
+  .fop-log, .fop-log tbody { display: block; }
+  .fop-log thead { display: none; }
+  .fop-log tr {
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: "gens at user" "c c c";
+    gap: 4px 10px; padding: 10px 0; border-bottom: 1px solid var(--line);
+  }
+  .fop-log td { display: block; padding: 0; border: 0; }
+  .fop-log__gens { grid-area: gens; }
+  .fop-log__gfull { display: none; }
+  .fop-log__gshort { display: inline-block; padding: 0 6px; font-size: 12px; font-weight: 600; border: 1px solid var(--line); border-radius: 4px; }
+  .fop-log__at { grid-area: at; font-size: 13px; color: var(--muted); white-space: normal; }
+  .fop-log__user { grid-area: user; font-size: 13px; color: var(--muted); }
+  .fop-log__c { grid-area: c; font-size: 14px; line-height: 1.4; }
+}
+
+/* ── Custom lines ──
+   Rep-defined lines under the regular ones (C1, C2…): a steel "Custom"
+   tag with the ideal SKU that opens the edit dialog, plain qty / price
+   text, and the add / edit dialog's form. */
+.fop-custom-tag {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 4px 8px;
+  font: inherit; font-size: 14px; color: var(--text); text-align: left;
+  background: none; border: 1px solid transparent; border-radius: 5px; cursor: pointer;
+}
+.fop-custom-tag:hover { border-color: var(--line); }
+.fop-custom-tag__sku { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fop-cell--desc .fop-block { font-size: 13px; overflow: hidden; text-overflow: ellipsis; }
+@media (min-width: 768px) {
+  /* Same 8px inset as the qty / price inputs' text on regular lines. */
+  .fop-grid .fop-custom-num { padding-right: 8px; }
+}
+.fop-custom-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.fop-custom-form__wide { grid-column: 1 / -1; }
+.fop-custom-var { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.fop-custom-var[hidden] { display: none; }
+.fop-custom-margin { margin-top: -4px; font-size: 13px; font-variant-numeric: tabular-nums; min-height: 1em; }
+.fop-custom-form .fop-num, .fop-custom-form input[inputmode] { font-variant-numeric: tabular-nums; }
+@media (max-width: 767px) {
+  .fop-custom-form, .fop-custom-var { grid-template-columns: 1fr; }
+}
+/* Slider switch (custom line "Variation of an existing product"): the
+   checkbox is visually hidden over a steel track; on, the track turns gold. */
+.fop-toggle { position: relative; display: inline-flex; align-items: center; gap: 10px; justify-self: start; font-size: 14px; color: var(--text); cursor: pointer; }
+.fop-toggle input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+.fop-toggle__track {
+  position: relative; flex: none; width: 38px; height: 22px; border-radius: 11px;
+  background: rgba(143, 164, 194, 0.25); border: 1px solid var(--steel); transition: background .15s, border-color .15s;
+}
+.fop-toggle__track::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--text); transition: transform .15s;
+}
+.fop-toggle input:checked + .fop-toggle__track { background: var(--gold); border-color: var(--gold); }
+.fop-toggle input:checked + .fop-toggle__track::after { transform: translateX(16px); background: var(--navy-dark); }
+.fop-toggle input:focus-visible + .fop-toggle__track { outline: 2px solid var(--gold-lt); outline-offset: 2px; }
+/* Custom line dialog: the picked existing product's name under its search box. */
+.fop-custom-pick { margin-top: 4px; font-size: 13px; min-height: 1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Line comments and the details layout (2026-10-19) ── */
+/* Inline layout: stock, qty breaks and the comment form one panel under the
+   focused line; the comment strip is its bottom half now. */
+.fop-stockstrip[data-cell="breaks"] { border-radius: 0; padding-bottom: 6px; margin-bottom: 0; }
+.fop-stockstrip--comment { align-items: flex-start; border-radius: 0 0 8px 8px; padding-bottom: 8px; margin-bottom: 10px; }
+.fop-stockstrip--solo { border-radius: 8px; padding-top: 8px; }
+.fop-stockstrip--comment .fop-strip__lbl { align-self: flex-start; padding-top: 6px; }
+/* Inline layout: clicking a description jumps to that line's comment. */
+.fop-grid:not(.fop-grid--noall) .fop-line[data-row] .fop-cell--desc { cursor: text; }
+.fop-stockstrip--comment > .fop-muted { align-self: center; }
+.fop-line-comment {
+  display: block; flex: 1; min-width: 200px; min-height: calc(1.4em + 14px);
+  padding: 6px 8px; font-size: 14px; line-height: 1.4; resize: none; overflow: hidden;
+}
+.fop-grid .fop-stockstrip .fop-line-comment { background: var(--input-bg); border-color: var(--line); }
+.fop-grid .fop-stockstrip .fop-line-comment:focus { border-color: var(--gold); }
+@media (max-width: 767px) {
+  .fop-stockstrip[data-cell="breaks"] { margin-bottom: 0; }
+  .fop-stockstrip--comment { margin-bottom: 2px; }
+  .fop-line-comment { min-width: 0; width: 100%; font-size: 16px; }
+}
+
+/* Details layout: no All column; the last column holds the Details button
+   and the × side by side. */
+.fop-grid--details .fop-line { grid-template-columns: 36px 150px minmax(160px, 1fr) 120px 110px 100px 110px 64px 64px; }
+.fop-grid--details .fop-cell--del { display: flex; justify-content: flex-end; align-items: center; gap: 2px; padding-left: 0; padding-right: 4px; }
+@media (max-width: 767px) {
+  .fop-grid--details .fop-line { grid-template-columns: 1fr 1fr; }
+}
+.fop-detail-btn { position: relative; display: inline-flex; align-items: center; justify-content: center; }
+.fop-detail-btn svg { width: 16px; height: 16px; }
+.fop-detail-btn:hover { color: var(--gold-lt); background: rgba(200, 150, 42, .12); }
+/* A line with a comment: gold icon with a small dot. */
+.fop-detail-btn--has { color: var(--gold-lt); }
+.fop-detail-btn--has::after {
+  content: ""; position: absolute; top: 4px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--gold);
+}
+
+/* Line details dialog: stock (left) and qty breaks (right), then the comment. */
+.fop-details__desc { margin-top: -6px; color: var(--white); }
+.fop-details__cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.fop-details .fop-chip { border-color: rgba(143, 164, 194, 0.28); background: rgba(9, 21, 41, 0.35); }
+.fop-details .fop-chip--ship { border-color: var(--gold); }
+.fop-details__comment .fop-line-comment { width: 100%; min-height: calc(4.2em + 14px); }
+/* Qty, unit price, unit cost, ext in one row (two per row on phones). Stock
+   and qty breaks stay side by side at every width. */
+.fop-details__nums { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; font-variant-numeric: tabular-nums; }
+.fop-details__nums .fop-input { text-align: right; }
+.fop-details__val { padding: 9px 11px 9px 0; text-align: right; color: var(--muted); }
+.fop-details .fop-mlabel { display: none; }
+@media (max-width: 767px) {
+  .fop-details__nums { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.fop-confirm-comment { font-size: 13px; white-space: pre-wrap; }
+/* Eclipse line comments under a loaded line's description, one per line. */
+.fop-line-notes { display: block; margin-top: 2px; }
+.fop-line-note { display: block; font-size: 13px; line-height: 1.35; color: var(--muted); white-space: pre-line; overflow-wrap: anywhere; }
+
+/* Inline strip: every label (Inventory, Quantity breaks, Line comment) in one
+   fixed-width column and every value left-aligned in a second column. The
+   strip's left padding makes room for the label, which sits in it with a
+   negative margin, so chips that wrap line up under the first chip. */
+.fop-stockstrip { --lbl: 128px; padding-left: calc(12px + var(--lbl) + 6px); }
+.fop-stockstrip .fop-strip__lbl { flex: 0 0 var(--lbl); min-width: 0; margin-left: calc(-1 * (var(--lbl) + 6px)); }
+@media (max-width: 767px) {
+  .fop-stockstrip { --lbl: 112px; padding-left: calc(8px + var(--lbl) + 6px); }
+}
+
+/* Desktop: a line that grows (Eclipse line comments, a price warning under
+   the description) keeps every cell at the top: cells share the first text
+   baseline, so the product, qty and price input text sits on the same line
+   as the description's first line and the plain number cells. */
+@media (min-width: 768px) {
+  .fop-line:not(.fop-line--head) { align-items: baseline; }
+}
+
+/* Place Order clicked with no ship via: the Ship via box flashes yellow twice
+   (flashShipVia() in app.js). background-color only, so the select keeps
+   its chevron. */
+@keyframes fop-flash {
+  0%, 100% { border-color: var(--line); box-shadow: none; background-color: var(--input-bg); }
+  50% { border-color: var(--warning); box-shadow: 0 0 0 3px rgba(240, 196, 106, .45); background-color: rgba(240, 196, 106, .18); }
+}
+.fop-input.fop-flash { animation: fop-flash .4s ease-in-out 2; }
+
+/* Invoiced / cancelled orders: no Br / All stock columns at all, so qty,
+   prices and ext move right instead of leaving empty columns (desktop; phones
+   use the card layout). */
+@media (min-width: 768px) {
+  .fop-grid--nostock .fop-line { grid-template-columns: 36px 150px minmax(160px, 1fr) 120px 110px 100px 110px 36px; }
+  .fop-grid--nostock.fop-grid--details .fop-line { grid-template-columns: 36px 150px minmax(160px, 1fr) 120px 110px 100px 110px 64px; }
+}
+
+/* ── Phone pass (2026-10-19): tighter, less chunky ──
+   Less padding on the page, cards and header; the line card puts its ×
+   (and the Details button) beside the product box instead of on a row of
+   its own; unit cost / ext / stock sit left and right in one row each; the
+   orders list grows with the page instead of scrolling inside its card; the
+   action bar is one row (total left, buttons right). Desktop is unchanged. */
+@media (max-width: 767px) {
+  /* The sign-in chip (auth.js, absolute top right, about 28px tall at top
+     12px) gets the top strip to itself, so the title and status badge start
+     below it instead of running into it. */
+  .fop-app { padding: 50px 12px 96px; }
+  .fop-wrap { gap: 12px; }
+  .fop-h1 { font-size: 26px; }
+  /* Title, then its buttons on their own row (the sign-in chip sits top right). */
+  .fop-top { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .fop-top > .fop-row { gap: 8px; align-self: flex-end; justify-content: flex-end; }
+  .fop-top .fop-key { display: none; }
+  .fop-card { padding: 14px 12px; }
+  .fop-btn { padding: 9px 14px; font-size: 16px; }
+  .fop-btn--sm { padding: 6px 10px; font-size: 14px; }
+
+  /* Bill-to / ship-to cards. */
+  /* Bill-to and ship-to read as one card: one border and background on
+     the pair, a thin divider between them. */
+  .fop-parties {
+    gap: 0; background: var(--card-bg);
+    border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+  }
+  .fop-party { padding: 10px 12px 12px; background: none; border: 0; border-radius: 0; }
+  .fop-party + .fop-party { border-top: 1px solid var(--line); }
+  /* Locked orders (invoiced, cancelled, non-bid): the line cards merge into
+     one card the same way, a thin divider between lines. */
+  .fop-grid.fop-grid--locked {
+    gap: 0; background: var(--card-bg);
+    border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+  }
+  .fop-grid--locked .fop-line { background: none; border: 0; border-radius: 0; }
+  .fop-grid--locked .fop-line:not(.fop-line--head) ~ .fop-line { border-top: 1px solid var(--line); }
+  .fop-party__top { margin-bottom: 4px; }
+  .fop-party__name { font-size: 16px; margin-bottom: 2px; }
+  .fop-party__amt { font-size: 18px; }
+
+  /* Header: same two fields per row, less inset. */
+  .fop-head__sum { padding: 10px 12px; }
+  .fop-head__grid { gap: 10px; padding: 0 12px 12px; }
+  /* Ship via and ship branch each on a row of their own. */
+  .fop-head__grid > .fop-field--mfull { grid-column: 1 / -1; }
+
+  /* Line cards. The × (and the Details button) sit at the end of the
+     product row: they share its grid area, and the product cell leaves
+     room for them, so qty and price stay half and half on every card.
+     Unit price sits left and qty right (on request), with unit cost under
+     the price and ext. under the qty. */
+  .fop-grid { gap: 8px; }
+  .fop-grid .fop-line,
+  .fop-grid--noall .fop-line,
+  .fop-grid--details .fop-line {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas:
+      "product product"
+      "desc    desc"
+      "price   qty"
+      "cost    ext"
+      "avail   total";
+    gap: 0 8px; padding: 8px 8px 10px;
+  }
+  .fop-cell { padding: 4px; }
+  .fop-cell--desc { padding-top: 2px; padding-bottom: 6px; font-size: 14px; }
+  .fop-grid .fop-cell--product { padding-right: 44px; }
+  .fop-grid .fop-line:has(.fop-detail-btn) .fop-cell--product { padding-right: 80px; }
+  .fop-grid .fop-line:not(:has(.fop-cell--del button)) .fop-cell--product { padding-right: 4px; }
+  .fop-grid .fop-cell--del,
+  .fop-grid--details .fop-cell--del {
+    grid-area: product; justify-self: end; align-self: end;
+    display: flex; gap: 0; padding: 4px 0 7px;
+  }
+  .fop-grid .fop-cell--del .fop-icon-btn { width: 36px; height: 36px; font-size: 22px; }
+  /* Read-only lines (invoiced / cancelled orders): the product id is a tile
+     in the card's top right and the description starts the card. */
+  .fop-grid .fop-line--ro { position: relative; }
+  /* Same spot as the customer id tile on the bill-to / ship-to cards (12px
+     in from the right, centred in a 24px row under 10px of padding). The
+     extra classes beat the product cell's padding rules above. grid-area:
+     auto, because an absolute item that keeps a grid area is placed inside
+     that area (the card's 8px padding in), not against the card's edge. */
+  .fop-grid .fop-line.fop-line--ro .fop-cell.fop-cell--product {
+    grid-area: auto; position: absolute; top: 10px; right: 12px; display: flex; align-items: center; min-height: 24px; padding: 0;
+  }
+  .fop-grid .fop-line--ro .fop-cell--product .fop-mlabel,
+  .fop-grid .fop-line--ro .fop-cell--product .fop-ac { display: none; }
+  .fop-grid .fop-line--ro .fop-line__id { display: inline-block; font-size: 14px; }
+  .fop-grid .fop-line--ro .fop-cell--desc { padding-top: 4px; padding-right: 84px; }
+  /* Read-only lines: qty, unit price, unit cost and ext in one row, each
+     label above its value (editable lines keep the stepper and price box). */
+  .fop-grid .fop-line.fop-line--ro {
+    grid-template-columns: minmax(0, .8fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr);
+    grid-template-areas:
+      "desc  desc  desc  desc"
+      "qty   price cost  ext"
+      "avail avail total total";
+  }
+  .fop-grid .fop-line--ro .fop-cell--qty,
+  .fop-grid .fop-line--ro .fop-cell--price,
+  .fop-grid .fop-line--ro .fop-cell--cost,
+  .fop-grid .fop-line--ro .fop-cell--ext { padding-top: 4px; font-size: 15px; }
+  .fop-grid .fop-line--ro .fop-cell--cost .fop-mlabel,
+  .fop-grid .fop-line--ro .fop-cell--ext .fop-mlabel { display: block; margin-bottom: 3px; }
+  .fop-grid .fop-line--ro .fop-grid-in[readonly] { padding-top: 0; padding-bottom: 0; font-size: 15px; }
+  /* No × on a read-only line: drop the empty cell. A Details button (details
+     layout, open order) sits top right and the tile moves left of it. */
+  .fop-grid .fop-line--ro .fop-cell--del:not(:has(button)) { display: none; }
+  .fop-grid .fop-line--ro .fop-cell--del:has(button) { grid-area: auto; position: absolute; top: 4px; right: 6px; padding: 0; }
+  .fop-grid .fop-line.fop-line--ro:has(.fop-cell--del button) .fop-cell.fop-cell--product { right: 48px; }
+  .fop-grid .fop-line--ro:has(.fop-cell--del button) .fop-cell--desc { padding-right: 124px; }
+  .fop-grid .fop-cell--cost.fop-num { text-align: left; }
+  .fop-grid .fop-cell--ext.fop-num { text-align: right; }
+  .fop-grid .fop-cell--cost, .fop-grid .fop-cell--ext { font-size: 14px; padding-top: 6px; }
+  .fop-grid .fop-input { padding: 9px 10px; }
+  /* Read-only lines (existing orders): values sit flush left, no box. */
+  .fop-grid .fop-grid-in[readonly] { padding-left: 0; padding-right: 0; height: auto; text-align: left; }
+  .fop-step { flex-basis: 40px; height: 42px; }
+  .fop-qty .fop-input { height: 42px; }
+
+  /* Inline strip: each label (Inventory, Quantity breaks, Line comment) on
+     its own line above its chips, so the chips get the full width. */
+  .fop-stockstrip { padding-left: 8px; }
+  .fop-stockstrip .fop-strip__lbl { flex: 0 0 100%; margin-left: 0; padding-top: 0; }
+  .fop-stockstrip--comment .fop-strip__lbl { padding-top: 0; }
+
+  /* Totals box and the buttons beside it. */
+  .fop-gridfoot { margin-top: -4px; gap: 8px; }
+  .fop-sum__row { padding: 7px 12px; }
+
+  /* Orders list: "New order" floats fixed in the bottom right of the
+     screen, above the list (the page's 96px bottom padding keeps the last
+     order clear of it). */
+  .fop-fab {
+    position: fixed; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 40;
+    padding: 14px 20px; border-radius: 999px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, .45), 0 0 0 1px rgba(9, 21, 41, .4);
+  }
+  .fop-fab .fop-key { display: none; }
+  /* Keyboard-only hints (orders list, ship-to picker): no keyboard on a phone. */
+  .fop-hint--keys { display: none; }
+  /* Its row holds nothing else when there is no ship-to checkbox: no gap. */
+  .fop-row:has(> .fop-fab:only-child) { display: contents; }
+  /* Orders list: no scroll box inside the card, the page scrolls instead. */
+  .fop-orders { max-height: none; overflow: visible; padding-right: 0; scrollbar-gutter: auto; }
+  .fop-order { padding: 9px 10px; }
+
+  /* Stock & qty breaks box (side layout) under the header. */
+  /* It grows with the page (no scroll area of its own), and stock and qty
+     breaks stack, chips flowing in rows, so branch names stay on one line. */
+  .fop-side { padding: 10px 12px 12px; font-size: 14px; max-height: none; overflow: visible; }
+  .fop-side__cols { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .fop-side__sec { flex-direction: row; flex-wrap: wrap; }
+  .fop-side__sec .fop-chip { white-space: nowrap; }
+
+  /* Action bar: one row, total left and buttons right. On an existing order
+     "Last modified" takes its own line above the buttons. */
+  .fop-bar {
+    flex-wrap: nowrap; align-items: flex-end; gap: 10px;
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+  }
+  .fop-bar__totals { width: auto; flex: none; align-self: center; }
+  .fop-bar__totals .fop-muted { display: block; font-size: 12px; }
+  .fop-bar__actions { width: auto; flex: 1; min-width: 0; gap: 8px; justify-content: flex-end; }
+  .fop-bar__actions .fop-btn { padding: 10px 8px; font-size: 15px; letter-spacing: .03em; }
+  .fop-lastmod { font-size: 12px; text-align: right; white-space: normal; }
+
+  /* Dialogs: a little more room for content. */
+  .fop-modal { padding: 10px; }
+  .fop-modal__box { padding: 16px 14px; gap: 12px; max-height: calc(100vh - 20px); }
+
+  /* Generation tabs scroll sideways instead of wrapping into rows. */
+  .fop-tabs { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; scrollbar-width: none; }
+  .fop-tab { padding: 8px 12px; }
+  .fop-tab__full { display: none; }
+  .fop-tab__short { display: inline; }
+}
+
+/* Phone line cards, calmer (2026-10-19): no "At branch" / "All branches"
+   counts (the strip and the stock box show stock by branch); strip labels
+   in the same small caps as Qty / Unit price; smaller chips; the line
+   comment folded behind an "Add line comment" button until it is used. */
+@media (max-width: 767px) {
+  .fop-grid .fop-line [data-cell="avail"],
+  .fop-grid .fop-line [data-cell="total"] { display: none; }
+
+  .fop-stockstrip { gap: 6px; padding-top: 8px; padding-bottom: 8px; }
+  .fop-stockstrip[data-cell="strip"] { margin-top: 8px; }
+  .fop-stockstrip .fop-strip__lbl,
+  .fop-side__sec .fop-strip__lbl {
+    font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
+  }
+  .fop-stockstrip .fop-chip { gap: 5px; padding: 1px 3px 1px 7px; font-size: 13px; }
+  .fop-stockstrip .fop-chip--break { padding-right: 7px; }
+  .fop-stockstrip .fop-stock { min-width: 24px; padding: 0 5px; }
+
+  .fop-stockstrip--cmt-closed .fop-strip__lbl,
+  .fop-stockstrip--cmt-closed .fop-line-comment { display: none; }
+  .fop-stockstrip--cmt-closed .fop-addcmt { display: inline-flex; }
+  .fop-addcmt { padding: 5px 10px; font-size: 13px; }
+}
