@@ -17,7 +17,7 @@ Product inquiry and order placement v1 keep the HubSpot CMS module layout (a thi
 
 ## Sign-in
 
-Every page loads `docs/auth.js`. Reps click **Sign in with HubSpot** and log in on HubSpot's own page. The n8n flow `auth-hubspot.json` checks with HubSpot that the login belongs to Fairbank's HubSpot account (43793456), reads the rep's Eclipse user ID, branch and territory from their HubSpot user, and returns a signed session token that lasts 12 hours. Reps no longer type an ID or a password, and no Microsoft login is needed.
+Every page loads `docs/auth.js`. Reps click **Sign in with HubSpot** and log in on HubSpot's own page. The n8n flow `auth-hubspot.json` checks with HubSpot that the login belongs to Fairbank's HubSpot account (43793456), reads the rep's Eclipse user ID, branch and territory from their HubSpot user, and returns a signed session token that lasts 48 hours. Every time a rep opens the site, `auth-refresh.json` renews it for another 48 hours (and re-checks the rep in HubSpot), so reps only sign in again after 48 hours away. Reps no longer type an ID or a password, and no Microsoft login is needed.
 
 Every call to an `e-order-placement/*` webhook sends that token, and n8n refuses calls without a valid one, so the webhooks are protected on the server, not just hidden by the page.
 
@@ -30,6 +30,7 @@ The workflow exports are in `n8n-flows/`. Import each one into n8n (Workflows â†
 | File | Webhook | Used by |
 |---|---|---|
 | `auth-hubspot.json` | `GET auth/hubspot` | HubSpot sign-in (OAuth redirect URI) |
+| `auth-refresh.json` | `GET auth/refresh` | `auth.js` (renews the session on every open) |
 | `user-lookup.json` | `GET user?e_user_id=` | not used since HubSpot sign-in |
 | `customer-lookup.json` | `GET customer?e_customer_id=` | order placement |
 | `create-order.json` | `POST create-order` | order placement |

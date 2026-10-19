@@ -22,6 +22,13 @@
    server, not just hidden by this page. The session's claims become
    window.FB_USER (same shape the old password gate used).
 
+   Sessions last 48 hours and slide: every time a page opens (at most
+   once every REFRESH_AFTER_S), it asks n8n (auth-refresh.json) for a
+   fresh 48-hour token. n8n checks the old token's signature and expiry
+   and re-reads the rep from HubSpot, so a rep removed from HubSpot (or
+   whose e_user_id was cleared) is signed out on their next open. A
+   session left unopened for 48 hours ends and needs HubSpot sign-in.
+
    Setup: CLIENT_ID below is the HubSpot app's client id (public, safe
    here). The client secret lives only in n8n. See README.md.
    ============================================================ */
@@ -41,6 +48,11 @@
   ].join(' ');
   var N8N = 'https://n8n.fairbankequipment.com/webhook/';
   var REDIRECT_URI = N8N + 'e-order-placement/auth/hubspot';
+  var REFRESH_URL = N8N + 'e-order-placement/auth/refresh';
+  var AUTH_PREFIX = 'e-order-placement/auth/';
+  // Renew on open only if the token is older than this (page reloads and
+  // tab switches between pages do not each call n8n).
+  var REFRESH_AFTER_S = 300;
   // Webhook path prefixes that need the session token. Add a prefix
   // only once that webhook uses the same JWT credential in n8n.
   var PROTECTED = ['e-order-placement/'];
@@ -137,7 +149,7 @@
   function isProtected(url) {
     if (url.indexOf(N8N) !== 0) return false;
     var rest = url.slice(N8N.length);
-    if (rest.indexOf(REDIRECT_URI.slice(N8N.length)) === 0) return false;
+    if (rest.indexOf(AUTH_PREFIX) === 0) return false;
     return PROTECTED.some(function (p) { return rest.indexOf(p) === 0; });
   }
 
@@ -170,11 +182,53 @@
     if (document.body) renderGate();
   }
 
-  if (user) {
-    // Lock as soon as the session expires, even if the rep is idle.
+  // Lock as soon as the session expires, even if the rep is idle.
+  var expiryTimer = null;
+  function scheduleExpiry() {
+    window.clearTimeout(expiryTimer);
     var left = Number(claims.exp) * 1000 - Date.now() - 30000;
-    window.setTimeout(function () { endSession('Your session ended. Sign in again.'); },
+    expiryTimer = window.setTimeout(function () { endSession('Your session ended. Sign in again.'); },
       Math.min(Math.max(left, 0), 2147483647));
+  }
+
+  // Take a newer session (from a refresh here or in another tab).
+  function adopt(next) {
+    var c = claimsOf(next);
+    if (!c || String(c.sub) !== String(claims.sub)) return false;
+    token = next;
+    claims = c;
+    lsSet(KEY_SESSION, next);
+    // Same object, so pages that kept a reference see the new values.
+    Object.assign(window.FB_USER, userOf(c));
+    scheduleExpiry();
+    return true;
+  }
+
+  // Sliding session: a fresh 48-hour token each time a page opens.
+  function refreshSession() {
+    if (Date.now() / 1000 - Number(claims.iat || 0) < REFRESH_AFTER_S) return;
+    nativeFetch(REFRESH_URL, { headers: { Authorization: 'Bearer ' + token } })
+      .then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (data) {
+          if (res.ok && data.token) { adopt(data.token); return; }
+          // 401 / 403: the session or the HubSpot user is no longer valid.
+          // Anything else (n8n or HubSpot down) keeps the current session.
+          if (res.status === 401 || res.status === 403) {
+            endSession(data.error || 'Your session ended. Sign in again.');
+          }
+        });
+      })
+      .catch(function () { /* offline: keep the current session */ });
+  }
+
+  if (user) {
+    scheduleExpiry();
+    refreshSession();
+    window.addEventListener('storage', function (e) {
+      if (e.key !== KEY_SESSION || !token) return;
+      if (e.newValue) adopt(e.newValue);
+      else endSession('You signed out in another tab.');
+    });
     document.addEventListener('DOMContentLoaded', addUserChip);
     return;
   }
