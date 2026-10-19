@@ -12,7 +12,7 @@ A static GitHub Pages site (`/docs`) that replaces the HubSpot CMS pages on `sal
 
 ```
 docs/
-  index.html                      redirect to product-inquiry
+  index.html                      redirect to order-placement (was product-inquiry until 2026-10-19)
   auth.js                         temporary password gate (all pages)
   favicon.png
   product-inquiry/                existing page (do not edit beyond the auth.js line)
