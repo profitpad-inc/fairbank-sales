@@ -3,6 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <script src="../auth.js"></script>
+  <script>
+    // Theme before first paint (no dark flash on a light page): the saved
+    // choice from the chip toggle, else the system setting. See app.js.
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem("fop-theme"); } catch (e) {}
+      if (t !== "light" && t !== "dark") t = window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", t);
+    })();
+  </script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Fairbank | Order Placement (side)</title>
   <link rel="icon" href="../favicon.png" type="image/png">

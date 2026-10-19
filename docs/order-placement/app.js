@@ -3529,4 +3529,46 @@
   // FB_USER (writer, branch) is known.
   if (window.FB_USER) boot();
   else window.addEventListener("fb:auth", boot, { once: true });
+
+  // ── Light / dark theme toggle ──────────────────────────────────────────
+  // The <head> of each page sets html[data-theme] before paint (saved
+  // choice, else the system setting). This adds a sun / moon button as the
+  // first item of the sign-in chip (auth.js adds the chip on
+  // DOMContentLoaded when already signed in, or after the gate) and saves
+  // the choice in localStorage ("fop-theme").
+  var THEME_KEY = "fop-theme";
+  var SUN_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>';
+  var MOON_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+
+  function currentTheme() {
+    return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+  }
+
+  function paintThemeBtn(btn) {
+    var light = currentTheme() === "light";
+    // The icon shows the theme a click switches to.
+    btn.innerHTML = light ? MOON_ICON : SUN_ICON;
+    btn.setAttribute("aria-label", light ? "Switch to dark mode" : "Switch to light mode");
+    btn.title = btn.getAttribute("aria-label");
+  }
+
+  function initThemeToggle() {
+    var chip = document.getElementById("fb-user-chip");
+    if (!chip || chip.querySelector(".fop-theme-btn")) return;
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "fop-theme-btn";
+    paintThemeBtn(btn);
+    btn.addEventListener("click", function () {
+      var next = currentTheme() === "light" ? "dark" : "light";
+      document.documentElement.setAttribute("data-theme", next);
+      try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* private mode: not saved */ }
+      paintThemeBtn(btn);
+    });
+    chip.insertBefore(btn, chip.firstChild);
+  }
+
+  initThemeToggle();
+  document.addEventListener("DOMContentLoaded", initThemeToggle);
+  window.addEventListener("fb:auth", initThemeToggle);
 })();

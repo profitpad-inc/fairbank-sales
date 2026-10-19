@@ -170,7 +170,8 @@
       'padding:6px 12px;font:500 12px "Barlow",sans-serif;color:#8fa4c2;background:rgba(8,21,41,.9);' +
       'border:1px solid #2a4466;border-radius:999px;';
     var name = document.createElement('span');
-    name.textContent = (u.name || u.e_user_id) + ' · ' + u.e_user_id;
+    // Name only; the Eclipse user id is shown only when there is no name.
+    name.textContent = u.name || u.e_user_id;
     var out = document.createElement('button');
     out.type = 'button';
     out.textContent = 'Sign out';
