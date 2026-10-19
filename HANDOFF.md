@@ -13,7 +13,7 @@ A static GitHub Pages site (`/docs`) that replaces the HubSpot CMS pages on `sal
 ```
 docs/
   index.html                      redirect to order-placement (was product-inquiry until 2026-10-19)
-  auth.js                         temporary password gate (all pages)
+  auth.js                         Sign in with HubSpot gate + session token on webhook calls (all pages)
   favicon.png
   product-inquiry/                existing page (do not edit beyond the auth.js line)
   order-placement/                new keyboard-first order entry (plain page: index.html, styles.css, app.js)
@@ -21,6 +21,7 @@ docs/
                                   details.html = same app, a Details dialog per line
   archive/order-placement-v1/     port of the deal-based Branch Fulfillment card
 n8n-flows/
+  auth-hubspot.json               GET  e-order-placement/auth/hubspot   (HubSpot OAuth redirect URI)
   user-lookup.json                GET  e-order-placement/user
   customer-lookup.json            GET  e-order-placement/customer
   create-order.json               POST e-order-placement/create-order
@@ -49,17 +50,39 @@ Style: navy and gold palette, Barlow and Barlow Condensed fonts. The colour toke
 
 ## Sign-in (`docs/auth.js`)
 
-- Loaded synchronously in `<head>` of every page. The script path is relative: `auth.js`, `../auth.js` or `../../auth.js`.
-- When locked, it adds `html.fb-locked`, hides every `body` child, and shows a form asking for the Eclipse user ID and the password.
-- The user ID box only holds capitals (2026-10-19, on request): typed or pasted letters are uppercased as they go in (caret kept), and a remembered ID is uppercased when the form opens. The ID was already uppercased on submit.
-- The password is checked as SHA-256 against `PASSWORD_HASH`. **The current hash is for the placeholder password `fairbank`. Change it before going live.**
-- On success it calls `GET e-order-placement/user?e_user_id=`. It then stores `fb_user` (the response), `fb_auth` (the hash) and `fb_e_user_id` (remembered for next time) in localStorage. Changing the hash signs everyone out.
-- It exposes `window.FB_USER` and `window.fbSignOut()`, fires a `fb:auth` event on sign-in, and shows a "name · Sign out" chip top-right (the Eclipse user id was dropped on request 2026-10-19; it shows only when the user has no name). Order-placement adds a theme toggle as the chip's first item.
-- This is browser-only. The webhooks are public and unauthenticated. Microsoft login will replace this file.
+Sign in with HubSpot (2026-10-19, on request, branch `feature/hubspot-login`: "confirm 1000% that the user is logged into HubSpot", without Microsoft login). Replaces the shared password gate. **Not live yet:** needs the HubSpot app, two n8n credentials and the client id (see "Going live with HubSpot sign-in" below). The site and the flows must ship together: once the webhooks require the token, the old `auth.js` can no longer call them.
+
+How it works:
+1. Locked page: `html.fb-locked` hides every `body` child and shows a "Sign in with HubSpot" button (same dark gate style as before).
+2. The button makes a random nonce (kept in `sessionStorage["fb_nonce"]`) and sends the browser to `https://app.hubspot.com/oauth/43793456/authorize` (pinned to Fairbank's account) with `client_id`, `redirect_uri` (the n8n flow), `scope` (`oauth`) and `state` = base64url(JSON `{ r: current URL without the fragment, n: nonce }`).
+3. HubSpot logs the rep in (or uses their existing HubSpot login), asks for consent, and sends the browser to the n8n flow `auth-hubspot` with a one-time `code`.
+4. The flow (see below) proves the login with HubSpot and redirects back to `r` with `#fb_session=<JWT>&fb_nonce=<n>`, or `#fb_auth_error=<message>`.
+5. `auth.js` accepts the session only if the nonce matches the one this tab stored (a link with someone else's token is ignored), the token's `hub_id` is `43793456`, it has an `e_user_id` and it has more than 30s left. It stores it in `localStorage["fb_session"]` and strips the fragment with `history.replaceState`.
+
+Then:
+- `window.FB_USER` is built from the token's claims, same shape as before: `{ e_user_id, name, email, default_branch, territory, hs_user_id, hs_owner_id }`. `window.fbSignOut()` and the "name · Sign out" chip are unchanged (the order page hides the chip and uses its own header menu). The `fb:auth` event is no longer fired: a signed-in page is always signed in when `auth.js` finishes, because the return from HubSpot is a full page load.
+- `auth.js` wraps `window.fetch`: calls to `https://n8n.fairbankequipment.com/webhook/` + a `PROTECTED` prefix (only `e-order-placement/`, and never the sign-in flow) get `Authorization: Bearer <session>`. A 401 or 403 from those webhooks, or a call after the session expired, locks the page again with "Your session ended. Sign in again." A timer also locks the page 30s before expiry. Unsaved work on the page is lost when that happens (the sign-in round trip reloads the page).
+- `fairbank-product-inquiry` (not in this repo, used by product-inquiry and for product search and pricing in order placement) is **not** protected and gets no session header: it already has its own temporary auth header (see Front end). Move it to the same JWT credential in n8n, then add its prefix to `PROTECTED`.
+- The old keys `fb_auth`, `fb_user` and `fb_e_user_id` are deleted on load, so reps on the password gate are signed out once.
+- The token's claims are only read in the browser to decide whether to show the page; the signature is checked by n8n on every call.
+
+Checked in the browser pane (2026-10-19, localhost, with hand-made unsigned tokens, so no n8n or HubSpot involved): gate shows; the button with the placeholder client id shows "HubSpot sign-in is not set up yet"; a return with the right nonce signs in and strips the fragment; wrong nonce, missing nonce, wrong `hub_id`, an expired stored token and `#fb_auth_error` all keep the page locked with the right message; with a stubbed `fetch`, `e-order-placement/*` calls (string URL and `Request`, GET and POST) carry the Bearer header and keep their `Content-Type`, `fairbank-product-inquiry` and the sign-in flow do not, and a 403 locks the page. CORS preflight checked with curl `OPTIONS` on the live `e-order-placement/order` and `customer` webhooks: n8n answers 204 with `Access-Control-Allow-Headers: authorization`. **Not checked: the real round trip through HubSpot and n8n** (no HubSpot app exists yet).
+
+### Going live with HubSpot sign-in
+
+1. **HubSpot app.** Create an app with OAuth in a HubSpot developer account. Redirect URL exactly `https://n8n.fairbankequipment.com/webhook/e-order-placement/auth/hubspot`. Scope `oauth`. UNVERIFIED: which app type allows OAuth for one company's account (HubSpot's older "private apps" use fixed tokens, not OAuth; a public app that is not listed, or a newer project-based app set to OAuth, should work), whether `oauth` alone is accepted as the only scope, and whether reps without admin rights can approve the consent screen (test with one non-admin rep).
+2. **n8n credential "Fairbank session (JWT)"**, type JWT Auth: key type passphrase, algorithm HS256, a long random secret (for example `openssl rand -base64 48`). Used to sign sessions and by every protected webhook.
+3. **n8n credential "HubSpot sign-in app (OAuth client)"**, type Custom Auth, JSON `{ "body": { "client_id": "<id>", "client_secret": "<secret>" } }`. UNVERIFIED that n8n merges Custom Auth `body` fields into a form-urlencoded body; if HubSpot answers that the client id or secret is missing, add `client_id` and `client_secret` as body parameters on the two HTTP nodes in n8n instead (and keep the secret out of any export committed here).
+4. Import `auth-hubspot.json`, pick both credentials, activate it.
+5. On every other flow's Webhook node, pick the JWT credential (the repo has `REPLACE_WITH_JWT_CREDENTIAL_ID`).
+6. Put the app's client id in `CLIENT_ID` at the top of `docs/auth.js` (the client id is public; the secret stays in n8n).
+7. Deploy the site at the same time as step 5.
+8. After testing, remove the localhost entry (`RETURN_LOCAL`) from the flow's `Validate` config.
 
 ## n8n flows
 
 General rules:
+- Session check (2026-10-19, branch `feature/hubspot-login`): every Webhook node except the sign-in flow has `authentication: jwtAuth` with the credential "Fairbank session (JWT)" (id placeholder `REPLACE_WITH_JWT_CREDENTIAL_ID` until it exists in n8n). n8n checks the Bearer token's signature and expiry before the flow runs and refuses the call otherwise (UNVERIFIED: the exact status code and whether that refusal carries CORS headers; `auth.js` treats 401 and 403 as "session ended", and a refusal without CORS headers reaches the page as a network error instead). The flows do not yet use the token's identity (for example to force `writer` to the signed-in rep on create-order); that would need the decoded claims, which n8n's JWT webhook auth is UNVERIFIED to pass on.
 - Webhook nodes use `responseMode: responseNode` with CORS `allowedOrigins: *`. This can be tightened to `https://profitpad-inc.github.io,https://sales.fairbankequipment.com` once local testing is done.
 - Every path ends in a single `Respond` node that sends `$json.body` with status `$json.statusCode`. Each gate Code node emits `{ ok, statusCode, body }`; IF nodes route `ok: false` straight to `Respond`.
 - HubSpot and Eclipse nodes run with `onError: continueRegularOutput`. The Code node after each one checks for `json.error`.
@@ -67,7 +90,18 @@ General rules:
 - Credentials: HubSpot `hubspotApi` id `4HKK5aFFmTGesa3H`, Eclipse `eclipseApi` id `PVIgwtzRL74PSVft` (the IDs the user supplied for this project).
 - The JSON was generated by a small Python builder, not exported from n8n. After importing, open each flow once and check the nodes resolved their parameters. Re-export from n8n after any edit there, so the repo matches what is live.
 
+### auth-hubspot (`GET auth/hubspot?code=&state=`)
+HubSpot's OAuth redirect URI (2026-10-19). Built by a Python builder like the others; nothing in it has run in n8n yet. The Code nodes were run in node with mocked HubSpot answers (good sign-in, cancelled consent, bad or missing state, return URL on another site, token step failure, wrong account, user without `e_user_id`, no user found).
+1. `Validate`: config (`HUB_ID` 43793456, redirect URI, `SESSION_HOURS` 12, allowed return sites `https://sales.fairbankequipment.com`, `https://profitpad-inc.github.io`, plus `http://localhost` / `127.0.0.1` on any port for testing). Decodes `state`; a return URL on any other site falls back to `https://sales.fairbankequipment.com/`. Needs a nonce and a `code`; HubSpot's `error` (for example the rep clicked cancel) becomes a message.
+2. `HubSpot: code for token`: `POST https://api.hubspot.com/oauth/2026-09/token`, form body `grant_type=authorization_code`, `code`, `redirect_uri`, plus `client_id` / `client_secret` from the Custom Auth credential.
+3. `HubSpot: who is this token for`: `POST https://api.hubspot.com/oauth/2026-09/token/introspect`, `token_type_hint=access_token`, `token`. HubSpot answers with `user` (email), `user_id` and `hub_id` (per HubSpot's 2026-09 docs; not yet seen live). `Check identity` refuses any `hub_id` but 43793456. **This is the proof that the rep is a signed-in user of Fairbank's HubSpot.**
+4. `HubSpot: find user`: Users search, `hs_internal_user_id` = `user_id` OR `hs_email` = email (both are standard user properties; seen on ProfitPad's own HubSpot account through the HubSpot connector, which is not connected to Fairbank's). `Build session` prefers the record whose `hs_internal_user_id` matches (UNVERIFIED that it equals the token's `user_id`), else the email match. Refuses a user without `e_user_id`. Same placeholder branch / territory property names as user-lookup.
+5. `Sign session` (n8n JWT node, HS256, the JWT credential): claims `{ iss: "fairbank-sales", sub: <HubSpot user id>, iat, exp (12 h), hub_id, e_user_id, name, email, default_branch, territory, hs_user_id, hs_owner_id }`. UNVERIFIED: that the JWT node puts the token in `json.token` (the `Success` node reads that and shows "Could not create a session" otherwise).
+6. `Redirect` (Respond to Webhook, redirect) to `<return URL>#fb_session=<token>&fb_nonce=<nonce>`; every failure path redirects to `<return URL>#fb_auth_error=<message>` instead. The token goes in the fragment so it never reaches a server log.
+The HubSpot access token is used once and thrown away; the site never sees it.
+
 ### user-lookup (`GET user?e_user_id=`)
+- No longer called by `auth.js` (2026-10-19, HubSpot sign-in); kept for reference. It now needs a session token too.
 - HubSpot Owners → Users → Search, filtering on `e_user_id` EQ.
 - Returns `{ e_user_id, name, email, default_branch, territory, hs_user_id, hs_owner_id }`.
 - Territory doubles as the outside salesperson.
@@ -328,8 +362,7 @@ The user calls this page "order-placement v2".
 - Confirm what Eclipse print status codes `N`, `Q`, `H`, `P`, `A` mean, then show labels instead of the codes.
 - `update-bid.json` and `cancel-order.json` were regenerated with no behaviour change; re-import only if n8n's copies drifted.
 
-- Set the real password hash in `docs/auth.js`.
 - Import and activate the flows, then run the GET checks (`user`, `customer`, `order?e_sorder_id=`) and test the POST flows (create-order, update-bid, cancel-order) on a throwaway order.
 - Point the HubSpot customer card link at `/order-placement/?e_customer_id=…`.
 - Set up the DNS and custom domain for `sales.fairbankequipment.com`.
-- Replace `auth.js` with Microsoft login.
+- HubSpot sign-in (branch `feature/hubspot-login`): create the HubSpot app and n8n credentials, set `CLIENT_ID`, import `auth-hubspot.json`, switch the webhooks to the JWT credential and deploy together (see Sign-in → Going live). Then: test with a non-admin rep, move `fairbank-product-inquiry` to the same JWT credential, drop localhost from the allowed return sites, tighten CORS, and decide whether flows should take `writer` from the session instead of the page.

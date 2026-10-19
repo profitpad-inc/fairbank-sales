@@ -8,7 +8,8 @@
         "responseMode": "responseNode",
         "options": {
           "allowedOrigins": "*"
-        }
+        },
+        "authentication": "jwtAuth"
       },
       "id": "d1d88083-312b-5126-8fa9-4ac46814ec5d",
       "name": "Webhook",
@@ -18,7 +19,13 @@
         0,
         0
       ],
-      "webhookId": "5d8d3c08-23ce-5348-a2f8-39eb5545721e"
+      "webhookId": "5d8d3c08-23ce-5348-a2f8-39eb5545721e",
+      "credentials": {
+        "jwtAuth": {
+          "id": "REPLACE_WITH_JWT_CREDENTIAL_ID",
+          "name": "Fairbank session (JWT)"
+        }
+      }
     },
     {
       "parameters": {

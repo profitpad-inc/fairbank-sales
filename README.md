@@ -17,21 +17,20 @@ Product inquiry and order placement v1 keep the HubSpot CMS module layout (a thi
 
 ## Sign-in
 
-Every page loads `docs/auth.js`, a temporary browser-only password gate. Reps enter the shared password and their Eclipse user ID (`e_user_id`). The ID is looked up in HubSpot to get the rep's name, default branch and territory, and it is remembered in the browser. Microsoft login will replace this file later.
+Every page loads `docs/auth.js`. Reps click **Sign in with HubSpot** and log in on HubSpot's own page. The n8n flow `auth-hubspot.json` checks with HubSpot that the login belongs to Fairbank's HubSpot account (43793456), reads the rep's Eclipse user ID, branch and territory from their HubSpot user, and returns a signed session token that lasts 12 hours. Reps no longer type an ID or a password, and no Microsoft login is needed.
 
-The gate hides the pages, but it does not secure the n8n webhooks. To change the password, put the SHA-256 hex of the new password into `PASSWORD_HASH` in `docs/auth.js`:
+Every call to an `e-order-placement/*` webhook sends that token, and n8n refuses calls without a valid one, so the webhooks are protected on the server, not just hidden by the page.
 
-```bash
-node -e "console.log(require('crypto').createHash('sha256').update(process.argv[1]).digest('hex'))" 'new-password'
-```
+Setup (HubSpot app, two n8n credentials, the client id in `auth.js`) is in [HANDOFF.md](HANDOFF.md), under "Going live with HubSpot sign-in". The site and the n8n flows have to go live together.
 
 ## n8n workflows
 
-The workflow exports are in `n8n-flows/`. Import each one into n8n (Workflows → Import from file), check the credentials on the HubSpot and Eclipse nodes, and activate it. All the order webhooks live under `https://n8n.fairbankequipment.com/webhook/e-order-placement/`.
+The workflow exports are in `n8n-flows/`. Import each one into n8n (Workflows → Import from file), check the credentials on the HubSpot and Eclipse nodes and the JWT credential on the Webhook node, and activate it. All the order webhooks live under `https://n8n.fairbankequipment.com/webhook/e-order-placement/`.
 
 | File | Webhook | Used by |
 |---|---|---|
-| `user-lookup.json` | `GET user?e_user_id=` | `auth.js` |
+| `auth-hubspot.json` | `GET auth/hubspot` | HubSpot sign-in (OAuth redirect URI) |
+| `user-lookup.json` | `GET user?e_user_id=` | not used since HubSpot sign-in |
 | `customer-lookup.json` | `GET customer?e_customer_id=` | order placement |
 | `create-order.json` | `POST create-order` | order placement |
 | `order-lookup.json` | `GET order?e_sorder_id=` | order placement (existing order, every generation) |
@@ -54,11 +53,11 @@ Serve `docs/` with any static server, for example:
 python3 -m http.server 8000 --directory docs
 ```
 
-Then open `http://localhost:8000/order-placement/`. The page needs a secure context (https or localhost) for the password check.
+Then open `http://localhost:8000/order-placement/`. Sign-in sends you back to localhost after HubSpot, so the sign-in flow must be live in n8n for local testing.
 
 ## Going live on sales.fairbankequipment.com
 
-1. Import and activate the n8n workflows, then test them on a throwaway order.
+1. Set up HubSpot sign-in (see HANDOFF.md), import and activate the n8n workflows, then test them on a throwaway order.
 2. Point the `sales.fairbankequipment.com` DNS record at GitHub Pages and set the custom domain in the repo's Pages settings.
 3. Update the HubSpot customer card link to `https://sales.fairbankequipment.com/order-placement/?e_customer_id={{e_customer_id}}`.
 

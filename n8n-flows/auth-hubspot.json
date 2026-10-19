@@ -1,0 +1,568 @@
+{
+  "name": "e-order-placement: HubSpot sign-in",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "e-order-placement/auth/hubspot",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "a2e48115-5759-5408-b99c-23df7a0bceb2",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "246f1687-42bb-5d5b-8a55-513404a66abf"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Config. HUB_ID is Fairbank's HubSpot account (the id in the app's\n// HubSpot record links). RETURN_ORIGINS are the only sites a session\n// token is ever sent back to. Remove the localhost entries once local\n// testing is done.\nconst CONFIG = {\n  HUB_ID: '43793456',\n  REDIRECT_URI: 'https://n8n.fairbankequipment.com/webhook/e-order-placement/auth/hubspot',\n  SESSION_HOURS: 12,\n  DEFAULT_RETURN: 'https://sales.fairbankequipment.com/',\n  RETURN_ORIGINS: [\n    'https://sales.fairbankequipment.com',\n    'https://profitpad-inc.github.io',\n  ],\n  RETURN_LOCAL: /^http:\\/\\/(localhost|127\\.0\\.0\\.1)(:\\d+)?$/,\n};\n\nconst q = $input.first().json.query || {};\n\n// state = base64url(JSON { r: return URL, n: nonce }), made by auth.js.\nlet returnUrl = CONFIG.DEFAULT_RETURN;\nlet nonce = '';\ntry {\n  const b64 = String(q.state || '').replace(/-/g, '+').replace(/_/g, '/');\n  const s = JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));\n  const u = new URL(String(s.r || ''));\n  if (CONFIG.RETURN_ORIGINS.includes(u.origin) || CONFIG.RETURN_LOCAL.test(u.origin)) {\n    u.hash = '';\n    returnUrl = u.toString();\n  }\n  nonce = String(s.n || '').slice(0, 64);\n} catch (e) { /* bad state: fall back to the default page, no nonce */ }\n\nconst fail = (msg) => [{ json: { ok: false,\n  redirect: returnUrl + '#fb_auth_error=' + encodeURIComponent(msg) } }];\n\nif (q.error) return fail('HubSpot sign-in was cancelled or refused (' + String(q.error) + ').');\nif (!nonce) return fail('Sign-in link was invalid. Try again.');\nconst code = String(q.code || '').trim();\nif (!code) return fail('HubSpot did not return a sign-in code. Try again.');\n\nreturn [{ json: { ok: true, code, returnUrl, nonce, ...CONFIG } }];\n"
+      },
+      "id": "7063eb6c-db99-511a-8219-98635948a9c2",
+      "name": "Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "04da85b0-f5d1-5f46-a392-25be11d652e6",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "20a248e0-e793-5b8f-8574-b5f1be662290",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubspot.com/oauth/2026-09/token",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "authorization_code"
+            },
+            {
+              "name": "code",
+              "value": "={{ $json.code }}"
+            },
+            {
+              "name": "redirect_uri",
+              "value": "={{ $json.REDIRECT_URI }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "efe6629d-d2f9-5450-9578-058ef24961c0",
+      "name": "HubSpot: code for token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        0
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "REPLACE_WITH_OAUTH_CREDENTIAL_ID",
+          "name": "HubSpot sign-in app (OAuth client)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const cfg = $('Validate').first().json;\nconst r = $input.first().json;\nconst fail = (msg) => [{ json: { ok: false,\n  redirect: cfg.returnUrl + '#fb_auth_error=' + encodeURIComponent(msg) } }];\nif (r.error || !r.access_token) {\n  return fail('HubSpot sign-in failed at the token step. Try again.');\n}\nreturn [{ json: { ok: true, access_token: r.access_token } }];\n"
+      },
+      "id": "3142c189-5c65-5c52-9e7d-0feaf33de1d8",
+      "name": "Check token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "48ca3843-4e62-53d2-8b75-f6600bec853d",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3d8a7cec-f3a4-52cc-98aa-53976a00aee5",
+      "name": "Token ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubspot.com/oauth/2026-09/token/introspect",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "token_type_hint",
+              "value": "access_token"
+            },
+            {
+              "name": "token",
+              "value": "={{ $json.access_token }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5fc012ff-0281-5474-9d2e-efaabd3f1c2f",
+      "name": "HubSpot: who is this token for",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        0
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "REPLACE_WITH_OAUTH_CREDENTIAL_ID",
+          "name": "HubSpot sign-in app (OAuth client)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const cfg = $('Validate').first().json;\nconst r = $input.first().json;\nconst fail = (msg) => [{ json: { ok: false,\n  redirect: cfg.returnUrl + '#fb_auth_error=' + encodeURIComponent(msg) } }];\nif (r.error) return fail('HubSpot sign-in failed at the identity step. Try again.');\n// The proof: HubSpot itself says which account and user the token is for.\nif (String(r.hub_id || '') !== cfg.HUB_ID) {\n  return fail('That HubSpot login is not in the Fairbank account.');\n}\nconst hsUserId = String(r.user_id || '');\nconst email = String(r.user || '').trim().toLowerCase();\nif (!hsUserId && !email) return fail('HubSpot did not say who signed in. Try again.');\nconst userProps = [\n  'e_user_id', 'e_default_branch', 'e_territory', 'hs_internal_user_id',\n  'hs_given_name', 'hs_family_name', 'hs_email', 'hs_searchable_calculated_name',\n];\nconst groups = [];\nif (hsUserId) groups.push({ filters: [{ propertyName: 'hs_internal_user_id', operator: 'EQ', value: hsUserId }] });\nif (email) groups.push({ filters: [{ propertyName: 'hs_email', operator: 'EQ', value: email }] });\nreturn [{ json: { ok: true, hsUserId, email, userProps, filter: { filterGroups: groups } } }];\n"
+      },
+      "id": "189c0e22-b03d-58d5-a0f9-484351487b92",
+      "name": "Check identity",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "9960ada4-6b21-5cab-b2ff-abfd76809279",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "68c30bab-9d4b-56be-b5cf-abcb91e3f611",
+      "name": "Fairbank user?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "owners",
+        "objectType": "users",
+        "operation": "search",
+        "searchInputMode": "json",
+        "filterJson": "={{ JSON.stringify($json.filter) }}",
+        "returnAll": false,
+        "limit": 10,
+        "searchOptions": {
+          "errorWhenNotFound": false,
+          "properties": "={{ $json.userProps }}"
+        }
+      },
+      "id": "da01d491-b85c-539f-b57d-f21b114449f2",
+      "name": "HubSpot: find user",
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        2160,
+        0
+      ],
+      "credentials": {
+        "hubspotApi": {
+          "id": "4HKK5aFFmTGesa3H",
+          "name": "HubSpot account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Same property names as the user-lookup flow. Branch and territory\n// names are UNVERIFIED placeholders there too.\nconst PROPS = { idProp: 'e_user_id', branchProp: 'e_default_branch', territoryProp: 'e_territory' };\nconst cfg = $('Validate').first().json;\nconst who = $('Check identity').first().json;\nconst r = $input.first().json;\nconst fail = (msg) => [{ json: { ok: false,\n  redirect: cfg.returnUrl + '#fb_auth_error=' + encodeURIComponent(msg) } }];\nif (r.error) return fail('HubSpot user lookup failed. Try again.');\nconst results = Array.isArray(r.results) ? r.results : (r.id ? [r] : []);\n// Prefer the record whose user id matches; the email match is a fallback.\nconst u = results.find(x => String((x.properties || {}).hs_internal_user_id || '') === who.hsUserId)\n  || results.find(x => String((x.properties || {}).hs_email || '').toLowerCase() === who.email);\nif (!u) return fail('Your HubSpot user was not found in the Fairbank account.');\nconst p = u.properties || {};\nconst eUserId = String(p[PROPS.idProp] || '').trim().toUpperCase();\nif (!eUserId) {\n  return fail('Your HubSpot user has no Eclipse user ID (e_user_id). Ask an admin to add it.');\n}\nconst now = Math.floor(Date.now() / 1000);\nconst name = [p.hs_given_name, p.hs_family_name].filter(Boolean).join(' ') || p.hs_searchable_calculated_name || '';\nreturn [{ json: { ok: true, claims: {\n  iss: 'fairbank-sales',\n  sub: who.hsUserId || String(u.id || ''),\n  iat: now,\n  exp: now + cfg.SESSION_HOURS * 3600,\n  hub_id: cfg.HUB_ID,\n  e_user_id: eUserId,\n  name,\n  email: p.hs_email || who.email,\n  default_branch: p[PROPS.branchProp] || '',\n  territory: p[PROPS.territoryProp] || '',\n  hs_user_id: String(u.id || ''),\n  hs_owner_id: String((u.owner && u.owner.id) || ''),\n} } }];\n"
+      },
+      "id": "9e4a1f46-8205-5284-a95b-15b500c35c6c",
+      "name": "Build session",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "328f82bd-766b-5242-997f-cb4a76787557",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3284b87f-f8c6-5744-8667-b395a3e2bc24",
+      "name": "Has e_user_id?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sign",
+        "useJson": true,
+        "claimsJson": "={{ JSON.stringify($json.claims) }}",
+        "options": {
+          "algorithm": "HS256"
+        }
+      },
+      "id": "445f1468-72d4-5b2d-bfc5-4790e88051d3",
+      "name": "Sign session",
+      "type": "n8n-nodes-base.jwt",
+      "typeVersion": 1,
+      "position": [
+        2880,
+        0
+      ],
+      "credentials": {
+        "jwtAuth": {
+          "id": "REPLACE_WITH_JWT_CREDENTIAL_ID",
+          "name": "Fairbank session (JWT)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const cfg = $('Validate').first().json;\nconst token = $input.first().json.token;\nif (!token) {\n  return [{ json: { redirect: cfg.returnUrl + '#fb_auth_error=' + encodeURIComponent('Could not create a session. Try again.') } }];\n}\n// In the fragment, so the token never reaches a server log.\nreturn [{ json: { redirect: cfg.returnUrl + '#fb_session=' + encodeURIComponent(token)\n  + '&fb_nonce=' + encodeURIComponent(cfg.nonce) } }];\n"
+      },
+      "id": "1e67e0e6-1a9a-5b8b-8b5e-fe366e9e8eaf",
+      "name": "Success",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "redirect",
+        "redirectURL": "={{ $json.redirect }}",
+        "options": {}
+      },
+      "id": "09a0c139-4c67-59ce-b1da-f5f261908ae4",
+      "name": "Redirect",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        3360,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: code for token",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Redirect",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: code for token": {
+      "main": [
+        [
+          {
+            "node": "Check token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check token": {
+      "main": [
+        [
+          {
+            "node": "Token ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Token ok?": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: who is this token for",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Redirect",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: who is this token for": {
+      "main": [
+        [
+          {
+            "node": "Check identity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check identity": {
+      "main": [
+        [
+          {
+            "node": "Fairbank user?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fairbank user?": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: find user",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Redirect",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: find user": {
+      "main": [
+        [
+          {
+            "node": "Build session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build session": {
+      "main": [
+        [
+          {
+            "node": "Has e_user_id?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has e_user_id?": {
+      "main": [
+        [
+          {
+            "node": "Sign session",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Redirect",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign session": {
+      "main": [
+        [
+          {
+            "node": "Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Success": {
+      "main": [
+        [
+          {
+            "node": "Redirect",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "active": false
+}
