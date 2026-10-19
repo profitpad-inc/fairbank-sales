@@ -295,6 +295,11 @@
 
   function initApp(root) {
     var user = window.FB_USER || {};
+    var header = initHeader(root, user);
+    // HS Deal / HS Customer follow the open order and customer (every render).
+    function paintHeader() {
+      header.querySelector('[data-cell="hdr-links"]').innerHTML = dealLinkHtml() + customerLinkHtml();
+    }
     // Layout variant: <main id="app" data-layout="side"> (side.html)
     // shows stock + qty breaks for every line in a box to the
     // right of the lines, open by default. data-layout="details"
@@ -990,6 +995,7 @@
       var newSide = root.querySelector('[data-cell="side"]');
       if (newSide) newSide.scrollTop = sideTop;
       scrollActiveTab();
+      paintHeader();
       afterRender();
     }
 
@@ -1026,6 +1032,16 @@
     function autosizeNotesPair() {
       var pair = [root.querySelector('[data-head="shippingInstructions"]'), root.querySelector('[data-head="internalNotes"]')]
         .filter(Boolean);
+      // Phones stack them, each its own height. An empty, unfocused one is
+      // only its label there (styles.css stretches the box over the row),
+      // so it takes no height of its own.
+      if (window.matchMedia && window.matchMedia("(max-width: 767px)").matches) {
+        pair.forEach(function (el) {
+          if (getComputedStyle(el).position === "absolute") el.style.height = "";
+          else autosize(el);
+        });
+        return;
+      }
       pair.forEach(function (el) { el.style.height = "auto"; });
       var h = Math.max.apply(null, pair.map(function (el) { return el.scrollHeight; }).concat([0]));
       pair.forEach(function (el) { el.style.height = h + 2 + "px"; });
@@ -1059,6 +1075,42 @@
       });
     }
 
+    // "2026-10-20" (also 2026/10/20 or 2026-10-2) → Date, else null.
+    function isoDateOnly(s) {
+      var m = /^\s*(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})\s*$/.exec(s || "");
+      if (!m) return null;
+      var d = new Date(+m[1], +m[2] - 1, +m[3]);
+      return d.getMonth() === +m[2] - 1 && d.getDate() === +m[3] ? d : null;
+    }
+
+    // Flatpickr parseDate for one picker: typed YYYY-MM-DD first, then the
+    // given format ("M j, Y" for the visible field, "Y-m-d" for state). The
+    // static flatpickr.parseDate has no config, so this isn't called again.
+    // Typed text (read with altFormat) that isn't a date, or is outside the
+    // allowed range, keeps the current date instead of clearing it (an empty
+    // field still clears). Internal parses (minDate, setDate) use dateFormat.
+    function typedDateParser(getFp) {
+      return function (str, format) {
+        var d = isoDateOnly(str) || window.flatpickr.parseDate(str, format);
+        var fp = getFp();
+        var typed = fp && fp.config && format === fp.config.altFormat;
+        if (typed && (!d || !fp.isEnabled(d))) return fp.selectedDates[0];
+        return d || undefined;
+      };
+    }
+
+    // Phone width (the styles.css breakpoint) or a touch screen without
+    // hover: date fields can't be typed in and keep "Oct 26, 2026".
+    function phoneDates() {
+      return !!(window.matchMedia && window.matchMedia("(max-width: 767px), (hover: none) and (pointer: coarse)").matches);
+    }
+
+    // While the calendar is open, the visible field shows YYYY-MM-DD
+    // (only where it can be typed in).
+    function showIso(fp) {
+      if (fp && fp.isOpen && fp.altInput && fp.config.allowInput) fp.altInput.value = fp.input.value;
+    }
+
     function initDatePickers() {
       datePickers.forEach(function (fp) { fp.destroy(); });
       datePickers = [];
@@ -1078,6 +1130,13 @@
             minDate: headLocked() ? null : (key === "requiredDate" && state.header.shipDate) || "today",
             clickOpens: !headLocked(),
             disableMobile: true,           // keep the themed calendar on phones
+            // The field can be typed in. While the calendar is open it shows
+            // YYYY-MM-DD (onOpen / onValueUpdate below); typed text is read
+            // on Enter or blur by typedDateParser(). Not on phones or touch
+            // tablets (on request): there the field stays a plain tap-to-open
+            // "Oct 26, 2026", with no keyboard.
+            allowInput: !phoneDates(),
+            parseDate: typedDateParser(function () { return fp; }),
             onChange: function (_dates, dateStr) {
               state.header[key] = dateStr;
               if (key === "shipDate" && !headLocked()) {
@@ -1095,7 +1154,21 @@
               if (key === "requiredDate" && h.shipDate && (!h.requiredDate || h.requiredDate < h.shipDate)) {
                 fp.setDate(h.shipDate, true);
               }
+              showIso(fp);
+              // Selected, so typing replaces the date.
+              if (fp.altInput && fp.config.allowInput && document.activeElement === fp.altInput) fp.altInput.select();
             },
+            onValueUpdate: function () { showIso(fp); },
+            // Back to "Oct 26, 2026" once closed (an unparseable entry
+            // falls back to the selected date).
+            onClose: function () {
+              if (fp.altInput) fp.altInput.value = fp.selectedDates.length ? fp.formatDate(fp.selectedDates[0], fp.config.altFormat) : "";
+            },
+          });
+          // Typing a full YYYY-MM-DD moves the calendar to that month.
+          if (fp.altInput) fp.altInput.addEventListener("input", function () {
+            var d = isoDateOnly(fp.altInput.value);
+            if (d && fp.isOpen) fp.jumpToDate(d);
           });
           if (fp.altInput) fp.altInput.setAttribute("aria-label", key === "shipDate" ? "Ship date" : "Required date");
           if (fp.altInput && headLocked()) fp.altInput.disabled = true;
@@ -1107,6 +1180,16 @@
 
     function afterRender() {
       initDatePickers();
+      // Empty header values read "--" (HubSpot's empty property). After the
+      // date pickers, whose visible inputs are created there.
+      var heads = root.querySelectorAll(".fop-head input.fop-input:not([placeholder]), .fop-head textarea.fop-input:not([placeholder])");
+      for (var hp = 0; hp < heads.length; hp++) heads[hp].placeholder = "--";
+      // A locked select with no value (e.g. no ship via) shows "--" too.
+      var hsel = root.querySelectorAll(".fop-head select.fop-input:disabled");
+      for (var hs = 0; hs < hsel.length; hs++) {
+        var opt = hsel[hs].options[hsel[hs].selectedIndex];
+        if (opt && !opt.text.trim()) opt.text = "--";
+      }
       var notes = root.querySelectorAll(".fop-notes");
       for (var n = 0; n < notes.length; n++) autosize(notes[n]);
       autosizeNotesPair();
@@ -1125,7 +1208,8 @@
       } else if (state.view === "order") {
         if (state.logModal) {
           var lc = root.querySelector("[data-action=close-log]");
-          if (lc) lc.focus();
+          // Close sits below the log: no scroll, so the log opens at the top.
+          if (lc) lc.focus({ preventScroll: true });
         } else if (state.cancelAsk) {
           // Default to the safe choice.
           var keep = root.querySelector("[data-action=keep-order]");
@@ -1217,20 +1301,32 @@
         '<span class="fop-party__amt">' + esc(id + (known ? " - " + known[1] : "")) + "</span></div>";
     }
 
-    // Bottom-right of the Bill to card: Eclipse creditLimit ({ value, currency }).
+    // Bottom-right of the Bill to card: Eclipse defaultTerms (terms_code)
+    // left of creditLimit ({ value, currency }), bottoms aligned.
     function creditHtml(bt) {
+      var items = [];
+      if (bt && bt.terms_code) {
+        items.push('<div class="fop-party__corner"><span class="fop-party__lbl2">Terms</span>' +
+          '<span class="fop-party__amt">' + esc(bt.terms_code) + "</span></div>");
+      }
       var cl = bt && bt.credit_limit;
-      if (!cl || cl.value == null || !isFinite(cl.value)) return "";
-      var whole = Math.round(cl.value) === cl.value;
-      var amt = whole ? "$" + String(cl.value).replace(/\B(?=(\d{3})+(?!\d))/g, ",") : money(cl.value);
-      return '<div class="fop-party__corner"><span class="fop-party__lbl2">Credit limit</span>' +
-        '<span class="fop-party__amt">' + amt + (cl.currency && cl.currency !== "USD" ? " " + esc(cl.currency) : "") + "</span></div>";
+      if (cl && cl.value != null && isFinite(cl.value)) {
+        var whole = Math.round(cl.value) === cl.value;
+        var amt = whole ? "$" + String(cl.value).replace(/\B(?=(\d{3})+(?!\d))/g, ",") : money(cl.value);
+        items.push('<div class="fop-party__corner"><span class="fop-party__lbl2">Credit limit</span>' +
+          '<span class="fop-party__amt">' + amt + (cl.currency && cl.currency !== "USD" ? " " + esc(cl.currency) : "") + "</span></div>");
+      }
+      return items.length > 1 ? '<div class="fop-party__corners">' + items.join("") + "</div>" : items.join("");
     }
 
     function customerSummaryHtml() {
       var c = state.customer || {};
       var bt = c.bill_to || {};
-      var st = state.shipTo;
+      // Orders list with no picked ship-to: a customer with exactly one
+      // ship-to (often the bill-to shipping to itself) shows it too
+      // (2026-10-19, on request). Display only; the list is not filtered.
+      var only = (c.ship_tos || []).length === 1 ? c.ship_tos[0] : null;
+      var st = state.shipTo || (state.view === "orders" ? only : null);
       // Prices are quoted against the bill-to, so its price class is the
       // level the rep is selling at.
       var level = '<span class="fop-level" title="Price level">' + esc(bt.price_class || "Price level unknown") + "</span>";
@@ -1262,14 +1358,14 @@
       var st = pickedShipTo();
       var filter = st && state.ordersShipToOnly ? st.e_customer_id : null;
       return (
-        '<div class="fop-wrap fop-wrap--narrow">' +
+        '<div class="fop-wrap fop-wrap--narrow fop-wrap--orders">' +
         '<div class="fop-top"><div>' + titleHtml("Order Placement", "Orders") + "</div>" +
-        '<div class="fop-row">' + customerLinkHtml() +
+        '<div class="fop-row">' +
         '<button class="fop-btn fop-btn--ghost fop-btn--sm" data-action="change-customer">Change customer</button></div></div>' +
         customerSummaryHtml() +
         '<div class="fop-row">' +
         // Phones: floats fixed in the bottom right of the screen (.fop-fab).
-        '<button class="fop-btn fop-fab" data-action="new-from-list">New order <span class="fop-key fop-key--dark">N</span></button>' +
+        '<button class="fop-btn fop-fab" data-action="new-from-list">New order <span class="fop-key fop-key--dark">' + altKey("N") + '</span></button>' +
         (st ? '<label class="fop-check"><input type="checkbox" data-action="orders-shipto-only"' + (state.ordersShipToOnly ? "" : " checked") + "> " +
           "Show orders from other ShipTos</label>" : "") +
         "</div>" +
@@ -1387,12 +1483,13 @@
       return field(info[0], '<input class="fop-input" value="' + esc(info[1] || "") + '" disabled>', cls);
     }
 
-    // The bill-to's HubSpot company (hs_id from e-order-placement/customer),
-    // on new and existing orders alike.
+    // Page header links (paintHeader()). The bill-to's HubSpot company
+    // (hs_id from e-order-placement/customer), on new and existing orders
+    // alike.
     function customerLinkHtml() {
       var bt = state.customer && state.customer.bill_to;
       if (!bt || !bt.hs_id) return "";
-      return '<a class="fop-btn fop-btn--ghost fop-btn--sm" href="' + HS_COMPANY + encodeURIComponent(bt.hs_id) + '" target="_blank" rel="noopener"' +
+      return '<a class="fop-header__link" href="' + HS_COMPANY + encodeURIComponent(bt.hs_id) + '" target="_blank" rel="noopener"' +
         ' title="' + esc(bt.name + " (" + bt.e_customer_id + ")") + '">HS Customer ' + EXT_ICON + "</a>";
     }
 
@@ -1401,7 +1498,7 @@
     function dealLinkHtml() {
       var id = state.existing && state.existing.hs_deal_id;
       if (!id) return "";
-      return '<a class="fop-btn fop-btn--ghost fop-btn--sm" href="' + HS_DEAL + encodeURIComponent(id) + '" target="_blank" rel="noopener"' +
+      return '<a class="fop-header__link" href="' + HS_DEAL + encodeURIComponent(id) + '" target="_blank" rel="noopener"' +
         (state.existing.hs_deal_name ? ' title="' + esc(state.existing.hs_deal_name) + '"' : "") + ">HS Deal " + EXT_ICON + "</a>";
     }
 
@@ -2127,9 +2224,15 @@
             // Full words on desktop, "Gen. 1 / Inv. 2" on phones (CSS swaps them).
             '<span class="fop-tab__full">' + esc(genLabel(g)) + '</span><span class="fop-tab__short">' + esc(genLabel(g, true)) + "</span></button>";
         }).join("") + "</div>" : "") +
-        // Far right of the row (on request).
-        '<button class="fop-btn fop-btn--ghost fop-btn--sm fop-switch__end" data-action="change-log">Change log</button>' +
+        // Far right of the row (on request): Change log, then Exit.
+        '<div class="fop-row fop-switch__end">' +
+        '<button class="fop-btn fop-btn--ghost fop-btn--sm" data-action="change-log">Change log</button>' +
+        exitBtnHtml() + "</div>" +
         "</div>";
+    }
+
+    function exitBtnHtml() {
+      return '<button class="fop-btn fop-btn--ghost fop-btn--sm" data-action="exit-order">Exit <span class="fop-key">' + altKey("Q") + "</span></button>";
     }
 
     // The bill-to's recent orders (customer-orders flow), newest first; a row
@@ -2295,8 +2398,9 @@
         '<div class="fop-wrap fop-wrap--wide' + (sideLayout && stockShown() ? " fop-wrap--sideopen" : "") + '">' +
         '<div class="fop-top">' +
         '<div>' + orderTitleHtml() + "</div>" +
-        '<div class="fop-row">' + customerLinkHtml() + dealLinkHtml() +
-        '<button class="fop-btn fop-btn--ghost fop-btn--sm" data-action="exit-order">Exit <span class="fop-key">' + altKey("Q") + '</span></button></div>' +
+        // Existing orders: Exit sits right of Change log in the switcher row
+        // (2026-10-19, on request); new orders keep it here.
+        (state.existing ? "" : '<div class="fop-row">' + exitBtnHtml() + "</div>") +
         "</div>" +
         switcherHtml() +
         existingNoteHtml() +
@@ -2486,7 +2590,7 @@
         '<div class="fop-row">' +
         (r.mode === "update" ? '<button class="fop-btn fop-btn--ghost" data-action="reload-order">Back to bid</button>' : "") +
         (r.mode === "cancel" ? '<button class="fop-btn fop-btn--ghost" data-action="reload-order">Back to order</button>' : "") +
-        '<button class="fop-btn" data-action="new-order">New order, same ship-to <span class="fop-key fop-key--dark">N</span></button>' +
+        '<button class="fop-btn" data-action="new-order">New order, same ship-to <span class="fop-key fop-key--dark">' + altKey("N") + '</span></button>' +
         '<button class="fop-btn fop-btn--ghost" data-action="change-customer">Change customer</button>' +
         (dealId ? '<a class="fop-btn fop-btn--ghost" href="' + HS_DEAL + encodeURIComponent(dealId) + '" target="_blank" rel="noopener">HS Deal ' + EXT_ICON + "</a>" : "") +
         (hsId ? '<a class="fop-btn fop-btn--ghost" href="' + HS_COMPANY + encodeURIComponent(hsId) + '" target="_blank" rel="noopener">HS Customer ' + EXT_ICON + "</a>" : "") +
@@ -3038,6 +3142,18 @@
       render();
     }
 
+    // Desktop: a click on the dimmed backdrop around the change log closes
+    // it (on request). Press and release must both be on the backdrop, so
+    // selecting log text and letting go outside the box keeps it open.
+    // Phones keep Close / Esc only.
+    var backdropDown = null;
+    root.addEventListener("mousedown", function (e) { backdropDown = e.target; });
+    root.addEventListener("click", function (e) {
+      var t = e.target;
+      if (state.view === "order" && state.logModal && t === backdropDown && t.classList.contains("fop-modal") &&
+          !(window.matchMedia && window.matchMedia("(max-width: 767px)").matches)) closeChangeLog();
+    });
+
     root.addEventListener("click", function (e) {
       var acItem = e.target.closest("[data-ac]");
       if (acItem && ac) { acPick(Number(acItem.getAttribute("data-ac"))); return; }
@@ -3232,6 +3348,15 @@
       if (line && cs && commentClosed(line)) cs.classList.add("fop-stockstrip--cmt-closed");
     });
 
+    // Phones: an empty notes box switches between label-only (blurred) and
+    // a normal box (focused), so its height is measured again each time.
+    function resizeHeadNotes(e) {
+      var t = e.target;
+      if (t.classList && t.classList.contains("fop-notes") && t.closest(".fop-head")) autosizeNotes(t);
+    }
+    root.addEventListener("focusin", resizeHeadNotes);
+    root.addEventListener("focusout", function (e) { setTimeout(function () { resizeHeadNotes(e); }, 0); });
+
     root.addEventListener("focusin", function (e) {
       var t = e.target;
       if (t.classList && t.classList.contains("fop-grid-in")) {
@@ -3415,7 +3540,8 @@
       }
 
       // Orders list: ↑↓ move between "New order" and the orders, Enter opens
-      // (native button click), N starts a new order, Esc changes customer.
+      // (native button click), Alt+N (Control+N on a Mac) starts a new order,
+      // Esc changes customer.
       if (state.view === "orders") {
         if (t.type === "checkbox" && e.key !== "Escape") return;
         var items = Array.prototype.slice.call(root.querySelectorAll("[data-action=new-from-list], [data-open-order]"));
@@ -3423,7 +3549,7 @@
         if (e.key === "ArrowDown" || e.key === "ArrowUp") {
           e.preventDefault();
           if (items.length) items[oi < 0 ? 0 : (oi + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length].focus();
-        } else if ((e.key === "n" || e.key === "N") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        } else if (isShortcutMod(e) && e.code === "KeyN") {
           e.preventDefault();
           newOrderFromList();
         } else if (e.key === "Escape") {
@@ -3453,7 +3579,7 @@
       }
 
       if (state.view === "done") {
-        if ((e.key === "n" || e.key === "N") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); leaveExisting(); startOrder(state.shipTo); }
+        if (isShortcutMod(e) && e.code === "KeyN") { e.preventDefault(); leaveExisting(); startOrder(state.shipTo); }
         return;
       }
 
@@ -3505,8 +3631,13 @@
     // close the change log). While a dialog is open, Esc and Tab from outside
     // #app go through the same handler; Enter does not, so stray focus can
     // never confirm a placement.
+    // Alt (Control on a Mac) + letter shortcuts also go through from outside
+    // #app (focus on <body> or the page header), or Control+Q on a Mac did
+    // nothing after a click on blank space.
     document.addEventListener("keydown", function (e) {
-      if (root.contains(e.target) || (e.key !== "Escape" && e.key !== "Tab")) return;
+      if (root.contains(e.target)) return;
+      if (isShortcutMod(e)) { onKey(e); return; }
+      if (e.key !== "Escape" && e.key !== "Tab") return;
       if (state.view === "order" && (state.logModal || state.cancelAsk || state.confirm || state.customModal || state.detailsModal)) onKey(e);
     });
 
@@ -3523,21 +3654,84 @@
     else render();
   }
 
+  // ── Page header (2026-10-19) ─────────────────────────────────────────────
+  // Dark bar above the app on every view, both themes: the Fairbank mark
+  // (the favicon's icon, no wordmark) left;
+  // HS Deal, HS Customer (filled by paintHeader() in initApp), the theme
+  // toggle and a user menu right (the rep's name with a caret, like
+  // HubSpot's account menu; it opens the Eclipse user id and Sign out). It replaces auth.js's sign-in
+  // chip on these pages (hidden in styles.css). Sticky on desktop; on phones
+  // it slides away while scrolling down and comes back on any scroll up.
+  function initHeader(root, user) {
+    var name = user.name || user.e_user_id || "";
+    var header = document.createElement("header");
+    header.className = "fop-header";
+    header.innerHTML =
+      '<div class="fop-header__logo">' +
+      '<img src="fairbank-mark.png" alt="Fairbank" width="32" height="24">' +
+      "</div>" +
+      '<div class="fop-header__end">' +
+      '<span class="fop-header__links" data-cell="hdr-links"></span>' +
+      '<button type="button" class="fop-theme-btn"></button>' +
+      '<div class="fop-umenu">' +
+      '<button type="button" class="fop-umenu__btn" aria-haspopup="true" aria-expanded="false">' +
+      // Phones show the first name only (CSS swaps the two spans).
+      '<span class="fop-umenu__name fop-umenu__name--full">' + esc(name) + "</span>" +
+      '<span class="fop-umenu__name fop-umenu__name--first">' + esc(name.split(/\s+/)[0]) + "</span>" +
+      '<svg class="fop-umenu__caret" viewBox="0 0 10 6" aria-hidden="true"><path d="M0 0h10L5 6z" fill="currentColor"/></svg></button>' +
+      '<div class="fop-umenu__panel" hidden>' +
+      '<div class="fop-umenu__row"><span class="fop-umenu__lbl">Eclipse ID</span>' + esc(user.e_user_id || "") + "</div>" +
+      // Phones only (styles.css); desktop has the icon in the bar.
+      '<button type="button" class="fop-umenu__theme"></button>' +
+      '<button type="button" class="fop-umenu__out">Sign out</button>' +
+      "</div></div>" +
+      "</div>";
+    root.parentNode.insertBefore(header, root);
+    bindThemeBtn(header.querySelector(".fop-theme-btn"));
+    bindThemeBtn(header.querySelector(".fop-umenu__theme"));
+    header.querySelector(".fop-umenu__out").addEventListener("click", function () { window.fbSignOut(); });
+
+    // User menu: the name button toggles it; a click outside or Escape
+    // closes it (Escape puts focus back on the button).
+    var menuBtn = header.querySelector(".fop-umenu__btn");
+    var menu = header.querySelector(".fop-umenu__panel");
+    function setMenu(open) {
+      menu.hidden = !open;
+      menuBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+    menuBtn.addEventListener("click", function () { setMenu(menu.hidden); });
+    document.addEventListener("click", function (e) {
+      if (!menu.hidden && !header.querySelector(".fop-umenu").contains(e.target)) setMenu(false);
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !menu.hidden) { setMenu(false); menuBtn.focus(); }
+    });
+
+    // Phones only (the class does nothing on desktop, see styles.css): hide
+    // on a scroll down past the header, show again on a scroll up. Moves
+    // under 4px are ignored so a resting finger does not flicker it.
+    var lastY = window.scrollY;
+    window.addEventListener("scroll", function () {
+      var y = window.scrollY;
+      if (y <= header.offsetHeight) header.classList.remove("fop-header--hidden");
+      else if (y - lastY > 4) header.classList.add("fop-header--hidden");
+      else if (lastY - y > 4) header.classList.remove("fop-header--hidden");
+      else return;
+      lastY = y;
+    }, { passive: true });
+    return header;
+  }
+
   function boot() {
     initApp(document.getElementById("app"));
   }
 
-  // Loaded with defer, so the DOM is ready. Wait for the password gate so
-  // FB_USER (writer, branch) is known.
-  if (window.FB_USER) boot();
-  else window.addEventListener("fb:auth", boot, { once: true });
 
   // ── Light / dark theme toggle ──────────────────────────────────────────
   // The <head> of each page sets html[data-theme] before paint (saved
-  // choice, else the system setting). This adds a sun / moon button as the
-  // first item of the sign-in chip (auth.js adds the chip on
-  // DOMContentLoaded when already signed in, or after the gate) and saves
-  // the choice in localStorage ("fop-theme").
+  // choice, else the system setting). The sun / moon button in the page
+  // header (initHeader()) switches it and saves the choice in localStorage
+  // ("fop-theme").
   var THEME_KEY = "fop-theme";
   var SUN_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>';
   var MOON_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
@@ -3546,31 +3740,35 @@
     return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
   }
 
+  // Two toggles: the icon button in the header bar (desktop) and the
+  // "Dark mode" / "Light mode" row in the user menu (phones); both show the
+  // theme a click switches to and repaint together.
   function paintThemeBtn(btn) {
     var light = currentTheme() === "light";
-    // The icon shows the theme a click switches to.
-    btn.innerHTML = light ? MOON_ICON : SUN_ICON;
+    var icon = light ? MOON_ICON : SUN_ICON;
+    if (btn.classList.contains("fop-umenu__theme")) {
+      btn.innerHTML = icon + "<span>" + (light ? "Dark mode" : "Light mode") + "</span>";
+      return;
+    }
+    btn.innerHTML = icon;
     btn.setAttribute("aria-label", light ? "Switch to dark mode" : "Switch to light mode");
     btn.title = btn.getAttribute("aria-label");
   }
 
-  function initThemeToggle() {
-    var chip = document.getElementById("fb-user-chip");
-    if (!chip || chip.querySelector(".fop-theme-btn")) return;
-    var btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "fop-theme-btn";
+  function bindThemeBtn(btn) {
     paintThemeBtn(btn);
     btn.addEventListener("click", function () {
       var next = currentTheme() === "light" ? "dark" : "light";
       document.documentElement.setAttribute("data-theme", next);
       try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* private mode: not saved */ }
-      paintThemeBtn(btn);
+      var all = document.querySelectorAll(".fop-theme-btn, .fop-umenu__theme");
+      for (var i = 0; i < all.length; i++) paintThemeBtn(all[i]);
     });
-    chip.insertBefore(btn, chip.firstChild);
   }
 
-  initThemeToggle();
-  document.addEventListener("DOMContentLoaded", initThemeToggle);
-  window.addEventListener("fb:auth", initThemeToggle);
+  // Last, so the theme icons above are set before the header uses them.
+  // Loaded with defer, so the DOM is ready. Wait for the password gate so
+  // FB_USER (writer, branch) is known.
+  if (window.FB_USER) boot();
+  else window.addEventListener("fb:auth", boot, { once: true });
 })();

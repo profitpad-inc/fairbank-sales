@@ -26,3 +26,7 @@ Read [HANDOFF.md](HANDOFF.md) first. It describes what this project does, how it
 - One line only: the `auth.js` script tag in `docs/index.html` and `docs/product-inquiry/index.html`
 - No: `eclipse-branch-selector/*` (symlink to the original HubSpot project, read-only reference)
 - No: anything else in `docs/product-inquiry/*`
+
+## Other notes
+
+- Don't ask me to commit/push, the user will say when they want to commit

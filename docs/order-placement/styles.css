@@ -15,9 +15,7 @@ body {
    is appended to <body>, outside the app. Dark is the default; the light
    theme overrides them under html[data-theme="light"] at the end of this
    file (theme picked in the page <head>, toggled from the sign-in chip). */
-:root,
-/* The action bar stays navy in the light theme and takes the dark tokens. */
-html[data-theme="light"] .fop-bar {
+:root {
   --page-bg:   linear-gradient(to bottom right, #081529, #003057);
   --navy:      #0e2245;
   --navy-mid:  #162f5e;
@@ -72,6 +70,9 @@ html[data-theme="light"] .fop-bar {
 
 .fop-wrap { max-width: 1280px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
 .fop-wrap--narrow { max-width: 640px; }
+/* Orders list: wider so the Bill to / Ship to cards have room for the
+   address beside Terms and Credit limit (2026-10-19, on request). */
+.fop-wrap--orders { max-width: 960px; }
 
 .fop-kicker {
   font-family: 'Barlow Condensed', sans-serif;
@@ -244,8 +245,13 @@ textarea.fop-notes { display: block; min-height: calc(2.1em + 18px); line-height
 /* Same size as the product id tile on phone line cards. */
 .fop-party__topr .fop-badge { font-size: 14px; }
 .fop-party__name .fop-level { margin-left: 2px; vertical-align: 1px; }
-.fop-party__addr { font-size: 14px; line-height: 1.45; color: var(--muted); }
-.fop-party__body { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+/* The address keeps at least 150px; when the corner (terms, credit limit,
+   home branch) does not fit beside it, the corner wraps below, still
+   right-aligned, instead of squeezing the address or spilling out. */
+.fop-party__addr { flex: 1 1 150px; min-width: 0; font-size: 14px; line-height: 1.45; color: var(--muted); }
+.fop-party__body { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 8px 12px; }
+.fop-party__body > .fop-party__corner, .fop-party__body > .fop-party__corners { margin-left: auto; }
+.fop-party__corners { display: flex; align-items: flex-end; gap: 16px; }
 .fop-party__corner { display: flex; flex-direction: column; align-items: flex-end; text-align: right; white-space: nowrap; }
 /* Secondary labels are sentence case; caps are kept for section titles and
    grid column headers only. */
@@ -724,8 +730,7 @@ span.flatpickr-weekday {
 
 /* ── Switcher: one tab per generation + "Change log" ── */
 .fop-switch { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; border-bottom: 1px solid var(--steel); padding-bottom: 0; }
-.fop-switch > .fop-btn { margin-bottom: 8px; }
-.fop-switch__end { margin-left: auto; }
+.fop-switch__end { margin-left: auto; margin-bottom: 8px; gap: 8px; }
 .fop-tabs { display: flex; gap: 2px; flex-wrap: wrap; }
 .fop-tab {
   padding: 8px 14px; margin-bottom: -1px;
@@ -1138,11 +1143,17 @@ span.flatpickr-weekday {
      box outgrew the visible screen and its top (title, checkbox) was cut off. */
   .fop-modal__box { padding: 16px 14px; gap: 12px; max-height: calc(100vh - 20px); max-height: calc(100dvh - 20px); }
 
-  /* Generation tabs scroll sideways instead of wrapping into rows. */
-  .fop-tabs { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; scrollbar-width: none; }
-  .fop-tab { padding: 8px 12px; }
+  /* Generation tabs scroll sideways instead of wrapping into rows. Never
+     up and down: overflow-x auto made overflow-y auto too, and the tabs'
+     -1px bottom margin made the strip 1px taller than its box, so it
+     scrolled vertically (fixed 2026-10-19, on request). */
+  .fop-tabs { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; max-width: 100%; scrollbar-width: none; margin-bottom: -1px; }
+  /* The -1px overlap onto the row's bottom line moves to the strip, so
+     the tabs fit its height exactly. */
+  .fop-tab { padding: 8px 12px; margin-bottom: 0; }
   .fop-tab__full { display: none; }
   .fop-tab__short { display: inline; }
+  .fop-switch .fop-key { display: none; }
 }
 
 /* Phone line cards, calmer (2026-10-19): no "At branch" / "All branches"
@@ -1169,94 +1180,362 @@ span.flatpickr-weekday {
   .fop-addcmt { padding: 5px 10px; font-size: 13px; }
 }
 
-/* ── Light theme (2026-10-19) ──
-   Same navy / gold palette turned around: light steel page, white cards,
-   navy text, gold kept for the primary action, focus and the total (a
-   darker gold where gold is text, so it reads on white). Picked in each
-   page's <head> (saved choice, else the system setting) and toggled with
-   the sun / moon button in the sign-in chip (initThemeToggle() in app.js). */
+/* ── Light theme: HubSpot look (2026-10-19, on request: "for light mode,
+   just make it look like HubSpot", from a HubSpot company record
+   screenshot) ──
+   Pale gray page, white cards with thin gray borders and rounded corners,
+   dark slate text, Lexend Deca in sentence case (no condensed caps),
+   teal links / focus / active states, dark teal pill primary buttons
+   (HubSpot's Create colour), white outlined pill secondary buttons, gray tab boxes with a white active tab and
+   gray tag-style id badges. Dark mode keeps the navy / gold scheme. Picked
+   in each page's <head> (saved choice, else the system setting) and toggled
+   with the sun / moon button in the sign-in chip (initThemeToggle() in
+   app.js). */
 html[data-theme="light"] {
   color-scheme: light;
-  --page-bg:      linear-gradient(to bottom right, #f4f6fa, #e2e9f2);
-  --gold-lt:      #a8761a;
-  --white:        #0e2245;
-  --text:         #1c2b44;
-  --muted:        #5b6f8c;
-  --steel:        rgba(14, 34, 69, .18);
-  --line:         rgba(14, 34, 69, .11);
+  --page-bg:      #f5f8fa;
+  --navy:         #ffffff;
+  --navy-mid:     #f5f8fa;
+  --navy-dark:    #eaf0f6;
+  /* --gold / --gold-lt carry the teal accent here (links, focus, active
+     tab, chips); primary buttons use --hs-primary below. */
+  --gold:         #0091ae;
+  --gold-lt:      #007a8c;
+  --hs-primary:    #1c484a;
+  --hs-primary-hi: #275f61;
+  --white:        #213343;
+  --text:         #33475b;
+  --muted:        #516f90;
+  --steel:        #cbd6e2;
+  --border:       #dfe3eb;
+  --line:         #dfe3eb;
   --card-bg:      #ffffff;
-  --input-bg:     #f5f7fb;
-  --row-hover:    rgba(200, 150, 42, .09);
-  --success:      #17895a;
-  --warning:      #9a6a0c;
-  --error:        #cc3333;
+  --input-bg:     #ffffff;
+  --row-hover:    #f5f8fa;
+  --success:      #00a38d;
+  --warning:      #b36b00;
+  --error:        #d9363e;
+  --on-gold:      #ffffff;
   --panel:        #ffffff;
   --panel-hi:     #ffffff;
   --surface:      #ffffff;
-  --surface-head: #eef2f7;
+  --surface-head: #f5f8fa;
   --chip-bg:      #ffffff;
-  --alt-row:      rgba(14, 34, 69, .025);
-  --tint-bg:      rgba(74, 128, 196, .08);
-  --tint-text:    #2b4466;
-  --tint-label:   #4d6788;
-  --shadow:       rgba(14, 34, 69, .16);
-  --overlay:      rgba(14, 34, 69, .4);
-  --err-text:     #9b1f1f;
-  --warn-text:    #6e4c05;
-  --ok-text:      #0e6640;
-  --danger-text:  #b42c2c;
+  --alt-row:      #fbfcfd;
+  --tint-bg:      #f5f8fa;
+  --tint-text:    #33475b;
+  --tint-label:   #516f90;
+  --shadow:       rgba(45, 62, 80, .18);
+  --overlay:      rgba(45, 62, 80, .45);
+  --err-text:     #9b1c22;
+  --warn-text:    #7a4a00;
+  --ok-text:      #006b5c;
+  --danger-text:  #c0282f;
 }
-/* The sign-in chip (auth.js) styles itself inline in dark colours. */
-/* Light colour scheme "steel blue / ice cards" (2026-10-19, picked from
-   mockups): steel-blue page, very pale blue cards with soft shadows, white
-   input boxes, a light-blue grid header row, blue section labels and
-   blue-tinted id badges; the action bar stays navy (dark tokens, see the
-   :root selector at the top). Gold use is unchanged. */
-html[data-theme="light"] {
-  --page-bg:  linear-gradient(to bottom right, #c3d1e3, #a7bad3);
-  --accent:   #1f4f8f;
-  --steel:    rgba(14, 34, 69, .16);
-  --card-bg:  #f5f8fc;
-  --surface:  #f5f8fc;
-  --input-bg: #ffffff;
+
+/* Type, both themes (dark too since 2026-10-19, on request): Lexend Deca
+   everywhere, sentence case, no tracking. Colours stay per theme. */
+html .fop-app,
+html .fop-app *:not(svg):not(path),
+html .flatpickr-calendar,
+html .flatpickr-calendar *,
+html .fop-header,
+html .fop-header * {
+  font-family: 'Lexend Deca', 'Barlow', sans-serif !important;
+  letter-spacing: normal !important;
+  text-transform: none !important;
 }
-html[data-theme="light"] .fop-bar { color: var(--text); background: var(--navy); }
-html[data-theme="light"] .fop-line--head { --muted: #2c4a75; background: #dce6f3; }
+html .fop-app { font-size: 14px; }
+html .fop-kicker { font-size: 14px; font-weight: 500; }
+html .fop-h1 { font-size: 26px; font-weight: 600; }
+html .fop-h2,
+html .fop-head__sum { font-size: 18px; font-weight: 600; }
+html .fop-party__lbl { font-size: 16px; font-weight: 600; }
+html .fop-party__name { font-size: 15px; font-weight: 500; }
+html .fop-party__addr { font-size: 14px; }
+html .fop-party__amt,
+html .fop-sum__row--total .fop-sum__val,
+html .fop-total,
+html .fop-confirm-total { font-size: 18px; font-weight: 600; }
+html .fop-sum__lbl,
+html .fop-table th,
+html .fop-mlabel { font-size: 13px; font-weight: 500; }
+html .fop-sum__row--total .fop-sum__lbl { font-size: 14px; font-weight: 600; }
+html .fop-label { font-size: 14px; font-weight: 400; }
+
+html .fop-btn { font-size: 14px; font-weight: 600; }
+html .fop-btn--sm { font-size: 13px; }
+html .fop-tab { font-size: 14px; }
+html .fop-line--head > * { font-size: 13px; font-weight: 600; }
+/* Light-only text colours for the type rules above (dark keeps its gold
+   totals and muted labels). */
+html[data-theme="light"] .fop-h2,
+html[data-theme="light"] .fop-head__sum,
+html[data-theme="light"] .fop-party__lbl,
+html[data-theme="light"] .fop-party__amt,
+html[data-theme="light"] .fop-sum__row--total .fop-sum__val,
+html[data-theme="light"] .fop-total,
+html[data-theme="light"] .fop-confirm-total,
+html[data-theme="light"] .fop-sum__row--total .fop-sum__lbl { color: var(--white); }
+
+/* Cards: white, thin gray border, rounded, a faint shadow. */
 html[data-theme="light"] .fop-card,
 html[data-theme="light"] .fop-party,
 html[data-theme="light"] .fop-head,
 html[data-theme="light"] .fop-sum,
-html[data-theme="light"] .fop-grid { box-shadow: 0 4px 14px rgba(14, 34, 69, .12); }
-html[data-theme="light"] .fop-kicker { color: #2c4a75; }
-html[data-theme="light"] .fop-party__lbl,
-html[data-theme="light"] .fop-head__sum,
-html[data-theme="light"] .fop-h2 { color: var(--accent); }
-html[data-theme="light"] .fop-badge { color: var(--accent); background: rgba(47, 98, 168, .1); border-color: rgba(47, 98, 168, .3); }
-html[data-theme="light"] .fop-stockstrip,
-html[data-theme="light"] .fop-side { background: rgba(74, 128, 196, .12); }
+html[data-theme="light"] .fop-grid,
+html[data-theme="light"] .fop-bar {
+  border-color: var(--border); border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(45, 62, 80, .06);
+}
+html[data-theme="light"] .fop-line--head { --muted: #33475b; background: #f5f8fa; border-radius: 12px 12px 0 0; }
 @media (max-width: 767px) {
-  /* Phones: bill-to / ship-to share one card, so the shadow goes on the
-     pair; the line cards replace the grid box. */
-  html[data-theme="light"] .fop-party,
-  html[data-theme="light"] .fop-grid { box-shadow: none; }
-  html[data-theme="light"] .fop-parties,
-  html[data-theme="light"] .fop-grid .fop-line,
-  html[data-theme="light"] .fop-grid.fop-grid--locked { box-shadow: 0 4px 14px rgba(14, 34, 69, .12); }
-  html[data-theme="light"] .fop-grid--locked .fop-line { box-shadow: none; }
+  html[data-theme="light"] .fop-bar { border-radius: 0; box-shadow: 0 -2px 8px rgba(45, 62, 80, .08); }
+  /* Bill-to / ship-to share one card on phones: the pair gets the card look. */
+  html[data-theme="light"] .fop-party { border: 0; border-radius: 0; box-shadow: none; }
+  html[data-theme="light"] .fop-party + .fop-party { border-top: 1px solid var(--line); }
+  html[data-theme="light"] .fop-parties { border-color: var(--border); border-radius: 12px; box-shadow: 0 1px 2px rgba(45, 62, 80, .06); }
 }
 
-html[data-theme="light"] #fb-user-chip {
-  color: var(--muted) !important; background: rgba(255, 255, 255, .92) !important;
-  border-color: var(--steel) !important; box-shadow: 0 2px 8px var(--shadow);
+/* Buttons: pills, dark teal primary (sampled from HubSpot's Create
+   button), white outlined secondary. */
+html[data-theme="light"] .fop-btn {
+  font-size: 14px; font-weight: 600; padding: 9px 18px; border-radius: 999px;
+  color: #ffffff; background: var(--hs-primary); border-color: var(--hs-primary);
 }
-html[data-theme="light"] #fb-user-chip button { color: var(--gold-lt) !important; }
+html[data-theme="light"] .fop-btn--sm { padding: 6px 12px; font-size: 13px; }
+html[data-theme="light"] .fop-btn--ghost { color: var(--white); background: #ffffff; border-color: var(--steel); }
+html[data-theme="light"] .fop-btn--on { background: #eaf0f6; }
+@media (hover: hover) {
+  html[data-theme="light"] .fop-btn:hover:not([disabled]):not([aria-disabled="true"]) { background: var(--hs-primary-hi); border-color: var(--hs-primary-hi); }
+  html[data-theme="light"] .fop-btn--ghost:hover:not([disabled]):not([aria-disabled="true"]) { color: var(--white); background: #f5f8fa; border-color: #7c98b6; }
+}
+html[data-theme="light"] .fop-key { color: inherit; border-color: currentColor; opacity: .7; }
 
-/* Theme toggle, first item in the sign-in chip. */
+/* Inputs and focus: gray border, teal ring. */
+html[data-theme="light"] .fop-input { border-color: var(--steel); border-radius: 6px; }
+/* Read-only line values (locked orders, readonly grid cells) stay plain
+   text, as in dark mode. */
+html[data-theme="light"] .fop-grid--locked .fop-input,
+html[data-theme="light"] .fop-grid-in[readonly] { border-color: transparent; }
+/* Desktop: with visible boxes, the qty and unit price inputs touched (the
+   base rule drops those cells' side padding so digits line up). A 4px gap
+   each side splits them by 8px; the column headers move in to match. */
+@media (min-width: 768px) {
+  html[data-theme="light"] .fop-grid .fop-cell--qty,
+  html[data-theme="light"] .fop-grid .fop-cell--price { padding-left: 4px; padding-right: 4px; }
+  html[data-theme="light"] .fop-grid .fop-line--head .fop-cell--qty,
+  html[data-theme="light"] .fop-grid .fop-line--head .fop-cell--price { padding-right: 12px; }
+}
+html[data-theme="light"] .fop-input:focus,
+html[data-theme="light"] .fop-grid .fop-input:focus { border-color: #00bda5; box-shadow: 0 0 0 3px rgba(0, 189, 165, .2); }
+html[data-theme="light"] .fop-app :focus-visible { outline-color: #00bda5; }
+
+/* Links: teal, no underline until hover. */
+html[data-theme="light"] .fop-linkbtn,
+html[data-theme="light"] .fop-linkbox a,
+html[data-theme="light"] .fop-pkg__trk,
+html[data-theme="light"] .fop-pkg__extra a,
+html[data-theme="light"] .fop-trackbox a { font-weight: 600; text-decoration: none; }
+html[data-theme="light"] .fop-linkbtn:hover,
+html[data-theme="light"] .fop-linkbox a:hover,
+html[data-theme="light"] .fop-pkg__trk:hover { text-decoration: underline; }
+
+/* Generation tabs: the dark mode's underline tabs (base rules), in the
+   light tokens: the open tab white with a teal underline. */
+html[data-theme="light"] .fop-tab:hover { background: #eaf0f6; }
+
+/* Order header as HubSpot properties (2026-10-19, on request, both
+   themes): label over value. Fields that can't be edited (a locked header,
+   the order date, the order info fields) are plain text with no box, the
+   text lined up under its label (the box is pulled 10px left). Editable
+   fields keep a permanent input box (on request the same day, after a
+   hover-only box), sized normally. Empty read-only values read "--"
+   (placeholder set in afterRender()). Colours come from the theme tokens; light swaps in
+   its own border, focus and icon colours. */
+html .fop-head .fop-input::placeholder { color: var(--muted); -webkit-text-fill-color: var(--muted); opacity: 1; }
+/* "--" is for read-only values; an empty editable box stays empty. */
+html .fop-head:not(.fop-head--locked) .fop-input:not(:disabled)::placeholder { color: transparent; -webkit-text-fill-color: transparent; }
+html .fop-head .fop-label { margin-bottom: 2px; }
+html .fop-head .fop-input {
+  width: calc(100% + 10px); margin-left: -10px; padding-left: 10px;
+  font-size: 15px; color: var(--white); -webkit-text-fill-color: var(--white);
+  border-color: transparent; background-color: transparent; background-image: none;
+}
+html .fop-head:not(.fop-head--locked) .fop-input:not(:disabled) { width: 100%; margin-left: 0; border-color: rgba(143, 164, 194, .35); background-color: var(--input-bg); }
+html .fop-head:not(.fop-head--locked) .fop-input:not(:disabled):hover { border-color: rgba(143, 164, 194, .6); }
+html .fop-head:not(.fop-head--locked) .fop-input:not(:disabled):focus,
+html .fop-head:not(.fop-head--locked) .fop-date-alt.active { border-color: var(--gold); }
+html .fop-head:not(.fop-head--locked) select.fop-input:not(:disabled) { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238fa4c2' stroke-width='2.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); }
+html .fop-head:not(.fop-head--locked) .fop-date-alt { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238fa4c2' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4.5' width='18' height='16.5' rx='2'/%3E%3Cpath d='M3 9.5h18M8 2.5v4M16 2.5v4'/%3E%3C/svg%3E"); }
+html[data-theme="light"] .fop-head:not(.fop-head--locked) .fop-input:not(:disabled) { border-color: var(--steel); background-color: #ffffff; }
+html[data-theme="light"] .fop-head:not(.fop-head--locked) .fop-input:not(:disabled):hover { border-color: #a9bbcf; }
+html[data-theme="light"] .fop-head:not(.fop-head--locked) .fop-input:not(:disabled):focus,
+html[data-theme="light"] .fop-head:not(.fop-head--locked) .fop-date-alt.active { border-color: #00bda5; }
+html[data-theme="light"] .fop-head:not(.fop-head--locked) select.fop-input:not(:disabled) { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23516f90' stroke-width='2.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); }
+html[data-theme="light"] .fop-head:not(.fop-head--locked) .fop-date-alt { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23516f90' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4.5' width='18' height='16.5' rx='2'/%3E%3Cpath d='M3 9.5h18M8 2.5v4M16 2.5v4'/%3E%3C/svg%3E"); }
+/* Beats the locked-header rules' input background (more specific). */
+html .fop-head--locked .fop-input,
+html .fop-head .fop-input:disabled,
+html .fop-head--locked .fop-date-alt[readonly] { background-color: transparent; cursor: default; }
+@media (max-width: 767px) {
+  /* Phones: HubSpot's mobile property list, a thin line under each
+     property (two per row where they fit). */
+  html .fop-head__grid { row-gap: 0; column-gap: 16px; padding-bottom: 4px; }
+  html .fop-head__grid > .fop-field { padding: 10px 0; border-bottom: 1px solid var(--line); }
+
+  /* Phones, HubSpot app's Edit Deal list (2026-10-19, on request, both
+     themes): one property per row with a line across the card, small label
+     over the value, no input boxes (editable or not), a calendar icon on
+     editable dates, a filled caret on dropdowns. An empty property shows only its label, at
+     value size (like HubSpot's empty "Deal Type"); tapping it (focus) puts
+     the label back on top. Values are 16px so iOS doesn't zoom on focus. */
+  html .fop-head__grid { display: block; padding: 0; }
+  html .fop-head__grid > .fop-field {
+    position: relative; display: flex; flex-direction: column; justify-content: center;
+    min-height: 66px; padding: 9px 12px; border-bottom: 1px solid var(--line);
+  }
+  html .fop-head__grid > .fop-field:last-child { border-bottom: 0; }
+  html .fop-head .fop-label { margin-bottom: 1px; font-size: 13px; transition: font-size .12s ease; }
+  html .fop-head input.fop-input,
+  html .fop-head select.fop-input,
+  html .fop-head textarea.fop-input,
+  html .fop-head:not(.fop-head--locked) input.fop-input:not(:disabled),
+  html .fop-head:not(.fop-head--locked) select.fop-input:not(:disabled),
+  html .fop-head:not(.fop-head--locked) textarea.fop-input:not(:disabled) {
+    width: 100%; margin: 0; padding: 0; min-height: 0; height: auto;
+    font-size: 16px; line-height: 1.35;
+    border: 0; border-radius: 0; box-shadow: none; background-color: transparent;
+  }
+  html .fop-head textarea.fop-notes { min-height: 0; }
+  /* Editable dates keep their calendar icon (locked ones have none). */
+  html .fop-head:not(.fop-head--locked) input.fop-date-alt:not(:disabled) { padding-right: 28px; background-position: right 2px center; }
+  html .fop-head:not(.fop-head--locked) select.fop-input:not(:disabled) {
+    padding-right: 28px; background-position: right 2px center; background-size: 12px 12px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M1 3.5h10L6 9z' fill='%23f0f4fa'/%3E%3C/svg%3E");
+  }
+  html[data-theme="light"] .fop-head:not(.fop-head--locked) select.fop-input:not(:disabled) {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M1 3.5h10L6 9z' fill='%23213343'/%3E%3C/svg%3E");
+  }
+  /* Focus: the label takes the accent colour instead of a box. */
+  html .fop-head__grid > .fop-field:focus-within .fop-label,
+  html .fop-head__grid > .fop-field:has(.fop-date-alt.active) .fop-label { color: var(--gold); }
+  /* Empty and not focused: label only, at value size; the (invisible)
+     control covers the row so a tap still lands on it. */
+  html .fop-head__grid > .fop-field:has(> .fop-input:placeholder-shown):not(:focus-within):not(:has(.fop-date-alt.active)) .fop-label,
+  html .fop-head__grid > .fop-field:has(> select.fop-input option[value=""]:checked):not(:focus-within) .fop-label { margin: 0; font-size: 16px; }
+  html .fop-head__grid > .fop-field:has(> .fop-input:placeholder-shown):not(:focus-within):not(:has(.fop-date-alt.active)) > .fop-input,
+  html .fop-head__grid > .fop-field:has(> select.fop-input option[value=""]:checked):not(:focus-within) > select.fop-input {
+    position: absolute; inset: 0; width: 100%; height: 100%; padding: 0 12px; opacity: 0;
+  }
+  /* The caret stays visible on an empty dropdown. */
+  html .fop-head__grid > .fop-field:has(> select.fop-input:not(:disabled) option[value=""]:checked):not(:focus-within)::after {
+    content: ""; position: absolute; right: 14px; top: 50%; width: 12px; height: 12px; margin-top: -6px;
+    pointer-events: none; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M1 3.5h10L6 9z' fill='%23f0f4fa'/%3E%3C/svg%3E") no-repeat center / 12px 12px;
+  }
+  html[data-theme="light"] .fop-head__grid > .fop-field:has(> select.fop-input:not(:disabled) option[value=""]:checked):not(:focus-within)::after {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M1 3.5h10L6 9z' fill='%23213343'/%3E%3C/svg%3E");
+  }
+}
+
+/* Tags: id badges gray, price level a filled teal pill. */
+html[data-theme="light"] .fop-badge { font-size: 13px; font-weight: 500; color: var(--text); background: #eaf0f6; border-color: var(--steel); border-radius: 4px; }
+html[data-theme="light"] .fop-level { font-size: 13px; font-weight: 500; padding: 2px 9px; color: #ffffff; background: #0b7a85; border-radius: 4px; }
+
+/* Stock / qty-break panel and side panel: pale gray. */
+html[data-theme="light"] .fop-stockstrip,
+html[data-theme="light"] .fop-side { background: #f5f8fa; }
+html[data-theme="light"] .fop-side__line--active { background: rgba(0, 145, 174, .06); }
+html[data-theme="light"] .fop-detail-btn:hover { background: rgba(0, 145, 174, .1); }
+html[data-theme="light"] .flatpickr-day.today:focus { background: rgba(0, 145, 174, .15); }
+/* Remaining gold tints in the base rules, turned teal / gray. */
+html[data-theme="light"] .fop-step { background: #f5f8fa; border-color: var(--steel); color: var(--gold-lt); }
+html[data-theme="light"] .fop-ac__item--active,
+html[data-theme="light"] .fop-ac__item:hover,
+html[data-theme="light"] .flatpickr-day:hover,
+html[data-theme="light"] .flatpickr-day:focus,
+html[data-theme="light"] .numInputWrapper:hover { background: rgba(0, 145, 174, .1); border-color: transparent; }
+html[data-theme="light"] .fop-spinner { border-color: rgba(0, 145, 174, .2); border-top-color: var(--gold); }
+html[data-theme="light"] .flatpickr-calendar { box-shadow: 0 0 0 1px var(--border), 0 10px 30px var(--shadow); }
+html[data-theme="light"] .flatpickr-calendar.arrowTop:before { border-bottom-color: var(--border); }
+html[data-theme="light"] .flatpickr-calendar.arrowBottom:before { border-top-color: var(--border); }
+
+/* Dialogs: white, rounded, soft shadow. */
+html[data-theme="light"] .fop-modal__box { border-radius: 12px; box-shadow: 0 10px 40px var(--shadow); }
+
+/* ── Page header (2026-10-19), both themes ──
+   #333 bar built by initHeader() in app.js: Fairbank mark left; HS
+   Deal, HS Customer, theme toggle and the user menu (name; opens the
+   Eclipse id and Sign out) right. Sticky on
+   desktop; on phones app.js adds --hidden while scrolling down (slides up
+   out of view) and drops it on any scroll up. It replaces auth.js's
+   sign-in chip on these pages. */
+#fb-user-chip { display: none !important; }
+.fop-header {
+  position: sticky; top: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  height: 40px; padding: 0 20px;
+  font-size: 14px; font-weight: 500; color: #f2f2f2; background: #333333;
+  transition: transform .2s ease;
+}
+.fop-header__logo { display: flex; align-items: center; flex: none; }
+.fop-header__logo img { display: block; height: 24px; width: auto; }
+.fop-header__end { display: flex; align-items: center; gap: 18px; min-width: 0; }
+.fop-header__links { display: flex; align-items: center; gap: 18px; }
+.fop-header__links:not(:empty) { padding-right: 18px; border-right: 1px solid #555555; }
+.fop-header__link { display: inline-flex; align-items: center; gap: 6px; color: #f2f2f2; text-decoration: none; white-space: nowrap; }
+.fop-header__link:hover { color: #ffffff; text-decoration: underline; text-underline-offset: 3px; }
+.fop-umenu { position: relative; min-width: 0; }
+.fop-umenu__btn {
+  display: flex; align-items: center; gap: 8px; max-width: 100%; height: 30px; padding: 0 12px 0 14px;
+  font: inherit; color: #ffffff; background: rgba(255, 255, 255, .1); border: 0; border-radius: 999px; cursor: pointer;
+}
+.fop-umenu__btn:hover, .fop-umenu__btn[aria-expanded="true"] { background: rgba(255, 255, 255, .18); }
+.fop-umenu__name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fop-umenu__caret { flex: none; width: 10px; height: 6px; }
+.fop-umenu__name--first { display: none; }
+/* Same gray as the bar: the Eclipse user id, a divider, Sign out. */
+.fop-umenu__panel {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 70; width: max-content; min-width: 140px;
+  color: #f2f2f2; background: #333333; border: 1px solid #555555; border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .35); overflow: hidden;
+}
+.fop-umenu__panel[hidden] { display: none; }
+.fop-umenu__row { padding: 12px 16px; white-space: nowrap; border-bottom: 1px solid #555555; }
+.fop-umenu__lbl { display: block; margin-bottom: 2px; font-size: 12px; color: #b5b5b5; }
+.fop-umenu__out {
+  display: block; width: 100%; padding: 12px 16px; text-align: left;
+  font: inherit; color: #ffffff; background: none; border: 0; cursor: pointer;
+}
+.fop-umenu__out:hover,
+.fop-umenu__theme:hover { background: rgba(255, 255, 255, .08); }
+/* Theme row: phones only, above Sign out (the bar's icon is hidden there). */
+.fop-umenu__theme {
+  display: none; align-items: center; gap: 10px; width: 100%; padding: 12px 16px; text-align: left;
+  font: inherit; color: #ffffff; background: none; border: 0; border-bottom: 1px solid #555555; cursor: pointer;
+}
+.fop-umenu__theme svg { width: 17px; height: 17px; flex: none; }
+.fop-header :focus-visible { outline: 2px solid #ffffff; outline-offset: 3px; border-radius: 3px; }
+@media (max-width: 767px) {
+  .fop-header { height: 40px; padding: 0 12px; gap: 10px; font-size: 13px; }
+  .fop-header--hidden { transform: translateY(-100%); }
+  /* Narrow screens: first name only, still shortened with an ellipsis if
+     it does not fit. */
+  .fop-header__end, .fop-header__links { gap: 12px; }
+  .fop-header__links:not(:empty) { padding-right: 12px; }
+  .fop-header__link { gap: 4px; }
+  .fop-umenu__btn { padding: 0 10px 0 12px; gap: 6px; }
+  .fop-umenu__name--full { display: none; }
+  .fop-header .fop-theme-btn { display: none; }
+  .fop-umenu__theme { display: flex; }
+  .fop-umenu__name--first { display: inline; }
+}
+
+/* Theme toggle in the page header. */
 .fop-theme-btn {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 18px; height: 18px; padding: 0; margin: 0 -2px;
-  color: inherit; background: none; border: 0; cursor: pointer;
+  width: 20px; height: 20px; padding: 0;
+  color: #f2f2f2; background: none; border: 0; cursor: pointer;
 }
-.fop-theme-btn svg { width: 15px; height: 15px; }
-.fop-theme-btn:hover { color: var(--gold-lt); }
-.fop-theme-btn:focus-visible { outline: 2px solid var(--gold-lt); outline-offset: 2px; border-radius: 50%; }
+.fop-theme-btn svg { width: 17px; height: 17px; }
+.fop-theme-btn:hover { color: #ffffff; }
