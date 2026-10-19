@@ -51,6 +51,9 @@
     customer: N8N + "e-order-placement/customer",
     customerOrders: N8N + "e-order-placement/customer-orders",
     orderChangelog: N8N + "e-order-placement/order-changelog",
+    quote: N8N + "e-order-placement/quote",
+    createQuote: N8N + "e-order-placement/create-quote",
+    sendQuote: N8N + "e-order-placement/send-quote",
     inquiry: N8N + "fairbank-product-inquiry",
   };
   var HS_COMPANY = "https://app.hubspot.com/contacts/43793456/record/0-2/";
@@ -92,8 +95,8 @@
 
   // [label, value]. The first 9 are the common ones.
   var SHIP_VIAS = [
-    ["SEE INSTRUCTION", "SEE INSTRUCTION"], ["SALESMAN DELIVERY", "SALESMAN DELIVR"], ["UPS", "UPS"],
-    ["BW BEST WAY", "BW BEST WAY"], ["CPU PICK UP", "CPU PICK UP"], ["OT OUR TRUCK", "OT OUR TRUCK"],
+    ["SEE INSTRUCTION", "SEE INSTRUCTION"], ["SALESMAN DELIVERY", "SALESMAN DELIVR"], ["CPU PICK UP", "CPU PICK UP"],
+    ["UPS", "UPS"], ["BW BEST WAY", "BW BEST WAY"], ["OT OUR TRUCK", "OT OUR TRUCK"],
     ["FEDEX AIR", "FEDEX AIR"], ["FEDEX FRT", "FEDEX FRT"], ["FEDEX GRD", "FEDEX GRD"],
     ["ACI", "ACI"], ["ARCBEST", "ARCBEST"], ["ASAP EXPRESS", "ASAP EXPRESS"],
     ["ASAP EXPRESS CC", "ASAP EXPRESS CC"], ["BC FREIGHTWAYS", "BC FREIGHTWAYS"], ["BEAVER", "BEAVER"],
@@ -125,9 +128,9 @@
   // Order statuses, in the order reps asked for: the common ones first,
   // then the rest alphabetically. Values are the Eclipse orderStatus enum.
   // "Vendor Direct" is Eclipse's "Direct" status (the enum has no
-  // separate VendorDirect value).
+  // separate VendorDirect value). Bid is not here: Place as Bid (Alt+B)
+  // is the only way to place a bid.
   var ORDER_STATUSES = [
-    ["Bid", "Bid"],
     ["Ship When Complete", "ShipWhenComplete"],
     ["Ship When Available", "ShipWhenAvailable"],
     ["Ship When Specified", "ShipWhenSpecified"],
@@ -345,11 +348,14 @@
       sidePanel: true,           // side layout only: stock / breaks box open
       detailsModal: null,        // details layout only: { r, comment } "Line details" dialog
       notice: null,              // { text, hubspotError }: "Bid / Order placed" note after a save
+      quoteModal: null,          // { id, quote, emails, sending, note }: "View Quote" dialog
+      quoteError: null,          // View Quote could not make a quote (shown above the action bar)
     };
     // Inline layout: the line whose stock / qty breaks / comment strip is shown.
     var stripRow = -1;
     var lineSeq = 0;
     var quoteCache = {};         // productId → { loading, error, data }
+    var hsQuotes = {};           // e_sorder_id → { loading, error, data }: HubSpot quote (quote lookup flow)
 
     function newLine() {
       // comment: the line's Eclipse line comment (lineItemProduct.comments).
@@ -377,7 +383,7 @@
       return {
         shipBranch: defaultShipBranch(state.shipTo),
         shipVia: "",
-        orderStatus: "Bid",
+        orderStatus: "",         // picked in the Place Order dialog; blank until then
         shipDate: isoDate(0),
         requiredDate: isoDate(7, true),
         po: "",
@@ -540,6 +546,8 @@
       state.genEdits = {};
       state.changeLog = null;
       state.logModal = false;
+      state.quoteModal = null;
+      hsQuotes = {};             // a reload checks HubSpot again
       render();
 
       getJson(API.order, { e_sorder_id: state.orderId })
@@ -642,6 +650,9 @@
       if (!saved && (order.editable || !state.lines.length)) state.lines.push(newLine());
       state.customModal = null;
       state.detailsModal = null;
+      state.quoteModal = null;
+      state.quoteError = null;
+      fetchHsQuote(order.e_sorder_id);
       state.lines.forEach(function (l) { if (l.productId) fetchQuote(l.productId); });
       // Not a bid: nothing is focused or highlighted on load (r -1); Alt+L or a
       // click still moves into the lines.
@@ -1206,7 +1217,11 @@
         var first = root.querySelector("[data-shipto]");
         if (first) first.focus();
       } else if (state.view === "order") {
-        if (state.logModal) {
+        if (state.quoteModal) {
+          // The email box (no scroll, so the quote shows from its top).
+          var qin = root.querySelector("#fop-quote-email");
+          if (qin) qin.focus({ preventScroll: true });
+        } else if (state.logModal) {
           var lc = root.querySelector("[data-action=close-log]");
           // Close sits below the log: no scroll, so the log opens at the top.
           if (lc) lc.focus({ preventScroll: true });
@@ -1645,8 +1660,13 @@
       return (
         '<div class="fop-line' + (r % 2 ? " fop-line--alt" : "") + (ro ? " fop-line--ro" : "") + '" data-row="' + r + '" role="row">' +
         '<div class="fop-cell fop-cell--num" role="cell">' + (r + 1) + "</div>" +
-        '<div class="fop-cell fop-cell--product" role="cell">' +
+        '<div class="fop-cell fop-cell--product' + (!ro && line.productId ? " fop-cell--tiled" : "") + '" role="cell">' +
         '<label class="fop-mlabel">Product</label>' +
+        // An editable line with a product shows its id as a tile (like the
+        // customer id tiles); a click, or focus reaching the box (arrows,
+        // Tab), turns it back into the product box (tileProduct).
+        (ro ? "" : '<button type="button" class="fop-badge fop-pid" tabindex="-1" data-action="edit-product" data-r="' + r + '" ' +
+          'title="Change product" aria-label="Change product, line ' + (r + 1) + '">' + esc(line.productId) + "</button>") +
         '<div class="fop-ac">' +
         '<input class="fop-input fop-grid-in" data-r="' + r + '" data-c="0" autocomplete="off" spellcheck="false" ' +
         'placeholder="' + (ro ? "" : "Search…") + '" value="' + esc(line.productId) + '" aria-label="Product, line ' + (r + 1) + '"' + ro + ">" +
@@ -2160,7 +2180,34 @@
       if (!ex) return titleHtml("Order Placement", "New order");
       return '<div class="fop-kicker">Order Placement</div><h1 class="fop-h1">' +
         esc(ex.e_sorder_id) +
-        ' <span class="fop-status fop-status--' + esc(String(ex.status).toLowerCase()) + '">' + esc(statusLabel(ex.status)) + "</span></h1>";
+        ' <span class="fop-status fop-status--' + esc(String(ex.status).toLowerCase()) + '">' + esc(statusLabel(ex.status)) + "</span>" +
+        deliveredHtml() + paymentHtml() + "</h1>";
+    }
+
+    // Payment tile after Delivered: order-lookup's payment_status (Eclipse
+    // balanceDue vs salesTotal, the same rule as the HubSpot deal sync's
+    // e_payment_status). "Paid" green, "Partially Paid" orange, nothing when
+    // unpaid. Bids and cancelled orders show none (nothing is billed).
+    function paymentHtml() {
+      var ex = state.existing;
+      if (!ex || ex.status === "Bid" || ex.status === "Cancel") return "";
+      var due = ex.balance_due != null ? " title=\"Balance due " + money(ex.balance_due) + "\"" : "";
+      if (ex.payment_status === "fully_paid") return '<span class="fop-status fop-status--invoice">Paid</span>';
+      if (ex.payment_status === "partially_paid") return '<span class="fop-status fop-status--partial"' + due + ">Partially Paid</span>";
+      return "";
+    }
+
+    // A green Delivered tile right of the status once every package in the
+    // order's Tracking details (parseTracking) is delivered. Its tooltip
+    // carries the delivery date when the packages share one.
+    function deliveredHtml() {
+      var pkgs = parseTracking(state.existing && state.existing.tracking_details);
+      if (!pkgs) return "";
+      var withStatus = pkgs.filter(function (p) { return p.status; });
+      if (!withStatus.length || !withStatus.every(function (p) { return isDelivered(p.status); })) return "";
+      var dates = withStatus.map(function (p) { return p.delivery; }).filter(function (v, i, a) { return v && a.indexOf(v) === i; });
+      return '<span class="fop-status fop-status--invoice"' +
+        (dates.length === 1 ? ' title="Delivered ' + esc(tdate(dates[0])) + '"' : "") + ">Delivered</span>";
     }
 
     // Action bar buttons. New order: Place as Bid + Place Order. Existing
@@ -2177,8 +2224,8 @@
           '<button class="fop-btn" data-action="place-order"' + (orderReason ? ' aria-disabled="true" title="' + esc(orderReason) + '"' : "") +
           ">Place Order <span class=\"fop-key fop-key--dark\">" + altKey("O") + "</span></button>";
       }
-      var html = ex.cancellable
-        ? '<button class="fop-btn fop-btn--danger" data-action="ask-cancel">Cancel ' + (ex.editable ? "Bid" : "Order") + "</button>" : "";
+      var html = quoteBtnHtml() + (ex.cancellable
+        ? '<button class="fop-btn fop-btn--danger" data-action="ask-cancel">Cancel ' + (ex.editable ? "Bid" : "Order") + "</button>" : "");
       if (ex.editable) {
         var updReason = placeBlockedReason("update");
         html += '<button class="fop-btn" data-action="update-bid"' + (updReason ? ' disabled title="' + esc(updReason) + '"' : "") +
@@ -2333,6 +2380,244 @@
       render();
     }
 
+    // ── View Quote (2026-10-19) ──────────────────────────────────────────
+    // An existing order's HubSpot quote (the generation's deal's newest quote
+    // with a public link), from the quote lookup flow. With no quote yet,
+    // View Quote makes one first (create-quote flow) and then opens it. It is
+    // grayed out while checking, while making one, and when the order has no
+    // HubSpot deal yet (a quote hangs off the deal).
+
+    function fetchHsQuote(id) {
+      if (!id || (hsQuotes[id] && !hsQuotes[id].error)) return;
+      hsQuotes[id] = { loading: true };
+      getJson(API.quote, { e_sorder_id: id })
+        .then(function (d) { hsQuotes[id] = { data: d }; })
+        .catch(function (err) { hsQuotes[id] = { error: err.message }; })
+        .then(refreshQuoteBtn);
+    }
+
+    function hsQuoteFor(ex) {
+      var q = ex && hsQuotes[ex.e_sorder_id];
+      return q && q.data && q.data.quote && q.data.quote.link ? q.data.quote : null;
+    }
+
+    // Why View Quote is grayed out, or null when it can open.
+    function quoteBlockedReason() {
+      var q = state.existing && hsQuotes[state.existing.e_sorder_id];
+      if (!q || q.loading) return "Checking HubSpot for a quote…";
+      if (q.creating) return "Creating the quote in HubSpot…";
+      if (q.error) return "Could not check HubSpot for a quote: " + q.error;
+      if (hsQuoteFor(state.existing)) return null;
+      return q.data && q.data.hs_deal_id ? null : "No HubSpot deal for this order yet, so there is nothing to quote.";
+    }
+
+    function quoteBtnText() {
+      var q = state.existing && hsQuotes[state.existing.e_sorder_id];
+      return q && q.creating ? "Creating quote…" : "View Quote";
+    }
+
+    function quoteBtnHtml() {
+      var why = quoteBlockedReason();
+      var tip = why || (hsQuoteFor(state.existing) ? "" : "No quote yet: this creates one in HubSpot.");
+      return '<button class="fop-btn fop-btn--ghost" data-action="view-quote"' + (why ? " disabled" : "") +
+        (tip ? ' title="' + esc(tip) + '"' : "") + ">" + quoteBtnText() + "</button>";
+    }
+
+    // Only the button: a full render would reload an open quote's iframe.
+    function refreshQuoteBtn() {
+      var btn = root.querySelector("[data-action=view-quote]");
+      if (!btn || !state.existing) return;
+      btn.outerHTML = quoteBtnHtml();
+    }
+
+    // Show the quote above the action bar's error, never inside the dialog.
+    function showQuoteError(msg) {
+      state.quoteError = msg;
+      var cell = root.querySelector('[data-cell="quote-error"]');
+      if (cell) cell.innerHTML = msg ? '<div class="fop-alert fop-alert--error">' + esc(msg) + "</div>" : "";
+    }
+
+    function openQuote() {
+      var ex = state.existing;
+      if (!ex) return;
+      var q = hsQuoteFor(ex);
+      if (q) {
+        showQuoteError(null);
+        state.quoteModal = { id: ex.e_sorder_id, quote: q, emails: [], sending: false, note: null };
+        render();
+        return;
+      }
+      // No quote yet: make one (create-quote returns an existing one instead
+      // if another click or rep got there first), then open it.
+      var id = ex.e_sorder_id, cur = hsQuotes[id];
+      if (!cur || !cur.data || cur.creating) return;
+      cur.creating = true;
+      showQuoteError(null);
+      refreshQuoteBtn();
+      postJson(API.createQuote, { e_sorder_id: id })
+        .then(function (d) {
+          hsQuotes[id] = { data: d };
+          if (!(d.quote && d.quote.link)) throw new Error("HubSpot made the quote but has not published its link yet. Try View Quote again in a minute.");
+          if (state.existing && state.existing.e_sorder_id === id && !state.quoteModal) openQuote();
+          else refreshQuoteBtn();
+        })
+        .catch(function (err) {
+          cur.creating = false;
+          if (state.existing && state.existing.e_sorder_id === id) showQuoteError("Could not create the quote: " + err.message);
+          refreshQuoteBtn();
+        });
+    }
+
+    function closeQuote() {
+      state.quoteModal = null;
+      render();
+    }
+
+    // Email format: letters, digits and . _ + - before the @, a domain with
+    // at least one dot after it and a 2+ letter ending. Lowercase only.
+    var EMAIL_RE = /^[a-z0-9_+-]+(\.[a-z0-9_+-]+)*@[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/;
+    var EMAIL_CHARS = /[^a-z0-9._+@-]/g;
+
+    function quoteModalHtml() {
+      var m = state.quoteModal, q = m.quote;
+      var meta = [q.number ? "Quote " + q.number : "", q.amount != null ? money(q.amount) : "",
+        q.expires ? (q.expired ? "Expired " : "Expires ") + q.expires : ""].filter(Boolean).join(" · ");
+      return (
+        '<div class="fop-modal" role="dialog" aria-modal="true" aria-labelledby="fop-quote-title">' +
+        '<div class="fop-modal__box fop-modal__box--wide fop-quote">' +
+        '<div class="fop-quote__head"><div><h2 class="fop-h2" id="fop-quote-title">Quote · ' + esc(m.id) + "</h2>" +
+        (meta ? '<div class="fop-muted' + (q.expired ? " fop-warn-text" : "") + '">' + esc(meta) + "</div>" : "") + "</div>" +
+        '<a class="fop-btn fop-btn--ghost fop-btn--sm" href="' + esc(q.link) + '" target="_blank" rel="noopener">Open in new tab ' + EXT_ICON + "</a></div>" +
+        '<iframe class="fop-quote__frame" src="' + esc(q.link) + '" title="Quote ' + esc(q.number || m.id) + '"></iframe>' +
+        '<div class="fop-field"><label class="fop-label" for="fop-quote-email">Send to <span class="fop-muted">(comma or Enter after each address)</span></label>' +
+        '<div class="fop-input fop-emails" data-cell="emails">' + emailChipsHtml() +
+        '<input class="fop-emails__in" id="fop-quote-email" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="email"' +
+        (m.emails.length ? "" : ' placeholder="name@example.com"') + "></div>" +
+        '<span class="fop-warn-text fop-block" data-cell="email-msg"></span></div>' +
+        '<div data-cell="send-note">' + sendNoteHtml() + "</div>" +
+        '<div class="fop-row fop-row--end">' +
+        '<button class="fop-btn fop-btn--ghost" data-action="close-quote">Close <span class="fop-key">Esc</span></button>' +
+        // aria-disabled, not disabled: a click with no address flashes the box.
+        sendBtnHtml() +
+        "</div></div></div>"
+      );
+    }
+
+    function sendBtnHtml() {
+      var m = state.quoteModal;
+      return '<button class="fop-btn" data-action="send-quote"' + (m.sending ? " disabled" : m.emails.length ? "" : ' aria-disabled="true" title="Add an email address."') + ">" +
+        (m.sending ? "Sending…" : 'Send Quote <span class="fop-key fop-key--dark">Ctrl+Enter</span>') + "</button>";
+    }
+
+    function sendNoteHtml() {
+      var n = state.quoteModal.note;
+      return n ? '<div class="fop-alert fop-alert--' + n.kind + '">' + esc(n.text) + "</div>" : "";
+    }
+
+    function emailChipsHtml() {
+      return state.quoteModal.emails.map(function (em, i) {
+        return '<span class="fop-chip">' + esc(em) + '<button type="button" class="fop-chip__x" data-action="remove-email" data-i="' + i + '" aria-label="Remove ' + esc(em) + '">×</button></span>';
+      }).join("");
+    }
+
+    // Redraw the chips, message and Send button in place (not render(), which
+    // would reload the iframe). Keeps the typed text and focus.
+    function refreshEmails(msg) {
+      var m = state.quoteModal;
+      var box = root.querySelector('[data-cell="emails"]');
+      var input = root.querySelector("#fop-quote-email");
+      if (!m || !box || !input) return;
+      Array.prototype.slice.call(box.querySelectorAll(".fop-chip")).forEach(function (c) { c.remove(); });
+      input.insertAdjacentHTML("beforebegin", emailChipsHtml());
+      if (m.emails.length) input.removeAttribute("placeholder"); else input.placeholder = "name@example.com";
+      box.classList.toggle("fop-input--err", !!msg);
+      var mc = root.querySelector('[data-cell="email-msg"]');
+      if (mc) mc.textContent = msg || "";
+      var btn = root.querySelector("[data-action=send-quote]");
+      if (btn) btn.outerHTML = sendBtnHtml();
+    }
+
+    // Turn the typed text into a chip. Returns false (and says why) when it is
+    // not a valid address; an empty box or a repeat is fine.
+    function addEmail(text) {
+      var em = String(text || "").trim();
+      if (!em) return true;
+      if (!EMAIL_RE.test(em)) { refreshEmails("\u201c" + em + "\u201d is not a valid email address."); return false; }
+      if (state.quoteModal.emails.indexOf(em) < 0) state.quoteModal.emails.push(em);
+      refreshEmails(null);
+      return true;
+    }
+
+    // Typing or pasting: lowercase only, characters an address can't hold are
+    // dropped, and a comma (or ; or a space) ends an address.
+    function onEmailInput(input) {
+      var raw = input.value;
+      var v = raw.toLowerCase();
+      var parts = v.split(/[,;\s]+/);
+      var rest = parts.pop();
+      var dropped = false;
+      var clean = function (x) { var c = x.replace(EMAIL_CHARS, ""); if (c !== x) dropped = true; return c; };
+      var bad = null;
+      parts.forEach(function (x) { x = clean(x); if (x && !bad && !addEmail(x)) bad = x; });
+      rest = clean(rest);
+      // A part that failed goes back in the box to be fixed.
+      var next = bad || rest;
+      if (input.value !== next) input.value = next;
+      if (bad) return;
+      if (dropped) refreshEmails("Only lowercase letters, numbers and . _ + - @ can be used.");
+      else if (parts.length || root.querySelector('[data-cell="email-msg"]').textContent) refreshEmails(null);
+    }
+
+    function removeEmail(i) {
+      state.quoteModal.emails.splice(i, 1);
+      refreshEmails(null);
+      var input = root.querySelector("#fop-quote-email");
+      if (input) input.focus();
+    }
+
+    function setSendNote(kind, text) {
+      var m = state.quoteModal;
+      if (!m) return;
+      m.note = text ? { kind: kind, text: text } : null;
+      var note = root.querySelector('[data-cell="send-note"]');
+      if (note) note.innerHTML = sendNoteHtml();
+    }
+
+    // Send Quote: with no address, flash the box. Otherwise the send-quote
+    // flow emails the quote (link + PDF) from the signed-in rep's Outlook
+    // mailbox; the chips clear once it is sent.
+    function sendQuote() {
+      var m = state.quoteModal;
+      if (!m || m.sending) return;
+      var input = root.querySelector("#fop-quote-email");
+      if (input && input.value.trim() && !addEmail(input.value)) { input.focus(); return; }
+      if (input) input.value = "";
+      if (!m.emails.length) {
+        flashField(root.querySelector('[data-cell="emails"]'));
+        if (input) input.focus();
+        return;
+      }
+      if (!user.email) { setSendNote("error", "Sign in again: no email address on this session, so there is no mailbox to send from."); return; }
+      var to = m.emails.slice();
+      m.sending = true;
+      setSendNote(null, null);
+      refreshEmails(null);
+      postJson(API.sendQuote, { e_sorder_id: m.id, to_emails: to, from_email: user.email })
+        .then(function (d) {
+          if (state.quoteModal !== m) return;
+          m.sending = false;
+          m.emails = [];
+          refreshEmails(null);
+          setSendNote("success", "Sent from " + (d.from || user.email) + " to " + (d.sent_to || to).join(", ") + ".");
+        })
+        .catch(function (err) {
+          if (state.quoteModal !== m) return;
+          m.sending = false;
+          refreshEmails(null);
+          setSendNote("error", "Not sent: " + err.message);
+        });
+    }
+
     function closeChangeLog() {
       state.logModal = false;
       render();
@@ -2435,6 +2720,7 @@
         // Error + action bar: in the side layout they stay in the left column
         // (under the header), so the stock card's column runs the full height.
         (state.placeError ? '<div class="fop-alert fop-alert--error">' + esc(state.placeError) + "</div>" : "") +
+        '<div data-cell="quote-error">' + (state.quoteError ? '<div class="fop-alert fop-alert--error">' + esc(state.quoteError) + "</div>" : "") + "</div>" +
         '<div class="fop-bar">' +
         '<div class="fop-bar__totals" data-cell="totals">' + totalsHtml() + "</div>" +
         '<div class="fop-bar__actions">' + lastModifiedHtml() + actionsHtml() + "</div></div>" +
@@ -2450,14 +2736,15 @@
         (state.detailsModal ? detailsModalHtml() : "") +
         (state.cancelAsk ? cancelHtml() : "") +
         (state.logModal ? changeLogHtml() : "") +
+        (state.quoteModal ? quoteModalHtml() : "") +
         "</div>"
       );
     }
 
     // Alt+B → fixed Bid. Alt+O → the rep picks the order status here (it is not
-    // in the header); a Bid status from Alt+O still places a bid.
+    // in the header); Bid is not one of the choices.
     function confirmIsBid() {
-      return state.confirm.mode === "bid" || state.header.orderStatus === "Bid";
+      return state.confirm.mode === "bid";
     }
 
     function statusPickerHtml() {
@@ -2465,6 +2752,8 @@
       return '<div class="fop-field fop-confirm-status"><label class="fop-label" for="fop-confirm-status">Order status ' +
         '<span class="fop-muted">(↑↓ or 1–' + ORDER_STATUSES.length + ")</span></label>" +
         '<select class="fop-input" id="fop-confirm-status" data-head="orderStatus">' +
+        // Starts on "Select…"; placing with it blank flashes the box.
+        '<option value="" disabled' + (h.orderStatus ? "" : " selected") + ">Select…</option>" +
         ORDER_STATUSES.map(function (o, i) {
           return '<option value="' + esc(o[1]) + '"' + (o[1] === h.orderStatus ? " selected" : "") + ">" + (i + 1) + ". " + esc(o[0]) + "</option>";
         }).join("") + "</select></div>";
@@ -2477,6 +2766,16 @@
       var btn = root.querySelector("[data-action=confirm-place]");
       if (title) title.textContent = isBid ? "Place as Bid?" : "Place Order?";
       if (btn && !state.placing) btn.innerHTML = (isBid ? "Place Bid" : "Place Order") + ' <span class="fop-key fop-key--dark">Enter</span>';
+      if (btn) {
+        if (needsStatus()) { btn.setAttribute("aria-disabled", "true"); btn.title = "Pick an order status."; }
+        else { btn.removeAttribute("aria-disabled"); btn.removeAttribute("title"); }
+      }
+    }
+
+    // An order (not a bid) with no status picked yet: Place Order is grayed
+    // out (aria-disabled, so a click still reaches place() and flashes the box).
+    function needsStatus() {
+      return state.confirm && state.confirm.mode === "order" && !state.header.orderStatus;
     }
 
     // A line's comment under its description in the confirm dialogs.
@@ -2524,7 +2823,8 @@
         (state.placeError ? '<div class="fop-alert fop-alert--error">' + esc(state.placeError) + "</div>" : "") +
         '<div class="fop-row fop-row--end">' +
         '<button class="fop-btn fop-btn--ghost" data-action="cancel-place"' + (state.placing ? " disabled" : "") + ">Back <span class=\"fop-key\">Esc</span></button>" +
-        '<button class="fop-btn" data-action="confirm-place"' + (state.placing ? " disabled" : "") + ">" +
+        '<button class="fop-btn" data-action="confirm-place"' + (state.placing ? " disabled" : "") +
+        (needsStatus() ? ' aria-disabled="true" title="Pick an order status."' : "") + ">" +
         (state.placing ? "Placing…" : (isBid ? "Place Bid" : "Place Order") + ' <span class="fop-key fop-key--dark">Enter</span>') +
         "</button></div></div></div>"
       );
@@ -2730,6 +3030,18 @@
 
     // ── Grid focus + line ops ──────────────────────────────────────────────
 
+    // Product id tile on an editable line (lineRowHtml): on shows the tile
+    // (only while the line has a product), off shows the product box.
+    function tileProduct(r, on) {
+      var el = rowEl(r);
+      var cell = el && el.querySelector(".fop-cell--product");
+      var line = state.lines[r];
+      var tile = cell && cell.querySelector(".fop-pid");
+      if (!tile || !line) return;
+      tile.textContent = line.productId;
+      cell.classList.toggle("fop-cell--tiled", !!(on && line.productId));
+    }
+
     function cellInput(r, c) {
       return root.querySelector('.fop-grid-in[data-r="' + r + '"][data-c="' + c + '"]');
     }
@@ -2920,7 +3232,7 @@
       var blocked = placeBlockedReason(mode);
       if (blocked) {
         // Place Order (click or shortcut) without a ship via: flash the box.
-        if (mode === "order" && !state.header.shipVia && blocked === "Pick a ship via.") flashShipVia();
+        if (mode === "order" && !state.header.shipVia && blocked === "Pick a ship via.") flashField(root.querySelector('#fop-head [data-head="shipVia"]'));
         return;
       }
       state.confirm = { mode: mode };
@@ -2928,10 +3240,10 @@
       render();
     }
 
-    // Flash the Ship via box yellow twice (restarts if already flashing), and
-    // scroll it into view when it is off screen.
-    function flashShipVia() {
-      var el = root.querySelector('#fop-head [data-head="shipVia"]');
+    // Flash a box yellow twice (restarts if already flashing), and scroll it
+    // into view when it is off screen. Used for a blank Ship via (Place
+    // Order) and a blank order status (Place Order in the dialog).
+    function flashField(el) {
       if (!el) return;
       el.classList.remove("fop-flash");
       void el.offsetWidth;
@@ -3048,6 +3360,13 @@
       var mode = state.confirm.mode;
       if (mode === "update") { updateBid(); return; }
       var h = state.header;
+      // An order needs a status picked in the dialog; blank flashes the box.
+      if (mode === "order" && !h.orderStatus) {
+        var st = root.querySelector("#fop-confirm-status");
+        flashField(st);
+        if (st) st.focus();
+        return;
+      }
       var c = state.customer;
       state.placing = true;
       state.placeError = null;
@@ -3096,7 +3415,7 @@
         }),
       })
         .then(function (data) {
-          data.mode = (mode === "bid" || h.orderStatus === "Bid") ? "bid" : "order";
+          data.mode = mode;
           state.result = data;
           state.ordersList = null;  // the new order belongs in the list
           // The new bid or order opens as the existing order it now is.
@@ -3142,16 +3461,23 @@
       render();
     }
 
-    // Desktop: a click on the dimmed backdrop around the change log closes
-    // it (on request). Press and release must both be on the backdrop, so
-    // selecting log text and letting go outside the box keeps it open.
+    // Desktop: a click on the dimmed backdrop around any dialog closes it,
+    // the same as Esc (change log on request, then every dialog 2026-10-19).
+    // Press and release must both be on the backdrop, so selecting text and
+    // letting go outside the box keeps it open. Nothing closes while placing.
     // Phones keep Close / Esc only.
     var backdropDown = null;
     root.addEventListener("mousedown", function (e) { backdropDown = e.target; });
     root.addEventListener("click", function (e) {
       var t = e.target;
-      if (state.view === "order" && state.logModal && t === backdropDown && t.classList.contains("fop-modal") &&
-          !(window.matchMedia && window.matchMedia("(max-width: 767px)").matches)) closeChangeLog();
+      if (state.view !== "order" || t !== backdropDown || !t.classList.contains("fop-modal") ||
+          (window.matchMedia && window.matchMedia("(max-width: 767px)").matches)) return;
+      if (state.quoteModal) closeQuote();
+      else if (state.logModal) closeChangeLog();
+      else if (state.cancelAsk) closeCancel();
+      else if (state.customModal) closeCustomModal();
+      else if (state.detailsModal) closeDetails(false);
+      else if (state.confirm && !state.placing) { state.confirm = null; state.placeError = null; render(); }
     });
 
     root.addEventListener("click", function (e) {
@@ -3174,6 +3500,13 @@
       var pick = e.target.closest("[data-shipto]");
       if (pick) { startOrder(state.customer.ship_tos[Number(pick.getAttribute("data-shipto"))]); return; }
 
+      // Quote dialog: a click anywhere in the email box (not a chip's ×) types there.
+      if (state.quoteModal && e.target.closest('[data-cell="emails"]') && !e.target.closest("[data-action]")) {
+        var qe = root.querySelector("#fop-quote-email");
+        if (qe && e.target !== qe) qe.focus();
+        return;
+      }
+
       var el = e.target.closest("[data-action]");
       if (!el || el.disabled) return;
       if (el.getAttribute("data-action") === "log-gen-only") { state.logGenOnly = el.checked; render(); return; }
@@ -3186,6 +3519,7 @@
         case "exit-order": if (confirmLeave()) exitToOrders(); break;
         case "add-line": if (!linesLocked()) addLine(); break;
         case "remove-line": if (!linesLocked()) removeLine(r); break;
+        case "edit-product": focusCell(r, 0); break;
         case "open-comment": {
           var cs = el.closest('[data-cell="comment"]');
           if (cs) cs.classList.remove("fop-stockstrip--cmt-closed");
@@ -3197,6 +3531,10 @@
         case "new-from-list": newOrderFromList(); break;
         case "change-log": openChangeLog(); break;
         case "close-log": closeChangeLog(); break;
+        case "view-quote": openQuote(); break;
+        case "close-quote": closeQuote(); break;
+        case "send-quote": sendQuote(); break;
+        case "remove-email": removeEmail(Number(el.getAttribute("data-i"))); break;
         case "ask-cancel": askCancel(); break;
         case "keep-order": closeCancel(); break;
         case "confirm-cancel": cancelOrder(); break;
@@ -3256,6 +3594,7 @@
 
     root.addEventListener("input", function (e) {
       var t = e.target;
+      if (state.quoteModal && t.id === "fop-quote-email") { onEmailInput(t); return; }
       if (state.customModal && t.hasAttribute("data-cf")) { onCustomField(t); return; }
       // Line comments: the inline strip writes straight to the line, the
       // details dialog to its draft.
@@ -3354,13 +3693,29 @@
       var t = e.target;
       if (t.classList && t.classList.contains("fop-notes") && t.closest(".fop-head")) autosizeNotes(t);
     }
+    // Quote dialog: leaving the email box turns a valid address left in it
+    // into a chip (an invalid one stays, with its message).
+    root.addEventListener("focusout", function (e) {
+      if (state.quoteModal && e.target.id === "fop-quote-email" && e.target.value.trim() && addEmail(e.target.value)) e.target.value = "";
+    });
     root.addEventListener("focusin", resizeHeadNotes);
     root.addEventListener("focusout", function (e) { setTimeout(function () { resizeHeadNotes(e); }, 0); });
+
+    // Leaving a product box that still holds its picked product turns it
+    // back into the id tile.
+    root.addEventListener("focusout", function (e) {
+      var t = e.target;
+      if (!t.classList || !t.classList.contains("fop-grid-in") || t.getAttribute("data-c") !== "0") return;
+      var r = Number(t.getAttribute("data-r"));
+      var line = state.lines[r];
+      if (line && line.productId && t.value.trim() === line.productId) tileProduct(r, true);
+    });
 
     root.addEventListener("focusin", function (e) {
       var t = e.target;
       if (t.classList && t.classList.contains("fop-grid-in")) {
         state.focus = { r: Number(t.getAttribute("data-r")), c: Number(t.getAttribute("data-c")) };
+        if (state.focus.c === 0) tileProduct(state.focus.r, false);
         if (sideLayout && state.focus.r !== sideRow) refreshSide();
         moveStrips();
       }
@@ -3436,6 +3791,30 @@
     function onKey(e) {
       var t = e.target;
 
+      // Quote dialog: Esc closes, Ctrl+Enter sends, Tab stays in the dialog.
+      // In the email box Enter or a comma ends an address and Backspace on
+      // an empty box removes the last one.
+      if (state.view === "order" && state.quoteModal) {
+        if (e.key === "Escape") { e.preventDefault(); closeQuote(); }
+        else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendQuote(); }
+        else if (t.id === "fop-quote-email" && (e.key === "Enter" || e.key === ",")) {
+          e.preventDefault();
+          if (addEmail(t.value)) t.value = "";
+        } else if (t.id === "fop-quote-email" && e.key === "Backspace" && !t.value && state.quoteModal.emails.length) {
+          e.preventDefault();
+          state.quoteModal.emails.pop();
+          refreshEmails(null);
+        } else if (e.key === "Tab") {
+          var qf = Array.prototype.slice.call(root.querySelectorAll(".fop-modal a, .fop-modal input, .fop-modal button:not([disabled])"));
+          if (qf.length) {
+            e.preventDefault();
+            var qi = qf.indexOf(document.activeElement);
+            qf[(qi + (e.shiftKey ? -1 : 1) + qf.length) % qf.length].focus();
+          }
+        }
+        return;
+      }
+
       // Change log dialog: Esc closes, Tab stays in the dialog.
       if (state.view === "order" && state.logModal) {
         var lf = Array.prototype.slice.call(root.querySelectorAll(".fop-modal input, .fop-modal button"));
@@ -3510,10 +3889,11 @@
         else if (e.key === "Enter" && !state.placing && !(t.getAttribute && t.getAttribute("data-action") === "cancel-place")) {
           e.preventDefault(); place();
         } else if (t.id === "fop-confirm-status" && (e.key === "ArrowDown" || e.key === "ArrowUp" || /^[1-9]$/.test(e.key))) {
-          // Pick the status without opening the native list.
+          // Pick the status without opening the native list. Option 0 is the
+          // blank "Select…", so status k is option k and ↑ stops at status 1.
           var n = ORDER_STATUSES.length;
-          var next = /^[1-9]$/.test(e.key) ? Number(e.key) - 1 : t.selectedIndex + (e.key === "ArrowDown" ? 1 : -1);
-          if (next >= 0 && next < n) {
+          var next = /^[1-9]$/.test(e.key) ? Number(e.key) : t.selectedIndex + (e.key === "ArrowDown" ? 1 : -1);
+          if (next >= 1 && next <= n) {
             e.preventDefault();
             t.selectedIndex = next;
             t.dispatchEvent(new Event("change", { bubbles: true }));
@@ -3638,7 +4018,7 @@
       if (root.contains(e.target)) return;
       if (isShortcutMod(e)) { onKey(e); return; }
       if (e.key !== "Escape" && e.key !== "Tab") return;
-      if (state.view === "order" && (state.logModal || state.cancelAsk || state.confirm || state.customModal || state.detailsModal)) onKey(e);
+      if (state.view === "order" && (state.quoteModal || state.logModal || state.cancelAsk || state.confirm || state.customModal || state.detailsModal)) onKey(e);
     });
 
     // Close an open list when clicking elsewhere.
@@ -3659,7 +4039,7 @@
   // (the favicon's icon, no wordmark) left;
   // HS Deal, HS Customer (filled by paintHeader() in initApp), the theme
   // toggle and a user menu right (the rep's name with a caret, like
-  // HubSpot's account menu; it opens the Eclipse user id and Sign out). It replaces auth.js's sign-in
+  // HubSpot's account menu; it opens the rep's email, Eclipse user id and Sign out). It replaces auth.js's sign-in
   // chip on these pages (hidden in styles.css). Sticky on desktop; on phones
   // it slides away while scrolling down and comes back on any scroll up.
   function initHeader(root, user) {
@@ -3680,6 +4060,7 @@
       '<span class="fop-umenu__name fop-umenu__name--first">' + esc(name.split(/\s+/)[0]) + "</span>" +
       '<svg class="fop-umenu__caret" viewBox="0 0 10 6" aria-hidden="true"><path d="M0 0h10L5 6z" fill="currentColor"/></svg></button>' +
       '<div class="fop-umenu__panel" hidden>' +
+      (user.email ? '<div class="fop-umenu__row"><span class="fop-umenu__lbl">Email</span>' + esc(user.email) + "</div>" : "") +
       '<div class="fop-umenu__row"><span class="fop-umenu__lbl">Eclipse ID</span>' + esc(user.e_user_id || "") + "</div>" +
       // Phones only (styles.css); desktop has the icon in the bar.
       '<button type="button" class="fop-umenu__theme"></button>' +
