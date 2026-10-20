@@ -1609,9 +1609,9 @@ html[data-theme="light"] .fop-chip { background: #eaf0f6; }
    "Open in new tab" is just its icon, the send hint is hidden and Send
    Quote reads "Send". */
 @media (max-width: 767px) {
-  /* 28px of the page shows above and below (so it reads as a dialog over
+  /* 12px of the page shows above and below (so it reads as a dialog over
      the order), 6px at the sides. */
-  .fop-modal.fop-modal--quote { padding: 28px 6px max(28px, env(safe-area-inset-bottom)); }
+  .fop-modal.fop-modal--quote { padding: 12px 6px max(12px, env(safe-area-inset-bottom)); }
   .fop-modal--quote .fop-quote { width: 100%; max-width: none; padding: 8px 2px; gap: 8px; }
   /* Only the quote runs to 2px from the edge; the header and the send row
      keep 8px. */
