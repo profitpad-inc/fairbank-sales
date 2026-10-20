@@ -1218,9 +1218,11 @@
         if (first) first.focus();
       } else if (state.view === "order") {
         if (state.quoteModal) {
-          // The email box (no scroll, so the quote shows from its top).
+          fitQuoteFrame();
+          // The email box (no scroll, so the quote shows from its top). Not on
+          // touch screens: the keyboard would cover the quote on open.
           var qin = root.querySelector("#fop-quote-email");
-          if (qin) qin.focus({ preventScroll: true });
+          if (qin && !(window.matchMedia && window.matchMedia("(hover: none)").matches)) qin.focus({ preventScroll: true });
         } else if (state.logModal) {
           var lc = root.querySelector("[data-action=close-log]");
           // Close sits below the log: no scroll, so the log opens at the top.
@@ -2458,7 +2460,13 @@
         .then(function (d) {
           hsQuotes[id] = { data: d };
           if (!(d.quote && d.quote.link)) throw new Error("HubSpot made the quote but has not published its link yet. Try View Quote again in a minute.");
-          if (state.existing && state.existing.e_sorder_id === id && !state.quoteModal) openQuote();
+          var here = state.existing && state.existing.e_sorder_id === id;
+          // create-quote waits (up to 20 s) for the new quote's page to stop
+          // answering 404; page_ready false means it was still not up.
+          if (d.page_ready === false) {
+            if (here) showQuoteError("HubSpot is still preparing the quote. Try View Quote again in a moment.");
+            refreshQuoteBtn();
+          } else if (here && !state.quoteModal) openQuote();
           else refreshQuoteBtn();
         })
         .catch(function (err) {
@@ -2480,34 +2488,166 @@
 
     function quoteModalHtml() {
       var m = state.quoteModal, q = m.quote;
-      var meta = [q.number ? "Quote " + q.number : "", q.amount != null ? money(q.amount) : "",
-        q.expires ? (q.expired ? "Expired " : "Expires ") + q.expires : ""].filter(Boolean).join(" · ");
       return (
-        '<div class="fop-modal" role="dialog" aria-modal="true" aria-labelledby="fop-quote-title">' +
+        // Closed by the × (top right), Esc or a backdrop click. Phones
+        // (styles.css): near full screen, the quote scaled to the screen's
+        // width (fitQuoteFrame), pinch to zoom.
+        '<div class="fop-modal fop-modal--quote" role="dialog" aria-modal="true" aria-labelledby="fop-quote-title">' +
         '<div class="fop-modal__box fop-modal__box--wide fop-quote">' +
-        '<div class="fop-quote__head"><div><h2 class="fop-h2" id="fop-quote-title">Quote · ' + esc(m.id) + "</h2>" +
-        (meta ? '<div class="fop-muted' + (q.expired ? " fop-warn-text" : "") + '">' + esc(meta) + "</div>" : "") + "</div>" +
-        '<a class="fop-btn fop-btn--ghost fop-btn--sm" href="' + esc(q.link) + '" target="_blank" rel="noopener">Open in new tab ' + EXT_ICON + "</a></div>" +
-        '<iframe class="fop-quote__frame" src="' + esc(q.link) + '" title="Quote ' + esc(q.number || m.id) + '"></iframe>' +
-        '<div class="fop-field"><label class="fop-label" for="fop-quote-email">Send to <span class="fop-muted">(comma or Enter after each address)</span></label>' +
+        '<div class="fop-quote__head"><div class="fop-quote__titles"><h2 class="fop-h2" id="fop-quote-title">Quote · ' + esc(m.id) + "</h2></div>" +
+        '<a class="fop-btn fop-btn--ghost fop-btn--sm fop-quote__newtab" href="' + esc(q.link) + '" target="_blank" rel="noopener" aria-label="Open the quote in a new tab">' +
+        '<span class="fop-quote__newtab-txt">Open in new tab </span>' + EXT_ICON + "</a>" +
+        '<button type="button" class="fop-icon-btn fop-quote__x" data-action="close-quote" aria-label="Close">×</button></div>' +
+        '<div class="fop-quote__viewport"><iframe class="fop-quote__frame" src="' + esc(q.link) + '" title="Quote ' + esc(q.number || m.id) + '"></iframe>' +
+        (quoteTouch() ? '<div class="fop-quote__touch" aria-hidden="true"></div>' : "") + "</div>" +
+        '<div class="fop-quote__foot">' +
+        '<div class="fop-field"><label class="fop-label" for="fop-quote-email">Send to <span class="fop-muted fop-quote__hint">(comma or Enter after each address)</span></label>' +
         '<div class="fop-input fop-emails" data-cell="emails">' + emailChipsHtml() +
         '<input class="fop-emails__in" id="fop-quote-email" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="email"' +
         (m.emails.length ? "" : ' placeholder="name@example.com"') + "></div>" +
         '<span class="fop-warn-text fop-block" data-cell="email-msg"></span></div>' +
-        '<div data-cell="send-note">' + sendNoteHtml() + "</div>" +
+        '<div class="fop-quote__note" data-cell="send-note">' + sendNoteHtml() + "</div>" +
         '<div class="fop-row fop-row--end">' +
-        '<button class="fop-btn fop-btn--ghost" data-action="close-quote">Close <span class="fop-key">Esc</span></button>' +
         // aria-disabled, not disabled: a click with no address flashes the box.
         sendBtnHtml() +
-        "</div></div></div>"
+        "</div></div></div></div>"
       );
     }
 
     function sendBtnHtml() {
       var m = state.quoteModal;
       return '<button class="fop-btn" data-action="send-quote"' + (m.sending ? " disabled" : m.emails.length ? "" : ' aria-disabled="true" title="Add an email address."') + ">" +
-        (m.sending ? "Sending…" : 'Send Quote <span class="fop-key fop-key--dark">Ctrl+Enter</span>') + "</button>";
+        (m.sending ? "Sending…" : 'Send<span class="fop-quote__q"> Quote</span> <span class="fop-key fop-key--dark">Ctrl+Enter</span>') + "</button>";
     }
+
+    // The quote template is a fixed 8.5in (816px) sheet. Where the dialog is
+    // narrower (phones), the iframe is laid out at that width and scaled down
+    // to fit, so the whole page width shows.
+    //
+    // Touch screens get pinch-to-zoom (2026-10-19, on request): the browser
+    // gives a cross-origin iframe's gestures to the iframe, so a transparent
+    // layer (.fop-quote__touch) sits over it and handles them here: two
+    // fingers zoom (fit width up to 4x), one finger pans, a double tap zooms
+    // in at that spot or back out to fit. The iframe is laid out tall enough
+    // for the whole quote (quoteSheetHeight) and moved with a transform, so
+    // panning replaces its own scrolling. Trade-off: links and buttons inside
+    // the quote can't be tapped there (Open in new tab has them).
+    var QUOTE_PAGE_W = 816;
+    var QUOTE_MAX_ZOOM = 4;
+
+    function quoteTouch() {
+      return !!(window.matchMedia && window.matchMedia("(hover: none) and (pointer: coarse)").matches);
+    }
+
+    // The quote's height can't be read (another site), so allow for it: an
+    // 11in sheet, or more for long orders (about 90px a line, generous, so a
+    // long quote is never cut off; the cost is blank space below a short one).
+    function quoteSheetHeight() {
+      var n = state.existing && state.existing.lines ? state.existing.lines.length : filledLines().length;
+      return Math.max(1100, 700 + n * 90);
+    }
+
+    function fitQuoteFrame() {
+      var m = state.quoteModal;
+      var vp = root.querySelector(".fop-quote__viewport");
+      var fr = vp && vp.querySelector("iframe");
+      if (!m || !fr) return;
+      var w = vp.clientWidth, h = vp.clientHeight;
+      var k = w && w < QUOTE_PAGE_W ? w / QUOTE_PAGE_W : 1;
+      if (quoteTouch()) {
+        var H = quoteSheetHeight();
+        var v = m.view;
+        if (!v || v.fit !== k) v = m.view = { fit: k, s: k, x: 0, y: 0 };
+        fr.style.width = QUOTE_PAGE_W + "px";
+        fr.style.height = H + "px";
+        clampQuoteView(v, w, h, H);
+        fr.style.transform = "translate(" + v.x + "px," + v.y + "px) scale(" + v.s + ")";
+      } else if (k < 1) {
+        fr.style.width = QUOTE_PAGE_W + "px";
+        fr.style.height = Math.ceil(h / k) + "px";
+        fr.style.transform = "scale(" + k + ")";
+      } else {
+        fr.style.width = fr.style.height = fr.style.transform = "";
+      }
+    }
+
+    // Keep the sheet covering the box: no panning past its edges, centred
+    // when it is narrower than the box.
+    function clampQuoteView(v, w, h, H) {
+      v.s = Math.min(Math.max(v.s, v.fit), v.fit * QUOTE_MAX_ZOOM);
+      var cw = QUOTE_PAGE_W * v.s, ch = H * v.s;
+      v.x = cw <= w ? (w - cw) / 2 : Math.min(0, Math.max(w - cw, v.x));
+      v.y = ch <= h ? 0 : Math.min(0, Math.max(h - ch, v.y));
+    }
+
+    // Zoom to scale s keeping the sheet point under (px, py) (box coords) there.
+    function zoomQuoteAt(v, s, px, py, from) {
+      var f = from || v;
+      var cx = (px - f.x) / f.s, cy = (py - f.y) / f.s;
+      v.s = s;
+      v.x = px - cx * s;
+      v.y = py - cy * s;
+    }
+
+    var qt = null;   // the gesture in progress on the quote's touch layer
+    var lastTap = 0;
+    function touchPts(e, box) {
+      var r = box.getBoundingClientRect();
+      return Array.prototype.map.call(e.touches, function (t) { return { x: t.clientX - r.left, y: t.clientY - r.top }; });
+    }
+    function quoteTouchStart(e) {
+      var m = state.quoteModal, vp = root.querySelector(".fop-quote__viewport");
+      if (!m || !m.view || !vp) return;
+      e.preventDefault();
+      var p = touchPts(e, vp), v = m.view;
+      if (p.length >= 2) {
+        qt = { pinch: true, d: Math.hypot(p[1].x - p[0].x, p[1].y - p[0].y) || 1,
+          mx: (p[0].x + p[1].x) / 2, my: (p[0].y + p[1].y) / 2, v: { s: v.s, x: v.x, y: v.y } };
+      } else if (p.length === 1) {
+        qt = { pinch: false, sx: p[0].x, sy: p[0].y, v: { s: v.s, x: v.x, y: v.y }, moved: false };
+      }
+    }
+    function quoteTouchMove(e) {
+      var m = state.quoteModal, vp = root.querySelector(".fop-quote__viewport");
+      if (!m || !m.view || !vp || !qt) return;
+      e.preventDefault();
+      var p = touchPts(e, vp), v = m.view;
+      if (qt.pinch && p.length >= 2) {
+        var d = Math.hypot(p[1].x - p[0].x, p[1].y - p[0].y) || 1;
+        var mx = (p[0].x + p[1].x) / 2, my = (p[0].y + p[1].y) / 2;
+        var s = Math.min(Math.max(qt.v.s * d / qt.d, v.fit), v.fit * QUOTE_MAX_ZOOM);
+        // The point under the fingers' first midpoint follows the midpoint.
+        zoomQuoteAt(v, s, qt.mx, qt.my, qt.v);
+        v.x += mx - qt.mx;
+        v.y += my - qt.my;
+      } else if (!qt.pinch && p.length === 1) {
+        var dx = p[0].x - qt.sx, dy = p[0].y - qt.sy;
+        if (Math.abs(dx) + Math.abs(dy) > 6) qt.moved = true;
+        v.x = qt.v.x + dx;
+        v.y = qt.v.y + dy;
+      }
+      fitQuoteFrame();
+    }
+    function quoteTouchEnd(e) {
+      var m = state.quoteModal, vp = root.querySelector(".fop-quote__viewport");
+      if (!m || !m.view || !vp) { qt = null; return; }
+      e.preventDefault();
+      var g = qt;
+      // A finger lifted mid-pinch: carry on panning with the one left.
+      if (e.touches.length) { quoteTouchStart(e); return; }
+      qt = null;
+      if (!g || g.pinch || g.moved) { lastTap = 0; return; }
+      // Double tap: zoom in 2.5x at the spot, or back out to fit.
+      var now = Date.now();
+      if (now - lastTap < 300) {
+        var v = m.view;
+        if (v.s > v.fit * 1.05) { v.s = v.fit; v.x = 0; v.y = Math.min(0, v.y); }
+        else zoomQuoteAt(v, v.fit * 2.5, g.sx, g.sy);
+        fitQuoteFrame();
+        lastTap = 0;
+      } else lastTap = now;
+    }
+    window.addEventListener("resize", function () { if (state.quoteModal) fitQuoteFrame(); });
 
     function sendNoteHtml() {
       var n = state.quoteModal.note;
@@ -3693,6 +3833,17 @@
       var t = e.target;
       if (t.classList && t.classList.contains("fop-notes") && t.closest(".fop-head")) autosizeNotes(t);
     }
+    // Quote dialog: pinch / pan / double tap on the quote (touch screens).
+    // Non-passive, so preventDefault stops the page scrolling or zooming.
+    ["touchstart", "touchmove", "touchend", "touchcancel"].forEach(function (type) {
+      root.addEventListener(type, function (e) {
+        if (!e.target.classList || !e.target.classList.contains("fop-quote__touch")) return;
+        if (type === "touchstart") quoteTouchStart(e);
+        else if (type === "touchmove") quoteTouchMove(e);
+        else quoteTouchEnd(e);
+      }, { passive: false });
+    });
+
     // Quote dialog: leaving the email box turns a valid address left in it
     // into a chip (an invalid one stays, with its message).
     root.addEventListener("focusout", function (e) {
@@ -4037,9 +4188,9 @@
   // ── Page header (2026-10-19) ─────────────────────────────────────────────
   // Dark bar above the app on every view, both themes: the Fairbank mark
   // (the favicon's icon, no wordmark) left;
-  // HS Deal, HS Customer (filled by paintHeader() in initApp), the theme
-  // toggle and a user menu right (the rep's name with a caret, like
-  // HubSpot's account menu; it opens the rep's email, Eclipse user id and Sign out). It replaces auth.js's sign-in
+  // HS Deal, HS Customer (filled by paintHeader() in initApp) and a user
+  // menu right (the rep's name with a caret, like HubSpot's account menu;
+  // it opens the rep's email, Eclipse user id, the theme toggle and Sign out). It replaces auth.js's sign-in
   // chip on these pages (hidden in styles.css). Sticky on desktop; on phones
   // it slides away while scrolling down and comes back on any scroll up.
   function initHeader(root, user) {
@@ -4052,7 +4203,6 @@
       "</div>" +
       '<div class="fop-header__end">' +
       '<span class="fop-header__links" data-cell="hdr-links"></span>' +
-      '<button type="button" class="fop-theme-btn"></button>' +
       '<div class="fop-umenu">' +
       '<button type="button" class="fop-umenu__btn" aria-haspopup="true" aria-expanded="false">' +
       // Phones show the first name only (CSS swaps the two spans).
@@ -4062,13 +4212,11 @@
       '<div class="fop-umenu__panel" hidden>' +
       (user.email ? '<div class="fop-umenu__row"><span class="fop-umenu__lbl">Email</span>' + esc(user.email) + "</div>" : "") +
       '<div class="fop-umenu__row"><span class="fop-umenu__lbl">Eclipse ID</span>' + esc(user.e_user_id || "") + "</div>" +
-      // Phones only (styles.css); desktop has the icon in the bar.
       '<button type="button" class="fop-umenu__theme"></button>' +
       '<button type="button" class="fop-umenu__out">Sign out</button>' +
       "</div></div>" +
       "</div>";
     root.parentNode.insertBefore(header, root);
-    bindThemeBtn(header.querySelector(".fop-theme-btn"));
     bindThemeBtn(header.querySelector(".fop-umenu__theme"));
     header.querySelector(".fop-umenu__out").addEventListener("click", function () { window.fbSignOut(); });
 
@@ -4110,8 +4258,8 @@
 
   // ── Light / dark theme toggle ──────────────────────────────────────────
   // The <head> of each page sets html[data-theme] before paint (saved
-  // choice, else the system setting). The sun / moon button in the page
-  // header (initHeader()) switches it and saves the choice in localStorage
+  // choice, else the system setting). The "Dark mode" / "Light mode" row in the user
+  // menu (initHeader()) switches it and saves the choice in localStorage
   // ("fop-theme").
   var THEME_KEY = "fop-theme";
   var SUN_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>';
@@ -4121,19 +4269,10 @@
     return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
   }
 
-  // Two toggles: the icon button in the header bar (desktop) and the
-  // "Dark mode" / "Light mode" row in the user menu (phones); both show the
-  // theme a click switches to and repaint together.
+  // The user menu row shows the theme a click switches to.
   function paintThemeBtn(btn) {
     var light = currentTheme() === "light";
-    var icon = light ? MOON_ICON : SUN_ICON;
-    if (btn.classList.contains("fop-umenu__theme")) {
-      btn.innerHTML = icon + "<span>" + (light ? "Dark mode" : "Light mode") + "</span>";
-      return;
-    }
-    btn.innerHTML = icon;
-    btn.setAttribute("aria-label", light ? "Switch to dark mode" : "Switch to light mode");
-    btn.title = btn.getAttribute("aria-label");
+    btn.innerHTML = (light ? MOON_ICON : SUN_ICON) + "<span>" + (light ? "Dark mode" : "Light mode") + "</span>";
   }
 
   function bindThemeBtn(btn) {
@@ -4142,8 +4281,7 @@
       var next = currentTheme() === "light" ? "dark" : "light";
       document.documentElement.setAttribute("data-theme", next);
       try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* private mode: not saved */ }
-      var all = document.querySelectorAll(".fop-theme-btn, .fop-umenu__theme");
-      for (var i = 0; i < all.length; i++) paintThemeBtn(all[i]);
+      paintThemeBtn(btn);
     });
   }
 

@@ -12,9 +12,9 @@ body {
 }
 
 /* Colour tokens sit on :root (not .fop-app) because the Flatpickr calendar
-   is appended to <body>, outside the app. Dark is the default; the light
+   is appended to <body>, outside the app. These are the dark values; the light
    theme overrides them under html[data-theme="light"] at the end of this
-   file (theme picked in the page <head>, toggled from the sign-in chip). */
+   file (theme picked in the page <head>, toggled from the user menu). */
 :root {
   --page-bg:   linear-gradient(to bottom right, #081529, #003057);
   --navy:      #0e2245;
@@ -1204,9 +1204,8 @@ html[data-theme="light"] .fop-status--partial { color: #a14d00; border-color: rg
    teal links / focus / active states, dark teal pill primary buttons
    (HubSpot's Create colour), white outlined pill secondary buttons, gray tab boxes with a white active tab and
    gray tag-style id badges. Dark mode keeps the navy / gold scheme. Picked
-   in each page's <head> (saved choice, else the system setting) and toggled
-   with the sun / moon button in the sign-in chip (initThemeToggle() in
-   app.js). */
+   in each page's <head> (saved choice, else the system setting) and toggled from the
+   user menu (bindThemeBtn() in app.js). */
 html[data-theme="light"] {
   color-scheme: light;
   --page-bg:      #f5f8fa;
@@ -1325,6 +1324,10 @@ html[data-theme="light"] .fop-btn--on { background: #eaf0f6; }
 @media (hover: hover) {
   html[data-theme="light"] .fop-btn:hover:not([disabled]):not([aria-disabled="true"]) { background: var(--hs-primary-hi); border-color: var(--hs-primary-hi); }
   html[data-theme="light"] .fop-btn--ghost:hover:not([disabled]):not([aria-disabled="true"]) { color: var(--white); background: #f5f8fa; border-color: #7c98b6; }
+  /* Cancel Bid / Cancel Order: the general hover above gave red text on
+     the dark teal (hard to read). Hover now turns the button the danger
+     red with white text (2026-10-19, on request). */
+  html[data-theme="light"] .fop-btn--danger:hover:not([disabled]):not([aria-disabled="true"]) { color: #ffffff; background: var(--danger-text); border-color: var(--danger-text); }
 }
 html[data-theme="light"] .fop-key { color: inherit; border-color: currentColor; opacity: .7; }
 
@@ -1525,9 +1528,9 @@ html[data-theme="light"] .fop-modal__box { border-radius: 12px; box-shadow: 0 10
 }
 .fop-umenu__out:hover,
 .fop-umenu__theme:hover { background: rgba(255, 255, 255, .08); }
-/* Theme row: phones only, above Sign out (the bar's icon is hidden there). */
+/* Theme row, above Sign out. */
 .fop-umenu__theme {
-  display: none; align-items: center; gap: 10px; width: 100%; padding: 12px 16px; text-align: left;
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px 16px; text-align: left;
   font: inherit; color: #ffffff; background: none; border: 0; border-bottom: 1px solid #555555; cursor: pointer;
 }
 .fop-umenu__theme svg { width: 17px; height: 17px; flex: none; }
@@ -1542,37 +1545,54 @@ html[data-theme="light"] .fop-modal__box { border-radius: 12px; box-shadow: 0 10
   .fop-header__link { gap: 4px; }
   .fop-umenu__btn { padding: 0 10px 0 12px; gap: 6px; }
   .fop-umenu__name--full { display: none; }
-  .fop-header .fop-theme-btn { display: none; }
-  .fop-umenu__theme { display: flex; }
   .fop-umenu__name--first { display: inline; }
 }
 
-/* Theme toggle in the page header. */
-.fop-theme-btn {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 20px; height: 20px; padding: 0;
-  color: #f2f2f2; background: none; border: 0; cursor: pointer;
-}
-.fop-theme-btn svg { width: 17px; height: 17px; }
-.fop-theme-btn:hover { color: #ffffff; }
-
 /* ── View Quote dialog (2026-10-19) ──
-   The HubSpot quote page in an iframe, then the "Send to" email box: a
-   .fop-input wrapper holding the address chips and a borderless input, so
-   it outlines (and flashes, .fop-flash) as one box. */
-.fop-quote__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+   Header (title, Open in new tab, ×), the HubSpot quote page in an iframe
+   taking all the height left, then the "Send to" email box with Send Quote
+   beside it. The email box is a .fop-input wrapper holding the address
+   chips and a borderless input, so it outlines (and flashes, .fop-flash)
+   as one box. Esc, × or a backdrop click closes (no Close button). */
+.fop-modal.fop-modal--quote { padding: 8px 16px; }   /* little space above and below */
+.fop-modal--quote .fop-quote { height: 100%; max-height: none; overflow: hidden; }
+.fop-quote__head { display: flex; align-items: center; gap: 12px; }
+.fop-quote__titles { flex: 1 1 auto; min-width: 0; }
 .fop-quote__head .fop-btn { flex: none; }
-.fop-quote__frame {
-  display: block; width: 100%; height: 62vh; min-height: 320px;
+.fop-quote__x {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 36px; height: 36px; font-size: 26px; line-height: 1;
+}
+/* The iframe sits in a clipping box; fitQuoteFrame() scales it down when
+   the box is narrower than the 816px quote sheet. */
+.fop-quote__viewport {
+  position: relative; overflow: hidden; flex: 1 1 auto; min-height: 0;
   background: #ffffff; border: 1px solid var(--line); border-radius: 8px;
 }
-.fop-emails { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 8px; min-height: 40px; cursor: text; }
+.fop-quote__frame { position: absolute; top: 0; left: 0; display: block; width: 100%; height: 100%; border: 0; transform-origin: 0 0; }
+/* Touch screens: catches pinch / pan / double tap for the quote under it
+   (app.js, quoteTouchStart). touch-action none: the browser leaves the
+   gestures to the page. */
+.fop-quote__touch { position: absolute; inset: 0; z-index: 1; touch-action: none; }
+/* Send row: the email box grows, Send sits to its right on the box's
+   line (the footer row's button joins this flex row through
+   display: contents); the sent / error note goes under both. */
+.fop-quote__foot { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px 10px; }
+.fop-quote__foot > .fop-field { flex: 1 1 0; min-width: 0; }
+.fop-quote__foot .fop-row { display: contents; }
+.fop-quote__foot [data-action="send-quote"] { flex: none; height: 40px; }
+.fop-quote__note { order: 9; flex: 1 0 100%; }
+.fop-quote__note:empty { display: none; }
+.fop-emails { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 8px; min-height: 40px; cursor: text; }
 .fop-emails:focus-within { border-color: var(--gold); box-shadow: 0 0 0 2px rgba(200, 150, 42, .25); }
 .fop-emails.fop-input--err { border-color: var(--error); }
 .fop-emails__in {
   flex: 1 1 180px; min-width: 120px; padding: 2px 2px;
   font: inherit; color: var(--white); background: transparent; border: 0; outline: none;
 }
+/* The box (.fop-emails:focus-within) shows the focus ring; the input inside
+   gets none, or .fop-app :focus-visible draws a second ring inside it. */
+.fop-app .fop-emails__in:focus, .fop-app .fop-emails__in:focus-visible { outline: none; }
 .fop-chip {
   display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 9px;
   font-size: 14px; color: var(--text); background: rgba(143, 164, 194, 0.14);
@@ -1585,7 +1605,24 @@ html[data-theme="light"] .fop-modal__box { border-radius: 12px; box-shadow: 0 10
 .fop-chip__x:hover { color: var(--error); background: rgba(255, 95, 95, .1); }
 html[data-theme="light"] .fop-emails:focus-within { border-color: #00bda5; box-shadow: 0 0 0 3px rgba(0, 189, 165, .2); }
 html[data-theme="light"] .fop-chip { background: #eaf0f6; }
+/* Phones: the dialog nearly fills the screen with little padding,
+   "Open in new tab" is just its icon, the send hint is hidden and Send
+   Quote reads "Send". */
 @media (max-width: 767px) {
-  .fop-quote__frame { height: 55vh; min-height: 260px; }
+  /* 28px of the page shows above and below (so it reads as a dialog over
+     the order), 6px at the sides. */
+  .fop-modal.fop-modal--quote { padding: 28px 6px max(28px, env(safe-area-inset-bottom)); }
+  .fop-modal--quote .fop-quote { width: 100%; max-width: none; padding: 8px 2px; gap: 8px; }
+  /* Only the quote runs to 2px from the edge; the header and the send row
+     keep 8px. */
+  .fop-modal--quote .fop-quote__head, .fop-modal--quote .fop-quote__foot { padding: 0 6px; }
+  .fop-quote__head { gap: 8px; }
+  .fop-quote .fop-h2 { font-size: 17px; line-height: 1.2; }
+  .fop-quote__newtab { padding: 7px 9px; }
+  .fop-quote__newtab-txt, .fop-quote__hint, .fop-quote__q { display: none; }
+  .fop-quote__viewport { border-radius: 4px; }
+  .fop-quote__foot { gap: 6px 8px; }
+  .fop-quote__foot .fop-label { margin-bottom: 3px; }
+  .fop-quote__foot [data-action="send-quote"] { padding: 0 16px; }
   .fop-emails__in { font-size: 16px; } /* no iOS zoom on focus */
 }

@@ -275,6 +275,20 @@
   },
   {
    "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "// A new quote's public page answers 404 for a few seconds while HubSpot\n// publishes it. Check it every second, up to 20 tries, and answer only once\n// it is up, so View Quote never opens on HubSpot's 404 page. Still 404 after\n// that: answer with page_ready false (the page asks to try again shortly).\n// Errors from earlier steps (ok false) pass straight through.\nconst j = $input.first().json;\nconst link = j.ok && j.body && j.body.quote && j.body.quote.link;\nif (!link) return [{ json: j }];\nconst t0 = Date.now();\nlet status = null, tries = 0;\nfor (; tries < 20; tries++) {\n  if (tries) await new Promise((res) => setTimeout(res, 1000));\n  try {\n    const r = await this.helpers.httpRequest({ method: 'GET', url: link, returnFullResponse: true, ignoreHttpStatusErrors: true, json: false });\n    status = r.statusCode;\n  } catch (e) {\n    status = 'error: ' + e.message;\n  }\n  if (status !== 404 && typeof status === 'number') break;\n}\nconst ready = typeof status === 'number' && status !== 404;\nreturn [{ json: Object.assign({}, j, { body: Object.assign({}, j.body, { page_ready: ready, page_status: status, page_wait_ms: Date.now() - t0, page_tries: Math.min(tries + 1, 20) }) }) }];\n"
+   },
+   "id": "0aa860f6-7d35-554c-abbc-a82efedfcbf2",
+   "name": "Wait for page",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2880,
+    0
+   ]
+  },
+  {
+   "parameters": {
     "respondWith": "json",
     "responseBody": "={{ JSON.stringify($json.body) }}",
     "options": {
@@ -286,7 +300,7 @@
    "type": "n8n-nodes-base.respondToWebhook",
    "typeVersion": 1.1,
    "position": [
-    2880,
+    3120,
     0
    ]
   },
@@ -318,7 +332,7 @@
    "type": "n8n-nodes-base.if",
    "typeVersion": 2,
    "position": [
-    3120,
+    3360,
     0
    ]
   },
@@ -350,7 +364,7 @@
    "type": "n8n-nodes-base.if",
    "typeVersion": 2,
    "position": [
-    3360,
+    3600,
     0
    ]
   },
@@ -382,7 +396,7 @@
    "type": "n8n-nodes-base.if",
    "typeVersion": 2,
    "position": [
-    3600,
+    3840,
     0
    ]
   },
@@ -414,7 +428,7 @@
    "type": "n8n-nodes-base.if",
    "typeVersion": 2,
    "position": [
-    3840,
+    4080,
     0
    ]
   },
@@ -446,7 +460,7 @@
    "type": "n8n-nodes-base.if",
    "typeVersion": 2,
    "position": [
-    4080,
+    4320,
     0
    ]
   }
@@ -574,6 +588,17 @@
    ]
   },
   "Shape": {
+   "main": [
+    [
+     {
+      "node": "Wait for page",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Wait for page": {
    "main": [
     [
      {
