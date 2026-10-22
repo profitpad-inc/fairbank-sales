@@ -387,6 +387,14 @@ textarea.fop-notes { display: block; min-height: calc(2.1em + 18px); line-height
 .fop-sum__row--total .fop-sum__val { font-family: 'Barlow Condensed', sans-serif; font-size: 22px; font-weight: 700; color: var(--gold-lt); }
 .fop-sum__cost { display: block; font-family: 'Barlow', sans-serif; font-size: 13px; font-weight: 400; color: var(--muted); }
 @media (max-width: 767px) { .fop-sum { width: 100%; } }
+/* Over credit limit tag (2026-10-21, on request): below the subtotal box on
+   desktop, same width and right edge so it lines up under it; empty (no
+   tag) collapses to no space. Phones put it back next to the Total instead
+   (.fop-credit-tag--bar, in the phone block below). 8px under the box,
+   the same as the box under the lines (the column's 16px gap less 8). */
+.fop-credit-tag--sum { width: 340px; max-width: 100%; margin: -8px 0 0 auto; text-align: right; }
+.fop-credit-tag--sum:empty { margin: 0; }
+.fop-credit-tag--bar { display: none; }
 .fop-btn--on { background: rgba(143, 164, 194, 0.16); }
 .fop-confirm-status { max-width: 320px; }
 
@@ -503,6 +511,11 @@ textarea.fop-notes { display: block; min-height: calc(2.1em + 18px); line-height
 
   .fop-mlabel { display: inline; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
   label.fop-mlabel { display: block; margin-bottom: 3px; }
+  /* Editable line with a product picked (tiled): the id sits beside the
+     "Product" label instead of on its own row under it. */
+  .fop-cell--tiled { display: flex; align-items: center; gap: 6px; }
+  .fop-cell--tiled .fop-mlabel { margin-bottom: 0; }
+  .fop-cell--tiled .fop-pid { margin: 0; }
   .fop-grid .fop-input { padding: 10px; font-size: 16px; background: var(--input-bg); border-color: var(--line); }
   .fop-grid .fop-cell--price .fop-num { text-align: left; }
 
@@ -882,7 +895,10 @@ html[data-theme="light"] .fop-status--partial { color: #a14d00; border-color: rg
 .fop-toggle input:checked + .fop-toggle__track::after { transform: translateX(16px); background: var(--on-gold); }
 .fop-toggle input:focus-visible + .fop-toggle__track { outline: 2px solid var(--gold-lt); outline-offset: 2px; }
 /* Custom line dialog: the picked existing product's name under its search box. */
+.fop-custom-orig { margin-top: 4px; font-size: 13px; font-variant-numeric: tabular-nums; min-height: 1em; }
 .fop-custom-pick { margin-top: 4px; font-size: 13px; min-height: 1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Blank (no product picked yet, or not a variation): no space, so the next field sits at the normal gap. */
+.fop-custom-pick:empty, .fop-custom-orig:empty { display: none; }
 
 /* ── Line comments and the details layout (2026-10-19) ── */
 /* Inline layout: stock, qty breaks and the comment form one panel under the
@@ -968,6 +984,13 @@ html[data-theme="light"] .fop-status--partial { color: #a14d00; border-color: rg
   50% { border-color: var(--warning); box-shadow: 0 0 0 3px rgba(240, 196, 106, .45); background-color: rgba(240, 196, 106, .18); }
 }
 .fop-input.fop-flash { animation: fop-flash .4s ease-in-out 2; }
+/* A button (Update Bid, when View Quote is clicked over unsaved changes):
+   the same yellow pulse as a ring, keeping the button's own colours. */
+@keyframes fop-flash-btn {
+  0%, 100% { box-shadow: none; }
+  50% { box-shadow: 0 0 0 3px rgba(240, 196, 106, .7); }
+}
+.fop-btn.fop-flash { animation: fop-flash-btn .4s ease-in-out 2; }
 
 /* Invoiced / cancelled orders: no Br / All stock columns at all, so qty,
    prices and ext move right instead of leaving empty columns (desktop; phones
@@ -987,7 +1010,10 @@ html[data-theme="light"] .fop-status--partial { color: #a14d00; border-color: rg
   /* The sign-in chip (auth.js, absolute top right, about 28px tall at top
      12px) gets the top strip to itself, so the title and status badge start
      below it instead of running into it. */
-  .fop-app { padding: 50px 12px 96px; }
+  /* Bottom padding matches the fixed action bar's own height (app.js
+     syncBarSpace, --fop-bar-h), which grows with Last modified / wrapped
+     buttons; 96px covers the common case before that runs. */
+  .fop-app { padding: 50px 12px var(--fop-bar-h, 96px); }
   .fop-wrap { gap: 12px; }
   .fop-h1 { font-size: 26px; }
   /* Title, then its buttons on their own row (the sign-in chip sits top right). */
@@ -1149,6 +1175,11 @@ html[data-theme="light"] .fop-status--partial { color: #a14d00; border-color: rg
   }
   .fop-bar__totals { width: auto; flex: none; align-self: center; }
   .fop-bar__totals .fop-muted { display: block; font-size: 12px; }
+  /* Over credit limit tag: back next to the Total here (no room below the
+     subtotal box on a phone), its own line like the "prices pending" note
+     so it never crowds the buttons. */
+  .fop-credit-tag--bar { display: block; margin: 2px 0 0; }
+  .fop-credit-tag--sum { display: none; }
   .fop-bar__actions { width: auto; flex: 1; min-width: 0; gap: 8px; justify-content: flex-end; }
   .fop-bar__actions .fop-btn { padding: 10px 8px; font-size: 15px; letter-spacing: .03em; }
   .fop-lastmod { font-size: 12px; text-align: right; white-space: normal; }
@@ -1626,3 +1657,52 @@ html[data-theme="light"] .fop-chip { background: #eaf0f6; }
   .fop-quote__foot [data-action="send-quote"] { padding: 0 16px; }
   .fop-emails__in { font-size: 16px; } /* no iOS zoom on focus */
 }
+
+/* ── Ship branch per line (2026-10-19, on request) ──
+   On a new order or a bid the inventory tiles are buttons: a click ships
+   that line from the branch (outlined in gold, as the ship branch was).
+   A line on another branch than the header's says so under its
+   description; the header says when the lines use several branches. */
+button.fop-chip--pick { font: inherit; color: inherit; cursor: pointer; }
+.fop-chip--pick:hover { border-color: var(--gold); }
+.fop-app .fop-chip--pick:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
+/* The + after the tiles opens the branches with no stock (dashed tiles). */
+.fop-app .fop-chip--more { justify-content: center; min-width: 30px; padding: 2px 8px; font-weight: 700; color: var(--muted); }
+.fop-app .fop-chip--more[aria-expanded="true"], .fop-app .fop-chip--more:hover { color: var(--gold-lt); }
+.fop-app .fop-chip--empty { border-style: dashed; }
+.fop-line-br { display: block; margin-top: 2px; font-size: 13px; color: var(--gold-lt); }
+.fop-branch-hint { display: block; margin-top: 4px; font-size: 12px; line-height: 1.35; color: var(--muted); }
+.fop-branch-hint:empty { display: none; }
+
+/* Update Bid / Convert to Order dialog: header changes and the generations
+   a conversion covers. */
+.fop-confirm-head { margin: 8px 0; padding: 0; list-style: none; font-size: 14px; }
+.fop-confirm-head li { margin: 2px 0; overflow-wrap: anywhere; }
+.fop-confirm-head span { display: inline-block; min-width: 150px; color: var(--muted); }
+.fop-confirm-gens { margin: 6px 0 4px; }
+
+/* Convert to Order reads "To Order" on phones (four buttons in the bar). */
+.fop-lbl-short { display: none; }
+@media (max-width: 767px) {
+  .fop-lbl-full { display: none; }
+  .fop-lbl-short { display: inline; }
+  .fop-confirm-head span { display: block; min-width: 0; font-size: 12px; }
+}
+
+/* ── Generation tab status (2026-10-20, on request; tile 2026-10-21) ──
+   One word after the tab label in a small tile like the status beside the
+   order id: Bid steel, Open blue, Invoiced green, Cancelled red
+   (tabStatusHtml in app.js). */
+.fop-tabst {
+  display: inline-block; margin-left: 8px; padding: 0 6px; vertical-align: 1px;
+  font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 700; letter-spacing: .04em; line-height: 18px;
+  color: var(--text); background: rgba(143, 164, 194, 0.16); border: 1px solid var(--steel); border-radius: 4px;
+}
+.fop-tabst--open    { color: #7fb3e6; border-color: rgba(127, 179, 230, .5); background: rgba(127, 179, 230, .12); }
+.fop-tabst--invoice { color: var(--ok-text); border-color: rgba(62, 207, 142, .45); background: rgba(62, 207, 142, .1); }
+.fop-tabst--cancel  { color: var(--err-text); border-color: rgba(255, 95, 95, .45); background: rgba(255, 95, 95, .12); }
+html[data-theme="light"] .fop-tabst--open { color: #1f6fbf; border-color: rgba(31, 111, 191, .45); background: rgba(31, 111, 191, .08); }
+@media (max-width: 767px) {
+  .fop-tabst { display: none; } /* phones: no tab status (2026-10-21, on request) */
+}
+

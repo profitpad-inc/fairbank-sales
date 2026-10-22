@@ -1,5 +1,13 @@
 {
   "name": "e-order-placement: create order",
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "active": false,
   "nodes": [
     {
       "parameters": {
@@ -30,7 +38,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Expected body:\n// { bill_to_id, ship_to_id, ship_branch, price_branch, order_status,\n//   ship_via, ship_date, required_date, po, release, internal_notes,\n//   shipping_instructions, freight_in, writer, outside_sales, email,\n//   lines: [{ productId, quantity, um?, umQuantity?, unitPrice?, comments? }] }\nconst b = $input.first().json.body || {};\nconst lines = (Array.isArray(b.lines) ? b.lines : [])\n  .map((l) => ({\n    productId: Number(l.productId),\n    quantity: Math.round(Number(l.quantity) || 0),\n    um: l.um || 'ea',\n    umQuantity: Number(l.umQuantity) || 1,\n    unitPrice: l.unitPrice != null && l.unitPrice !== '' ? Number(l.unitPrice) : null,\n    // Line comment, sent to Eclipse as lineItemProduct.comments.\n    comments: String(l.comments == null ? '' : l.comments).trim(),\n  }))\n  .filter((l) => l.productId && l.quantity > 0);\nconst fail = (msg) => [{ json: { ok: false, statusCode: 400, body: { success: false, error: msg, step: 'validate' } } }];\nif (!b.bill_to_id) return fail('Missing bill_to_id');\nif (!b.ship_to_id) return fail('Missing ship_to_id');\nif (!b.writer) return fail('Missing writer (e_user_id)');\nif (!lines.length) return fail('Add at least one line with a quantity.');\n// Freight in, dollars; blank, invalid or negative → 0 (not sent).\nconst freight = Number(b.freight_in);\nconst isoDate = (v) => /^\\d{4}-\\d{2}-\\d{2}$/.test(String(v || '')) ? String(v) : '';\nreturn [{ json: { ok: true, input: {\n  billToId: String(b.bill_to_id), shipToId: String(b.ship_to_id),\n  shipBranch: String(b.ship_branch || ''), priceBranch: String(b.price_branch || ''),\n  orderStatus: String(b.order_status || 'Bid'), shipVia: String(b.ship_via || ''),\n  shipDate: isoDate(b.ship_date), requiredDate: isoDate(b.required_date),\n  po: String(b.po || ''), release: String(b.release || ''),\n  internalNotes: String(b.internal_notes || ''), shippingInstructions: String(b.shipping_instructions || ''),\n  writer: String(b.writer).toUpperCase(), outsideSales: String(b.outside_sales || ''),\n  email: String(b.email || ''), lines,\n  freightIn: isFinite(freight) && freight > 0 ? Math.round(freight * 100) / 100 : 0,\n} } }];\n"
+        "jsCode": "// Expected body:\n// { bill_to_id, ship_to_id, ship_branch, price_branch, order_status,\n//   ship_via, ship_date, required_date, po, release, internal_notes,\n//   shipping_instructions, freight_in, writer, outside_sales, email,\n//   lines: [{ productId, quantity, um?, umQuantity?, unitPrice?, comments?, ship_branch? }],\n//   custom_lines: [{ line_number, name, ideal_sku, quantity, unit_price, est_cogs,\n//                    variation_of: { product_id, description, serial_number } | null,\n//                    customizations: [string], ship_branch? }] }\n// ship_branch on a line (2026-10-19): the branch that line ships from. Lines\n// on other branches than the header's go on their own generation, one per\n// branch (Build order / Plan splits). Blank → the header's ship_branch.\n// Custom lines (2026-10-19, on request) go to Eclipse as product 15680, the\n// free-text \"ITEM:\" product, with their text in the line comment.\nconst CUSTOM_PRODUCT_ID = 15680;\nconst b = $input.first().json.body || {};\nconst branchOf = (v) => { const m = String(v == null ? '' : v).trim().match(/^(\\d+)/); return m ? m[1] : ''; };\nconst headBranch = branchOf(b.ship_branch);\nconst regular = (Array.isArray(b.lines) ? b.lines : [])\n  .map((l) => ({\n    productId: Number(l.productId),\n    quantity: Math.round(Number(l.quantity) || 0),\n    um: l.um || 'ea',\n    umQuantity: Number(l.umQuantity) || 1,\n    unitPrice: l.unitPrice != null && l.unitPrice !== '' ? Number(l.unitPrice) : null,\n    // Line comment, sent to Eclipse as lineItemProduct.comments.\n    comments: String(l.comments == null ? '' : l.comments).trim(),\n    branch: branchOf(l.ship_branch) || headBranch,\n  }))\n  .filter((l) => l.productId && l.quantity > 0);\n// A custom line's comment: name, ideal SKU, the product it is a variation\n// of, then one customization per line.\nconst customComment = (c) => {\n  const out = [String(c.name || '').trim()];\n  if (String(c.ideal_sku || '').trim()) out.push('SKU: ' + String(c.ideal_sku).trim());\n  const v = c.variation_of;\n  if (v && v.product_id) {\n    out.push('Variation of ' + v.product_id + (v.description ? ' ' + String(v.description).trim() : '') +\n      (v.serial_number ? ' SN ' + String(v.serial_number).trim() : ''));\n  }\n  for (const x of (Array.isArray(c.customizations) ? c.customizations : [])) if (String(x).trim()) out.push(String(x).trim());\n  return out.filter(Boolean).join('\\n');\n};\nconst custom = (Array.isArray(b.custom_lines) ? b.custom_lines : [])\n  .map((c) => ({\n    productId: CUSTOM_PRODUCT_ID,\n    quantity: Math.round(Number(c.quantity) || 0),\n    um: 'ea',\n    umQuantity: 1,\n    unitPrice: isFinite(Number(c.unit_price)) && c.unit_price !== '' && c.unit_price != null ? Number(c.unit_price) : 0,\n    comments: customComment(c),\n    branch: branchOf(c.ship_branch) || headBranch,\n    lineNumber: Math.round(Number(c.line_number) || 0),\n  }))\n  .filter((c) => c.quantity > 0 && c.comments);\n// Page order: each custom line at its line_number (1-based among all sent\n// lines), the regular lines filling the other places in their own order.\nconst total = regular.length + custom.length;\nconst slots = new Array(total).fill(null);\nconst late = [];\nfor (const c of custom) {\n  const i = c.lineNumber - 1;\n  if (i >= 0 && i < total && !slots[i]) slots[i] = c; else late.push(c);\n}\nlet ri = 0;\nfor (let i = 0; i < total; i++) if (!slots[i]) slots[i] = ri < regular.length ? regular[ri++] : late.shift();\nconst lines = slots.filter(Boolean).map(({ lineNumber, ...l }) => l);\nconst fail = (msg) => [{ json: { ok: false, statusCode: 400, body: { success: false, error: msg, step: 'validate' } } }];\nif (!b.bill_to_id) return fail('Missing bill_to_id');\nif (!b.ship_to_id) return fail('Missing ship_to_id');\nif (!b.writer) return fail('Missing writer (e_user_id)');\nif (!lines.length) return fail('Add at least one line with a quantity.');\n// Freight in, dollars; blank, invalid or negative → 0 (not sent).\nconst freight = Number(b.freight_in);\nconst isoDate = (v) => /^\\d{4}-\\d{2}-\\d{2}$/.test(String(v || '')) ? String(v) : '';\nreturn [{ json: { ok: true, input: {\n  billToId: String(b.bill_to_id), shipToId: String(b.ship_to_id),\n  shipBranch: headBranch, priceBranch: String(b.price_branch || ''),\n  orderStatus: String(b.order_status || 'Bid'), shipVia: String(b.ship_via || ''),\n  shipDate: isoDate(b.ship_date), requiredDate: isoDate(b.required_date),\n  po: String(b.po || ''), release: String(b.release || ''),\n  internalNotes: String(b.internal_notes || ''), shippingInstructions: String(b.shipping_instructions || ''),\n  writer: String(b.writer).toUpperCase(), outsideSales: String(b.outside_sales || ''),\n  email: String(b.email || ''), lines,\n  freightIn: isFinite(freight) && freight > 0 ? Math.round(freight * 100) / 100 : 0,\n} } }];\n"
       },
       "id": "c0d1c297-0732-565b-9d02-4d365e4b14ac",
       "name": "Validate",
@@ -121,7 +129,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Field names follow the post_sorder() reference script. Rep-entered\n// values win; customer defaults fill the gaps.\nconst inp = $('Validate').first().json.input;\nconst billEnv = $('Eclipse: get bill-to').first().json;\nconst shipEnv = $input.first().json;\nconst fail = (msg, step) => [{ json: { ok: false, statusCode: 502, body: { success: false, error: msg, step } } }];\nif (billEnv.error) return fail('Eclipse bill-to lookup failed: ' + billEnv.error + ' ' + JSON.stringify(billEnv.message || ''), 'getBillTo');\nif (shipEnv.error) return fail('Eclipse ship-to lookup failed: ' + shipEnv.error + ' ' + JSON.stringify(shipEnv.message || ''), 'getShipTo');\nconst bill = (Array.isArray(billEnv.results) ? billEnv.results[0] : billEnv) || {};\nconst ship = (Array.isArray(shipEnv.results) ? shipEnv.results[0] : shipEnv) || {};\nif (!bill.id) return fail('Eclipse customer ' + inp.billToId + ' not found.', 'getBillTo');\nif (!ship.id) return fail('Eclipse customer ' + inp.shipToId + ' not found.', 'getShipTo');\nif (bill.isBillTo === false) return fail('Customer ' + bill.id + ' is not a Bill-To customer.', 'validate');\nif (ship.isShipTo === false) return fail('Customer ' + ship.id + ' is not a Ship-To customer.', 'validate');\n\nconst val = (v) => (v && typeof v === 'object') ? (v.id || v.code || v.name || '') : (v == null ? '' : String(v));\n// Defaults when the page sends blank dates: ship today, required 7 days\n// out, pushed to Monday if that lands on a weekend.\nconst ymd = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');\nconst today = new Date();\nconst req = new Date(); req.setDate(req.getDate() + 7);\nif (req.getDay() === 6) req.setDate(req.getDate() + 2);\nelse if (req.getDay() === 0) req.setDate(req.getDate() + 1);\nconst homeBranch = val(bill.homeBranch);\n\nconst order = {\n  priceBranch: inp.priceBranch || homeBranch,\n  shipBranch: inp.shipBranch || homeBranch,\n  billToCustomer: bill.id,\n  shipToCustomer: ship.id,\n  orderStatus: inp.orderStatus,\n  salesSource: val(bill.salesSourceOverride) || 'Default Sales', // bill-to's, else 'Default Sales'\n  shipDate: inp.shipDate || ymd(today),\n  requiredDate: inp.requiredDate || ymd(req),\n  customerPONumber: inp.po || val(bill.defaultPoNumber),\n  customerReleaseNumber: inp.release,\n  insideSalesPerson: '',\n  outsideSalesPerson: inp.outsideSales || val(bill.outsideSalesperson) || 'WIHOUSE',\n  writer: inp.writer,\n  orderType: 'MOE',\n  email: inp.email,\n  street1: ship.addressLine1 || '',\n  street2: ship.addressLine2 || '',\n  city: ship.city || '',\n  state: ship.state || '',\n  postalCode: ship.postalCode || '',\n  country: ship.countryCode || '',\n  internalNotes: inp.internalNotes,\n  shippingInstructions: inp.shippingInstructions,\n  shipIds: [ship.id],\n  lines: inp.lines.map((l) => {\n    const p = { productId: l.productId, quantity: l.quantity, um: l.um, umQuantity: l.umQuantity };\n    if (l.unitPrice != null && isFinite(l.unitPrice)) p.unitPrice = l.unitPrice;\n    // Line comment, with commentsId '1' as in the user's lineItemProduct\n    // sample (UNVERIFIED what other ids mean; exports show commentTypeId '1').\n    if (l.comments) { p.comments = l.comments; p.commentsId = '1'; }\n    return { lineItemProduct: p };\n  }),\n};\n// Ship via only when the rep picked one (a bid may leave it blank); no\n// customer-default fallback, Eclipse decides what a missing shipVia means.\nif (inp.shipVia) order.shipVia = inp.shipVia;\n// Freight in from the page's totals box, as Eclipse's freightCharges (the\n// only freight field in the post_sorder() reference body). UNVERIFIED that\n// Eclipse books it as freight in (freightInBillable) and not freight out.\nif (inp.freightIn > 0) order.freightCharges = inp.freightIn;\n// Terms from the bill-to; left out when the bill-to has none.\nif (val(bill.defaultTerms)) order.termsCode = val(bill.defaultTerms);\nreturn [{ json: { ok: true, order } }];\n"
+        "jsCode": "// Field names follow the post_sorder() reference script. Rep-entered\n// values win; customer defaults fill the gaps.\nconst inp = $('Validate').first().json.input;\nconst billEnv = $('Eclipse: get bill-to').first().json;\nconst shipEnv = $input.first().json;\nconst fail = (msg, step) => [{ json: { ok: false, statusCode: 502, body: { success: false, error: msg, step } } }];\nif (billEnv.error) return fail('Eclipse bill-to lookup failed: ' + billEnv.error + ' ' + JSON.stringify(billEnv.message || ''), 'getBillTo');\nif (shipEnv.error) return fail('Eclipse ship-to lookup failed: ' + shipEnv.error + ' ' + JSON.stringify(shipEnv.message || ''), 'getShipTo');\nconst bill = (Array.isArray(billEnv.results) ? billEnv.results[0] : billEnv) || {};\nconst ship = (Array.isArray(shipEnv.results) ? shipEnv.results[0] : shipEnv) || {};\nif (!bill.id) return fail('Eclipse customer ' + inp.billToId + ' not found.', 'getBillTo');\nif (!ship.id) return fail('Eclipse customer ' + inp.shipToId + ' not found.', 'getShipTo');\nif (bill.isBillTo === false) return fail('Customer ' + bill.id + ' is not a Bill-To customer.', 'validate');\nif (ship.isShipTo === false) return fail('Customer ' + ship.id + ' is not a Ship-To customer.', 'validate');\n\nconst val = (v) => (v && typeof v === 'object') ? (v.id || v.code || v.name || '') : (v == null ? '' : String(v));\n// Defaults when the page sends blank dates: ship today, required 7 days\n// out, pushed to Monday if that lands on a weekend.\nconst ymd = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');\nconst today = new Date();\nconst req = new Date(); req.setDate(req.getDate() + 7);\nif (req.getDay() === 6) req.setDate(req.getDate() + 2);\nelse if (req.getDay() === 0) req.setDate(req.getDate() + 1);\nconst homeBranch = val(bill.homeBranch);\nconst headBranch = inp.shipBranch || homeBranch;\n\nconst lineItem = (l) => {\n  const p = { productId: l.productId, quantity: l.quantity, um: l.um, umQuantity: l.umQuantity };\n  if (l.unitPrice != null && isFinite(l.unitPrice)) p.unitPrice = l.unitPrice;\n  // Line comment, with commentsId '1' as in the user's lineItemProduct\n  // sample (UNVERIFIED what other ids mean; exports show commentTypeId '1').\n  if (l.comments) { p.comments = l.comments; p.commentsId = '1'; }\n  return { lineItemProduct: p };\n};\n// One generation per ship branch (2026-10-19): the order is created with\n// the header branch's lines (or, when no line ships from it, the first\n// line's branch); every other branch becomes its own generation after the\n// create (Plan splits → Create Shipment → POST /LineItems).\nconst groups = [];\nfor (const l of inp.lines) {\n  const br = l.branch || headBranch;\n  let g = groups.find((x) => x.branch === br);\n  if (!g) { g = { branch: br, lines: [] }; groups.push(g); }\n  g.lines.push(l);\n}\nconst first = groups.find((g) => g.branch === headBranch) || groups[0];\nconst extras = groups.filter((g) => g !== first).map((g) => ({ branch: g.branch, items: g.lines.map(lineItem) }));\n\nconst order = {\n  priceBranch: inp.priceBranch || homeBranch,\n  shipBranch: first.branch,\n  billToCustomer: bill.id,\n  shipToCustomer: ship.id,\n  orderStatus: inp.orderStatus,\n  salesSource: val(bill.salesSourceOverride) || 'Default Sales', // bill-to's, else 'Default Sales'\n  shipDate: inp.shipDate || ymd(today),\n  requiredDate: inp.requiredDate || ymd(req),\n  customerPONumber: inp.po || val(bill.defaultPoNumber),\n  customerReleaseNumber: inp.release,\n  insideSalesPerson: '',\n  outsideSalesPerson: inp.outsideSales || val(bill.outsideSalesperson) || 'WIHOUSE',\n  writer: inp.writer,\n  orderType: 'MOE',\n  email: inp.email,\n  street1: ship.addressLine1 || '',\n  street2: ship.addressLine2 || '',\n  city: ship.city || '',\n  state: ship.state || '',\n  postalCode: ship.postalCode || '',\n  country: ship.countryCode || '',\n  internalNotes: inp.internalNotes,\n  shippingInstructions: inp.shippingInstructions,\n  shipIds: [ship.id],\n  lines: first.lines.map(lineItem),\n};\n// Ship via only when the rep picked one (a bid may leave it blank); no\n// customer-default fallback, Eclipse decides what a missing shipVia means.\nif (inp.shipVia) order.shipVia = inp.shipVia;\n// Freight in from the page's totals box, as Eclipse's freightCharges (the\n// only freight field in the post_sorder() reference body). UNVERIFIED that\n// Eclipse books it as freight in (freightInBillable) and not freight out.\nif (inp.freightIn > 0) order.freightCharges = inp.freightIn;\n// Terms from the bill-to; left out when the bill-to has none.\nif (val(bill.defaultTerms)) order.termsCode = val(bill.defaultTerms);\nreturn [{ json: { ok: true, order, extras } }];\n"
       },
       "id": "3e3d9774-309c-5c82-bcb7-5c7dc949d848",
       "name": "Build order",
@@ -237,6 +245,141 @@
     },
     {
       "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// One more generation per extra ship branch (Build order's extras): a Create\n// Shipment each, with the order's dates and status. The order itself was\n// created with the first branch's lines.\nconst c = $('Check order').first().json;\nconst b = $('Build order').first().json;\nconst extras = b.extras || [];\nif (!extras.length) return [{ json: { create: false } }];\nreturn extras.map((g) => ({ json: {\n  create: true, oid: c.orderId, shipBranch: g.branch,\n  requiredDate: b.order.requiredDate, shipDate: b.order.shipDate, shipStatus: b.order.orderStatus,\n} }));\n"
+      },
+      "name": "Plan splits",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "f1fcca1d-a760-5ebd-9957-bf4867929630",
+      "position": [
+        2400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "7b960e16-7ac0-5425-8582-fb33243e7639",
+              "leftValue": "={{ $json.create }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Split?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "fa068904-4df0-54f3-8ad1-f5a86962bdcc",
+      "position": [
+        2640,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "createShipment",
+        "shipmentSalesOrderId": "={{ $json.oid }}",
+        "generationId": "={{ String(Number($('Check order').first().json.e_sorder_id.split('.')[1])) }}",
+        "requiredDate": "={{ $json.requiredDate }}",
+        "shipmentShipDate": "={{ $json.shipDate }}",
+        "shipBranch": "={{ $json.shipBranch }}",
+        "shipStatus": "={{ $json.shipStatus }}"
+      },
+      "name": "Eclipse: create shipment",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "id": "596b487e-bc9b-5824-9187-154ecdbe5c43",
+      "position": [
+        2880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// The generations Create Shipment made, one per extra ship branch, and the\n// calls that fill them: their lines, plus ship via, shipping instructions\n// and internal notes copied from the order (UNVERIFIED whether Create\n// Shipment copies these itself; setting them again is harmless).\nconst c = $('Check order').first().json;\nconst b = $('Build order').first().json;\nconst o = b.order;\nconst pad = (g) => String(g).padStart(4, '0');\n// The new generation's id from a Create Shipment answer. v1 read\n// generationId at the top level; a { results: [order] } answer (the shape of\n// SO Create) is handled too, taking the highest generation on that branch.\nconst shipmentGenId = (res, branch) => {\n  if (!res || typeof res !== 'object') return '';\n  const direct = res.generationId || res.generationID;\n  if (direct) return String(Number(direct));\n  const r0 = Array.isArray(res.results) ? res.results[0] : null;\n  if (!r0) return '';\n  if (r0.generationId) return String(Number(r0.generationId));\n  const gens = (Array.isArray(r0.generations) ? r0.generations : [])\n    .filter((g) => String(g.shipBranch) === String(branch) && String(g.status) !== 'Cancel');\n  const ids = gens.map((g) => Number(g.generationId)).filter((n) => n > 0).sort((a, b) => b - a);\n  return ids.length ? String(ids[0]) : '';\n};\nconst shipments = $input.all();\nconst gens = [];\nconst empty = { posts: [], qty: [], prices: [], deletes: [], shipVia: [], shipDate: [], instructions: [], notes: [], status: [], cancels: [] };\nfor (let i = 0; i < b.extras.length; i++) {\n  const g = b.extras[i];\n  const res = shipments[i] ? shipments[i].json : null;\n  const gid = res && !res.error ? shipmentGenId(res, g.branch) : '';\n  if (!gid) {\n    const why = !res ? 'no response' : res.error ? res.error + ' ' + JSON.stringify(res.message || '').substring(0, 500)\n      : 'no generation id in ' + JSON.stringify(res).substring(0, 300);\n    return [{ json: { ok: false, gens, step: 'createShipment',\n      error: 'The lines for branch ' + b.extras.slice(i).map((x) => x.branch).join(', ') + ' could not be added: Eclipse Create Shipment failed (' + why + ').' } }];\n  }\n  gens.push({ branch: g.branch, generationId: gid, orderId: c.orderId + '.' + pad(gid), items: g.items });\n}\nconst each = (value) => (value ? gens.map((g) => ({ orderId: g.orderId, value })) : []);\nconst ops = Object.assign({}, empty, {\n  posts: gens.map((g) => ({ orderId: g.orderId, items: g.items })),\n  shipVia: each(o.shipVia || ''),\n  instructions: each(String(o.shippingInstructions || '').trim()),\n  notes: each(String(o.internalNotes || '').trim()),\n});\nconst has = {};\nfor (const k of Object.keys(ops)) has[k] = ops[k].length > 0;\nreturn [{ json: { ok: true, gens, ops, has, changes: { generations: gens.map((g) => ({ e_sorder_id: g.orderId, ship_branch: g.branch, lines: g.items.length })) } } }];\n"
+      },
+      "name": "Resolve",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "0da19200-a72f-5f97-85fd-fda0ce49a4b5",
+      "position": [
+        3120,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "ff0e53a1-2dab-5f37-b31e-201384b546e7",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Resolved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "9a4d7f28-8fa6-520e-bac9-fd6ce87f090d",
+      "position": [
+        3360,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Every generation this placement made goes to update-hs-deal in one call.\n// The order exists by now, so a failed split step is a warning in the answer\n// (success stays true; the page reopens the order and shows it), never a 502\n// that could make the rep place it again.\nconst c = $('Check order').first().json;\nconst ran = (n) => { try { return $(n).isExecuted; } catch (e) { return false; } };\nlet warning = '';\nfor (const n of ['Resolve', 'Check posts', 'Check ship via', 'Check instructions', 'Check notes']) {\n  if (!ran(n)) continue;\n  const j = $(n).first().json;\n  if (j && j.ok === false) { warning = j.error || (j.body && j.body.error) || 'A step after the create failed.'; break; }\n}\nconst gens = ran('Resolve') ? ($('Resolve').first().json.gens || []) : [];\nconst ids = [c.e_sorder_id].concat(gens.map((g) => g.orderId));\nreturn [{ json: { e_sorder_ids: ids, gens, warning } }];\n"
+      },
+      "name": "Sync list",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "7c9337b6-8660-5528-8635-b4928b5ca052",
+      "position": [
+        4560,
+        0
+      ]
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "https://n8n.fairbankequipment.com/webhook/update-hs-deal",
         "sendBody": true,
@@ -249,7 +392,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2400,
+        4800,
         0
       ],
       "onError": "continueRegularOutput",
@@ -258,14 +401,14 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const c = $('Check order').first().json;\nlet r = $input.first().json || {};\n// A non-JSON content type lands the body in `data` as text; parse it.\nif (!r.orders && typeof r.data === 'string') { try { r = JSON.parse(r.data); } catch (e) {} }\n// update-hs-deal answers { message, source, orders: [{ <hs_deal_id>: <e_sorder_id> }] }\n// (verified 2026-10-17); pick the deal whose order id is the one just created\n// (exact, or same order ignoring the gen suffix), else the only deal returned.\nconst pairs = [];\nfor (const o of (Array.isArray(r.orders) ? r.orders : [])) {\n  for (const [dealId, soId] of Object.entries(o || {})) pairs.push([String(dealId), String(soId)]);\n}\nconst base = (id) => String(id || '').split('.')[0].toUpperCase();\nconst hit = pairs.find((p) => p[1] === c.e_sorder_id) || pairs.find((p) => base(p[1]) === base(c.e_sorder_id)) || (pairs.length === 1 ? pairs[0] : null);\nconst hsDealId = hit ? hit[0] : '';\nreturn [{ json: { statusCode: 200, body: {\n  success: true,\n  e_sorder_id: c.e_sorder_id,\n  order_id: c.orderId,\n  hs_deal_id: hsDealId,\n  // orders: what update-hs-deal returned, kept for troubleshooting a missing deal link.\n  hubspot_sync: r.error ? { ok: false, error: String(r.error) } : { ok: true, orders: r.orders || null },\n} } }];\n"
+        "jsCode": "const c = $('Check order').first().json;\nconst s = $('Sync list').first().json;\nconst b = $('Build order').first().json;\nlet r = $input.first().json || {};\n// A non-JSON content type lands the body in `data` as text; parse it.\nif (!r.orders && typeof r.data === 'string') { try { r = JSON.parse(r.data); } catch (e) {} }\n// update-hs-deal answers { message, source, orders: [{ <hs_deal_id>: <e_sorder_id> }] }\n// (verified 2026-10-17); pick the deal whose order id is the one just created\n// (exact, or same order ignoring the gen suffix), else the only deal returned.\nconst pairs = [];\nfor (const o of (Array.isArray(r.orders) ? r.orders : [])) {\n  for (const [dealId, soId] of Object.entries(o || {})) pairs.push([String(dealId), String(soId)]);\n}\nconst base = (id) => String(id || '').split('.')[0].toUpperCase();\nconst hit = pairs.find((p) => p[1] === c.e_sorder_id) || pairs.find((p) => base(p[1]) === base(c.e_sorder_id)) || (pairs.length === 1 ? pairs[0] : null);\nconst hsDealId = hit ? hit[0] : '';\nreturn [{ json: { statusCode: 200, body: {\n  success: true,\n  e_sorder_id: c.e_sorder_id,\n  order_id: c.orderId,\n  // Every generation placed (one per ship branch), first one first.\n  e_sorder_ids: s.e_sorder_ids,\n  generations: [{ e_sorder_id: c.e_sorder_id, ship_branch: b.order.shipBranch }]\n    .concat((s.gens || []).map((g) => ({ e_sorder_id: g.orderId, ship_branch: g.branch }))),\n  // Set when a generation for another ship branch could not be finished.\n  warning: s.warning || '',\n  hs_deal_id: hsDealId,\n  // orders: what update-hs-deal returned, kept for troubleshooting a missing deal link.\n  hubspot_sync: r.error ? { ok: false, error: String(r.error) } : { ok: true, orders: r.orders || null },\n} } }];\n"
       },
       "id": "535e130b-7e4b-5fa2-aed7-7aede20a885b",
       "name": "Final",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2640,
+        5040,
         0
       ]
     },
@@ -282,12 +425,775 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        1680,
+        5280,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "0a364fd9-45d3-5db1-863b-b96b1fa31506",
+              "leftValue": "={{ $('Resolve').first().json.has.posts }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Has posts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "b3074dec-8d50-5438-82da-3c5f42deaf5c",
+      "position": [
+        3600,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return $('Resolve').first().json.ops.posts.map((g) => ({ json: g }));\n"
+      },
+      "name": "Emit posts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "fb67f6f9-4665-5673-8d3c-92fdd46ed2eb",
+      "position": [
+        3600,
         200
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "createLineItem",
+        "createLineItemSalesOrderId": "={{ $json.orderId }}",
+        "createLineItemLines": "={{ $json.items }}"
+      },
+      "name": "Eclipse: POST /LineItems",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "id": "7d59ba83-a36d-52e0-ae59-ca8098396993",
+      "position": [
+        3600,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const ops = $('Resolve').first().json.ops.posts;\nconst out = $input.all();\nfor (let i = 0; i < out.length; i++) {\n  const r = out[i].json;\n  if (r.error) {\n    const error = 'Eclipse POST /LineItems failed on ' + ((ops[i] || {}).orderId || '?') + ': ' + r.error + ' ' + JSON.stringify(r.message || '').substring(0, 500);\n    return [{ json: { ok: false, statusCode: 502, error, body: { success: false, step: 'postLineItems', changes: $('Resolve').first().json.changes,\n      error: error + '' } } }];\n  }\n}\nreturn [{ json: { ok: true } }];\n"
+      },
+      "name": "Check posts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "2badd4ba-795a-59ef-b102-9da86d5f1303",
+      "position": [
+        3600,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "d39f8877-3c39-5ac3-a74f-02823bf9528d",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Posts ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "a76087e8-577b-585f-9ba1-0ca2100d1cbc",
+      "position": [
+        3600,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "391e8fad-5c3d-5ec9-a6bc-95749641fb78",
+              "leftValue": "={{ $('Resolve').first().json.has.shipVia }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Has shipVia?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "a11c13b7-45cb-5127-9217-9760b497c319",
+      "position": [
+        3840,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return $('Resolve').first().json.ops.shipVia.map((g) => ({ json: g }));\n"
+      },
+      "name": "Emit shipVia",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "9aaf3e1f-8d3c-5504-be16-cb80e7f73eb7",
+      "position": [
+        3840,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "updateShipVia",
+        "shipViaUpdateOrderId": "={{ $json.orderId }}",
+        "shipViaUpdateValue": "={{ $json.value }}"
+      },
+      "name": "Eclipse: PUT ship via",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "id": "0912a1cb-867f-5ef1-8b26-e873906cb1b8",
+      "position": [
+        3840,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const ops = $('Resolve').first().json.ops.shipVia;\nconst out = $input.all();\nfor (let i = 0; i < out.length; i++) {\n  const r = out[i].json;\n  if (r.error) {\n    const error = 'Eclipse PUT ship via failed on ' + ((ops[i] || {}).orderId || '?') + ': ' + r.error + ' ' + JSON.stringify(r.message || '').substring(0, 500);\n    return [{ json: { ok: false, statusCode: 502, error, body: { success: false, step: 'updateShipVia', changes: $('Resolve').first().json.changes,\n      error: error + '' } } }];\n  }\n}\nreturn [{ json: { ok: true } }];\n"
+      },
+      "name": "Check ship via",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "df30738c-4007-563b-8ddb-1d0844f997d0",
+      "position": [
+        3840,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "a2ab7932-d2e0-52db-90ef-48a608ea2b91",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "ShipVia ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "a4c9e3c5-0711-53a7-b768-df4427ef5523",
+      "position": [
+        3840,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "fb6f6dbb-7459-5d1b-a2fe-7a91e428b2f4",
+              "leftValue": "={{ $('Resolve').first().json.has.instructions }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Has instructions?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "c850a6e4-9699-5bc8-9357-0c3f81599644",
+      "position": [
+        4080,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return $('Resolve').first().json.ops.instructions.map((g) => ({ json: g }));\n"
+      },
+      "name": "Emit instructions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "2cc263fa-7a28-5f82-858c-40a93836c5af",
+      "position": [
+        4080,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "updateShippingInstructions",
+        "shippingInstructionsOrderId": "={{ $json.orderId }}",
+        "shippingInstructionsValue": "={{ $json.value }}"
+      },
+      "name": "Eclipse: PUT shipping instructions",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "id": "21be0948-f15a-5c3f-a256-07f23d58be10",
+      "position": [
+        4080,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const ops = $('Resolve').first().json.ops.instructions;\nconst out = $input.all();\nfor (let i = 0; i < out.length; i++) {\n  const r = out[i].json;\n  if (r.error) {\n    const error = 'Eclipse PUT shipping instructions failed on ' + ((ops[i] || {}).orderId || '?') + ': ' + r.error + ' ' + JSON.stringify(r.message || '').substring(0, 500);\n    return [{ json: { ok: false, statusCode: 502, error, body: { success: false, step: 'updateShippingInstructions', changes: $('Resolve').first().json.changes,\n      error: error + '' } } }];\n  }\n}\nreturn [{ json: { ok: true } }];\n"
+      },
+      "name": "Check instructions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "64a1dc21-8393-57c5-8814-97f6471ef407",
+      "position": [
+        4080,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "4fc13f75-043b-5445-9d94-237181714994",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Instructions ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "b4ee2488-256f-52d0-8907-bc0a7356f9b4",
+      "position": [
+        4080,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "0e73a53e-72b2-5f61-9402-5be12abaf1a1",
+              "leftValue": "={{ $('Resolve').first().json.has.notes }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Has notes?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "d133a1ba-f1dd-5ad0-b3ee-d2ce8f54e5df",
+      "position": [
+        4320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return $('Resolve').first().json.ops.notes.map((g) => ({ json: g }));\n"
+      },
+      "name": "Emit notes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "4e5995bf-cf9e-51af-ba77-050ab1199ed5",
+      "position": [
+        4320,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "updateInternalNotes",
+        "internalNotesOrderId": "={{ $json.orderId }}",
+        "copyToAll": false,
+        "internalNotesValue": "={{ $json.value }}"
+      },
+      "name": "Eclipse: PUT internal notes",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "id": "d6a9424f-334e-5ebb-a9b0-ea3688bf1373",
+      "position": [
+        4320,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const ops = $('Resolve').first().json.ops.notes;\nconst out = $input.all();\nfor (let i = 0; i < out.length; i++) {\n  const r = out[i].json;\n  if (r.error) {\n    const error = 'Eclipse PUT internal notes failed on ' + ((ops[i] || {}).orderId || '?') + ': ' + r.error + ' ' + JSON.stringify(r.message || '').substring(0, 500);\n    return [{ json: { ok: false, statusCode: 502, error, body: { success: false, step: 'updateInternalNotes', changes: $('Resolve').first().json.changes,\n      error: error + '' } } }];\n  }\n}\nreturn [{ json: { ok: true } }];\n"
+      },
+      "name": "Check notes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "27e8a44f-683d-5973-80e2-f45fb33bc7d5",
+      "position": [
+        4320,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "499623d5-029e-567a-a045-0a93cabcb4dd",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Notes ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "3e6dec1c-be8e-52cf-aaf8-8c48f20dad9c",
+      "position": [
+        4320,
+        800
       ]
     }
   ],
   "connections": {
+    "Resolved?": {
+      "main": [
+        [
+          {
+            "node": "Has posts?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sync list",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has posts?": {
+      "main": [
+        [
+          {
+            "node": "Emit posts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Has shipVia?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emit posts": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: POST /LineItems",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: POST /LineItems": {
+      "main": [
+        [
+          {
+            "node": "Check posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check posts": {
+      "main": [
+        [
+          {
+            "node": "Posts ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Posts ok?": {
+      "main": [
+        [
+          {
+            "node": "Has shipVia?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sync list",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has shipVia?": {
+      "main": [
+        [
+          {
+            "node": "Emit shipVia",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Has instructions?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emit shipVia": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: PUT ship via",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: PUT ship via": {
+      "main": [
+        [
+          {
+            "node": "Check ship via",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check ship via": {
+      "main": [
+        [
+          {
+            "node": "ShipVia ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ShipVia ok?": {
+      "main": [
+        [
+          {
+            "node": "Has instructions?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sync list",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has instructions?": {
+      "main": [
+        [
+          {
+            "node": "Emit instructions",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Has notes?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emit instructions": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: PUT shipping instructions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: PUT shipping instructions": {
+      "main": [
+        [
+          {
+            "node": "Check instructions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check instructions": {
+      "main": [
+        [
+          {
+            "node": "Instructions ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Instructions ok?": {
+      "main": [
+        [
+          {
+            "node": "Has notes?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sync list",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has notes?": {
+      "main": [
+        [
+          {
+            "node": "Emit notes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sync list",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emit notes": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: PUT internal notes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: PUT internal notes": {
+      "main": [
+        [
+          {
+            "node": "Check notes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check notes": {
+      "main": [
+        [
+          {
+            "node": "Notes ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notes ok?": {
+      "main": [
+        [
+          {
+            "node": "Sync list",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sync list",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Webhook": {
       "main": [
         [
@@ -405,7 +1311,7 @@
       "main": [
         [
           {
-            "node": "Trigger HubSpot deal sync",
+            "node": "Plan splits",
             "type": "main",
             "index": 0
           }
@@ -413,6 +1319,68 @@
         [
           {
             "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan splits": {
+      "main": [
+        [
+          {
+            "node": "Split?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split?": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: create shipment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sync list",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: create shipment": {
+      "main": [
+        [
+          {
+            "node": "Resolve",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve": {
+      "main": [
+        [
+          {
+            "node": "Resolved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sync list": {
+      "main": [
+        [
+          {
+            "node": "Trigger HubSpot deal sync",
             "type": "main",
             "index": 0
           }
@@ -441,13 +1409,5 @@
         ]
       ]
     }
-  },
-  "settings": {
-    "executionOrder": "v1"
-  },
-  "pinData": {},
-  "meta": {
-    "templateCredsSetupCompleted": true
-  },
-  "active": false
+  }
 }

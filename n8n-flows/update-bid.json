@@ -1,5 +1,13 @@
 {
   "name": "e-order-placement: update bid",
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "active": false,
   "nodes": [
     {
       "parameters": {
@@ -30,7 +38,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Body: { e_sorder_id, writer, lines: [{ line_id?, productId, quantity, unitPrice?, comments? }] }\n// comments is only used on new lines (no line_id).\n// `lines` is the complete list the bid should end up with. A line_id is an\n// existing Eclipse line (qty and/or price may change); no line_id is a new\n// line. Existing lines left out are deleted. Only lines change: the header,\n// status and customers stay as they are.\nconst parseId = (raw) => {\n  const m = String(raw || '').trim().toUpperCase().match(/^S?(\\d+)(?:\\.(\\d{1,4}))?$/);\n  if (!m) return null;\n  const oid = 'S' + m[1];\n  const genId = String(Number(m[2] || 1));\n  return { oid, genId, eSorderId: oid + '.' + genId.padStart(4, '0') };\n};\nconst b = $input.first().json.body || {};\nconst fail = (msg) => [{ json: { ok: false, statusCode: 400, body: { success: false, error: msg, step: 'validate' } } }];\nconst id = parseId(b.e_sorder_id);\nif (!id) return fail('Missing or invalid e_sorder_id (expected S1234567.0001).');\nif (!b.writer) return fail('Missing writer (e_user_id)');\nconst lines = (Array.isArray(b.lines) ? b.lines : []).map((l) => ({\n  lineId: l.line_id != null && l.line_id !== '' ? Number(l.line_id) : null,\n  productId: Number(l.productId),\n  quantity: Math.round(Number(l.quantity) || 0),\n  unitPrice: l.unitPrice != null && l.unitPrice !== '' && isFinite(Number(l.unitPrice)) ? Number(l.unitPrice) : null,\n  comments: String(l.comments == null ? '' : l.comments).trim(),\n})).filter((l) => l.productId && l.quantity > 0);\nif (!lines.length) return fail('A bid needs at least one line. Cancel the bid to remove it.');\nreturn [{ json: { ok: true, ...id, writer: String(b.writer).toUpperCase(), lines } }];\n"
+        "jsCode": "// Body: { e_sorder_id, writer,\n//   header?: { ship_via, ship_branch, ship_date, required_date, shipping_instructions, internal_notes },\n//   lines: [{ line_id?, productId, quantity, unitPrice?, comments?, ship_branch? }],\n//   custom_lines?: [{ name, ideal_sku, quantity, unit_price, variation_of, customizations, ship_branch? }],\n//   order_status? }\n// `lines` is the complete list the open generation's lines should end up\n// as. A line_id is an existing Eclipse line, no line_id is a new line, and\n// existing lines left out are deleted. comments on an existing line is\n// added to it by re-creating the line (Eclipse cannot edit a line's\n// comments). ship_branch: the branch the line ships from; a line on\n// another branch moves to that branch's generation (2026-10-19).\n// header: only the fields sent change. Ship branch and required date\n// cannot be changed on a generation in Eclipse, so a change there moves the\n// lines to a generation that has them (Plan).\n// custom_lines: new custom lines, as product 15680 (\"ITEM:\") with their text\n// in the line comment, the same as create-order.\n// order_status (Convert to Order): after the changes, every bid generation\n// of the order gets this status.\nconst CUSTOM_PRODUCT_ID = 15680;\nconst STATUSES = ['ShipWhenComplete', 'ShipWhenAvailable', 'ShipWhenSpecified', 'ShipItemComplete', 'Direct',\n  'CallWhenAvailable', 'CallWhenComplete', 'CallWhenSpecified', 'PickUpNow', 'ShipTicket'];\nconst parseId = (raw) => {\n  const m = String(raw || '').trim().toUpperCase().match(/^S?(\\d+)(?:\\.(\\d{1,4}))?$/);\n  if (!m) return null;\n  const oid = 'S' + m[1];\n  const genId = String(Number(m[2] || 1));\n  return { oid, genId, eSorderId: oid + '.' + genId.padStart(4, '0') };\n};\nconst branchOf = (v) => { const m = String(v == null ? '' : v).trim().match(/^(\\d+)/); return m ? m[1] : ''; };\nconst isoDate = (v) => /^\\d{4}-\\d{2}-\\d{2}$/.test(String(v || '')) ? String(v) : '';\nconst text = (v) => (v == null ? null : String(v));\nconst b = $input.first().json.body || {};\nconst fail = (msg) => [{ json: { ok: false, statusCode: 400, body: { success: false, error: msg, step: 'validate' } } }];\nconst id = parseId(b.e_sorder_id);\nif (!id) return fail('Missing or invalid e_sorder_id (expected S1234567.0001).');\nif (!b.writer) return fail('Missing writer (e_user_id)');\nconst h = b.header && typeof b.header === 'object' ? b.header : {};\n// null = not sent, leave Eclipse's value.\nconst header = {\n  shipVia: h.ship_via == null ? null : String(h.ship_via).trim(),\n  shipBranch: branchOf(h.ship_branch) || null,\n  shipDate: isoDate(h.ship_date) || null,\n  requiredDate: isoDate(h.required_date) || null,\n  shippingInstructions: text(h.shipping_instructions),\n  internalNotes: text(h.internal_notes),\n};\nif (header.shipDate && header.requiredDate && header.requiredDate < header.shipDate) return fail('Required date cannot be before ship date.');\nconst lines = (Array.isArray(b.lines) ? b.lines : []).map((l) => ({\n  lineId: l.line_id != null && l.line_id !== '' ? Number(l.line_id) : null,\n  productId: Number(l.productId),\n  quantity: Math.round(Number(l.quantity) || 0),\n  unitPrice: l.unitPrice != null && l.unitPrice !== '' && isFinite(Number(l.unitPrice)) ? Number(l.unitPrice) : null,\n  comments: String(l.comments == null ? '' : l.comments).trim(),\n  branch: branchOf(l.ship_branch),\n})).filter((l) => l.productId && l.quantity > 0);\n// Same comment text as create-order's custom lines.\nconst customComment = (c) => {\n  const out = [String(c.name || '').trim()];\n  if (String(c.ideal_sku || '').trim()) out.push('SKU: ' + String(c.ideal_sku).trim());\n  const v = c.variation_of;\n  if (v && v.product_id) {\n    out.push('Variation of ' + v.product_id + (v.description ? ' ' + String(v.description).trim() : '') +\n      (v.serial_number ? ' SN ' + String(v.serial_number).trim() : ''));\n  }\n  for (const x of (Array.isArray(c.customizations) ? c.customizations : [])) if (String(x).trim()) out.push(String(x).trim());\n  return out.filter(Boolean).join('\\n');\n};\nfor (const c of (Array.isArray(b.custom_lines) ? b.custom_lines : [])) {\n  const qty = Math.round(Number(c.quantity) || 0);\n  const comments = customComment(c);\n  if (!(qty > 0) || !comments) continue;\n  lines.push({\n    lineId: null, productId: CUSTOM_PRODUCT_ID, quantity: qty,\n    unitPrice: c.unit_price != null && c.unit_price !== '' && isFinite(Number(c.unit_price)) ? Number(c.unit_price) : 0,\n    comments, branch: branchOf(c.ship_branch), custom: true,\n  });\n}\nif (!lines.length) return fail('A bid needs at least one line. Cancel the bid to remove it.');\nconst orderStatus = b.order_status ? String(b.order_status) : '';\nif (orderStatus && !STATUSES.includes(orderStatus)) return fail('Unknown order status \"' + orderStatus + '\".');\nreturn [{ json: { ok: true, ...id, writer: String(b.writer).toUpperCase(), header, lines, orderStatus } }];\n"
       },
       "id": "4f627086-0e3b-564c-ad6e-f6026f9c9ea2",
       "name": "Validate",
@@ -99,7 +107,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Diff the requested lines against the bid's current lines on this gen.\nconst v = $('Validate').first().json;\nconst env = $input.first().json;\nconst fail = (statusCode, error, step) => [{ json: { ok: false, statusCode, body: { success: false, error, step } } }];\nif (env.error) return fail(502, 'Eclipse GET /SalesOrders?id=' + v.oid + ' failed: ' + env.error + ' ' + JSON.stringify(env.message || '').substring(0, 500), 'getSalesOrder');\nconst so = (Array.isArray(env.results) ? env.results[0] : env) || {};\nif (!Array.isArray(so.generations) || !so.generations.length) return fail(404, 'Eclipse order ' + v.oid + ' not found.', 'getSalesOrder');\nconst gen = so.generations.find((g) => String(g.generationId) === v.genId);\nif (!gen) return fail(404, 'Order ' + v.oid + ' has no generation ' + v.genId + '.', 'getSalesOrder');\nconst status = String(gen.status || '');\n// Lines on this generation with a quantity: { lineId, productId, qty, price, um }.\nconst genLines = [];\nfor (const line of (Array.isArray(so.lines) ? so.lines : [])) {\n  for (const lg of (Array.isArray(line.generations) ? line.generations : [])) {\n    if (String(lg.generationId) !== v.genId) continue;\n    const qty = (Number(lg.stockQty) || 0) + (Number(lg.nonstockQty) || 0);\n    if (qty <= 0) continue;\n    genLines.push({\n      lineId: line.lineId, productId: String(line.productId), qty,\n      price: lg.price && lg.price.value != null ? Number(lg.price.value) : null,\n      // Line cost and COGS as saved on the order (null when restricted / missing).\n      cost: lg.cost && lg.cost.value != null ? Number(lg.cost.value) : null,\n      cogs: lg.cogs && lg.cogs.value != null ? Number(lg.cogs.value) : null,\n      um: line.displayUom || line.smallestUom || 'ea', umQuantity: Number(line.displayUomQty) || 1,\n      description: String(line.productDescription || line.productDecription || '').replace(/\\s*\\n\\s*/g, ' ').trim(),\n      lineStatus: String(line.status || ''),\n    });\n  }\n}\nif (status !== 'Bid') return fail(409, 'Order ' + v.eSorderId + ' is ' + (status || 'not a bid') + ', not a Bid. Only bids can be edited.', 'plan');\nconst byId = {};\nfor (const l of genLines) byId[String(l.lineId)] = l;\nconst kept = new Set();\nconst posts = [], puts = [], prices = [], changes = { added: [], qty: [], price: [], deleted: [] };\nfor (const l of v.lines) {\n  if (l.lineId == null) {\n    const p = { productId: l.productId, quantity: l.quantity, um: 'ea', umQuantity: 1 };\n    if (l.unitPrice != null) p.unitPrice = l.unitPrice;\n    if (l.comments) { p.comments = l.comments; p.commentsId = '1'; }\n    posts.push({ lineItemProduct: p });\n    changes.added.push({ productId: l.productId, quantity: l.quantity, unitPrice: l.unitPrice });\n    continue;\n  }\n  const cur = byId[String(l.lineId)];\n  if (!cur) return fail(409, 'Line ' + l.lineId + ' is no longer on ' + v.eSorderId + '. Reload the bid and try again.', 'plan');\n  if (String(cur.productId) !== String(l.productId)) return fail(409, 'Line ' + l.lineId + ' on ' + v.eSorderId + ' is product ' + cur.productId + ', not ' + l.productId + '. Reload the bid and try again.', 'plan');\n  kept.add(String(l.lineId));\n  if (l.quantity !== cur.qty) {\n    puts.push({ lineId: Number(l.lineId), qty: l.quantity, um: cur.um });\n    changes.qty.push({ lineId: l.lineId, from: cur.qty, to: l.quantity });\n  }\n  if (l.unitPrice != null && (cur.price == null || Math.abs(l.unitPrice - cur.price) >= 0.0005)) {\n    prices.push({ lineId: Number(l.lineId), value: l.unitPrice });\n    changes.price.push({ lineId: l.lineId, from: cur.price, to: l.unitPrice });\n  }\n}\nconst deletes = genLines.filter((l) => !kept.has(String(l.lineId))).map((l) => l.lineId);\nfor (const id of deletes) changes.deleted.push({ lineId: id, productId: byId[String(id)].productId });\nif (!posts.length && !puts.length && !prices.length && !deletes.length) {\n  // Nothing to change: answer straight away (ok: false only routes to Respond).\n  return [{ json: { ok: false, statusCode: 200, body: { success: true, unchanged: true, e_sorder_id: v.eSorderId, order_id: v.oid } } }];\n}\nreturn [{ json: {\n  ok: true, eSorderId: v.eSorderId, changes,\n  plan: { posts, puts, prices, deleteIds: deletes.join(',') },\n  hasPosts: posts.length > 0, hasPuts: puts.length > 0, hasPrices: prices.length > 0, hasDeletes: deletes.length > 0,\n} }];\n"
+        "jsCode": "// Diff the request against the bid as Eclipse has it now.\n// Lines live on a generation, and a generation has one ship branch and one\n// required date that Eclipse cannot change. So each line goes to the\n// generation for its ship branch with the wanted required date: the open\n// one when those still match, else another bid generation of this order\n// that matches, else a new one (Create Shipment, as v1 did). A line that\n// changes generation, or gets a comment, is re-created there (POST) and\n// deleted where it was. The open generation is cancelled when no line is\n// left on it. Emits one item per generation to create (for Create\n// Shipment), or one { create: false } item; the plan rides on the first.\nconst v = $('Validate').first().json;\nconst env = $input.first().json;\nconst fail = (statusCode, error, step) => [{ json: { ok: false, statusCode, body: { success: false, error, step } } }];\nif (env.error) return fail(502, 'Eclipse GET /SalesOrders?id=' + v.oid + ' failed: ' + env.error + ' ' + JSON.stringify(env.message || '').substring(0, 500), 'getSalesOrder');\nconst so = (Array.isArray(env.results) ? env.results[0] : env) || {};\nif (!Array.isArray(so.generations) || !so.generations.length) return fail(404, 'Eclipse order ' + v.oid + ' not found.', 'getSalesOrder');\nconst gidOf = (g) => String(Number(g.generationId));\nconst gen = so.generations.find((g) => gidOf(g) === v.genId);\nif (!gen) return fail(404, 'Order ' + v.oid + ' has no generation ' + v.genId + '.', 'getSalesOrder');\nconst status = String(gen.status || '');\nif (status !== 'Bid') return fail(409, 'Order ' + v.eSorderId + ' is ' + (status || 'not a bid') + ', not a Bid. Only bids can be edited.', 'plan');\nconst day = (d) => String(d || '').slice(0, 10);\nconst branchOf = (x) => { const m = String(x == null ? '' : x).trim().match(/^(\\d+)/); return m ? m[1] : ''; };\nconst trim = (s) => String(s == null ? '' : s).trim();\n\n// The open generation's header, and what the rep wants it to be.\nconst cur = {\n  branch: branchOf(gen.shipBranch), requiredDate: day(gen.requiredDate), shipDate: day(gen.shipDate),\n  shipVia: trim(gen.shipVia), instructions: trim(gen.shippingInstructions), notes: trim(gen.internalNotes),\n};\nconst H = v.header || {};\nconst want = {\n  branch: H.shipBranch || cur.branch,\n  requiredDate: H.requiredDate || cur.requiredDate,\n  shipDate: H.shipDate || cur.shipDate,\n  // A blank ship via keeps Eclipse's (there is no known way to clear it).\n  shipVia: H.shipVia ? trim(H.shipVia) : cur.shipVia,\n  instructions: H.shippingInstructions != null ? trim(H.shippingInstructions) : cur.instructions,\n  notes: H.internalNotes != null ? trim(H.internalNotes) : cur.notes,\n};\nif (want.requiredDate && want.shipDate && want.requiredDate < want.shipDate) return fail(400, 'Required date cannot be before ship date.', 'plan');\nif (v.orderStatus && !want.shipVia) return fail(400, 'Pick a ship via before converting the bid to an order.', 'plan');\n// Fields the rep changed (sent and different from the open generation).\nconst edited = {\n  shipVia: want.shipVia !== cur.shipVia,\n  shipDate: want.shipDate !== cur.shipDate,\n  instructions: want.instructions !== cur.instructions,\n  notes: want.notes !== cur.notes,\n};\n\n// Comments a re-created line keeps: the rep's own (Eclipse commentTypeId\n// '1' and '2'; '' is Eclipse's, e.g. \"Certification Required\", which\n// Eclipse adds again itself), without Eclipse's \"Requested QTY: n UOM: x\"\n// note, which it appends on create.\nconst keepComments = (line) => (Array.isArray(line.comments) ? line.comments : [])\n  .filter((c) => ['1', '2'].includes(String(c.commentTypeId)))\n  .map((c) => String(c.comment || '').split('\\n').filter((s) => !/^\\s*Requested QTY:/i.test(s)).join('\\n').trim())\n  .filter(Boolean);\n\n// Lines on this generation with a quantity.\nconst genLines = [];\nfor (const line of (Array.isArray(so.lines) ? so.lines : [])) {\n  for (const lg of (Array.isArray(line.generations) ? line.generations : [])) {\n    if (String(Number(lg.generationId)) !== v.genId) continue;\n    const qty = (Number(lg.stockQty) || 0) + (Number(lg.nonstockQty) || 0);\n    if (qty <= 0) continue;\n    genLines.push({\n      lineId: line.lineId, productId: String(line.productId), qty,\n      price: lg.price && lg.price.value != null ? Number(lg.price.value) : null,\n      // Line cost and COGS as saved on the order (null when restricted / missing).\n      cost: lg.cost && lg.cost.value != null ? Number(lg.cost.value) : null,\n      cogs: lg.cogs && lg.cogs.value != null ? Number(lg.cogs.value) : null,\n      um: line.displayUom || line.smallestUom || 'ea', umQuantity: Number(line.displayUomQty) || 1,\n      description: String(line.productDescription || line.productDecription || '').replace(/\\s*\\n\\s*/g, ' ').trim(),\n      lineStatus: String(line.status || ''),\n      comments: keepComments(line),\n    });\n  }\n}\nconst byId = {};\nfor (const l of genLines) byId[String(l.lineId)] = l;\n\n// Generation refs: 'g:<id>' an existing generation, 'n:<i>' one to create.\nconst home = 'g:' + v.genId;\nconst others = so.generations.filter((g) => gidOf(g) !== v.genId && String(g.status) === 'Bid');\nconst genById = {};\nfor (const g of so.generations) genById[gidOf(g)] = g;\nconst refs = {};\nconst creates = [];\nconst refFor = (branch) => {\n  if (refs[branch]) return refs[branch];\n  let ref;\n  if (branch === cur.branch && want.requiredDate === cur.requiredDate) ref = home;\n  else {\n    const hit = others.find((g) => branchOf(g.shipBranch) === branch && day(g.requiredDate) === want.requiredDate);\n    if (hit) ref = 'g:' + gidOf(hit);\n    else {\n      ref = 'n:' + creates.length;\n      creates.push({ shipBranch: branch, requiredDate: want.requiredDate, shipDate: want.shipDate, shipStatus: 'Bid' });\n    }\n  }\n  return (refs[branch] = ref);\n};\n\nconst posts = [], puts = [], prices = [], deletes = [];\nconst changes = { added: [], qty: [], price: [], deleted: [], moved: [], commented: [], header: [], generations: [], status: null, cancelled: [] };\nconst kept = new Set();\nlet homeLive = false;\nfor (const l of v.lines) {\n  const ref = refFor(l.branch || want.branch);\n  if (ref === home) homeLive = true;\n  if (l.lineId == null) {\n    const p = { productId: l.productId, quantity: l.quantity, um: 'ea', umQuantity: 1 };\n    if (l.unitPrice != null) p.unitPrice = l.unitPrice;\n    if (l.comments) { p.comments = l.comments; p.commentsId = '1'; }\n    posts.push({ ref, item: { lineItemProduct: p } });\n    changes.added.push({ productId: l.productId, quantity: l.quantity, unitPrice: l.unitPrice, custom: !!l.custom, ref });\n    continue;\n  }\n  const c = byId[String(l.lineId)];\n  if (!c) return fail(409, 'Line ' + l.lineId + ' is no longer on ' + v.eSorderId + '. Reload the bid and try again.', 'plan');\n  if (String(c.productId) !== String(l.productId)) return fail(409, 'Line ' + l.lineId + ' on ' + v.eSorderId + ' is product ' + c.productId + ', not ' + l.productId + '. Reload the bid and try again.', 'plan');\n  kept.add(String(l.lineId));\n  if (ref !== home || l.comments) {\n    // Re-create the line where it belongs, with its comments (plus the new\n    // one), qty, unit of measure and price (the bid's, unless changed).\n    const notes = c.comments.concat(l.comments ? [l.comments] : []);\n    const price = l.unitPrice != null ? l.unitPrice : c.price;\n    const p = { productId: Number(c.productId), quantity: l.quantity, um: c.um, umQuantity: c.umQuantity };\n    if (price != null) p.unitPrice = price;\n    if (notes.length) { p.comments = notes.join('\\n'); p.commentsId = '1'; }\n    posts.push({ ref, item: { lineItemProduct: p } });\n    deletes.push(c.lineId);\n    if (ref !== home) changes.moved.push({ lineId: l.lineId, productId: c.productId, ref });\n    else changes.commented.push({ lineId: l.lineId, productId: c.productId, comment: l.comments });\n    continue;\n  }\n  if (l.quantity !== c.qty) {\n    puts.push({ lineId: Number(l.lineId), qty: l.quantity, um: c.um });\n    changes.qty.push({ lineId: l.lineId, from: c.qty, to: l.quantity });\n  }\n  if (l.unitPrice != null && (c.price == null || Math.abs(l.unitPrice - c.price) >= 0.0005)) {\n    prices.push({ lineId: Number(l.lineId), value: l.unitPrice });\n    changes.price.push({ lineId: l.lineId, from: c.price, to: l.unitPrice });\n  }\n}\nfor (const l of genLines) {\n  if (kept.has(String(l.lineId))) continue;\n  deletes.push(l.lineId);\n  changes.deleted.push({ lineId: l.lineId, productId: l.productId });\n}\n// Nothing left on the open generation: its lines are deleted first (the\n// DELETE step runs before the cancel), then it is cancelled (2026-10-20, on\n// request), so a cancelled generation never keeps the lines that moved.\nconst cancelHome = !homeLive;\nconst liveRefs = [...new Set(Object.values(refs))];\n\n// Header: changed fields on every existing generation that ends up with\n// lines; a new generation gets the wanted ship via and notes (its dates\n// and branch come from Create Shipment).\nconst headerOps = [];\nconst fieldOf = { shipVia: 'shipVia', shipDate: 'shipDate', instructions: 'shippingInstructions', notes: 'internalNotes' };\nfor (const ref of liveRefs) {\n  if (ref.startsWith('n:')) {\n    for (const k of ['shipVia', 'instructions', 'notes']) if (want[k]) headerOps.push({ ref, kind: k, value: want[k] });\n    continue;\n  }\n  const g = genById[ref.slice(2)];\n  for (const k of ['shipVia', 'shipDate', 'instructions', 'notes']) {\n    const now = k === 'shipDate' ? day(g.shipDate) : trim(g[fieldOf[k]]);\n    if (edited[k] && want[k] !== now) headerOps.push({ ref, kind: k, value: want[k] });\n  }\n}\nfor (const k of ['shipVia', 'shipDate', 'instructions', 'notes']) if (edited[k]) changes.header.push({ field: k, from: cur[k], to: want[k] });\nif (want.branch !== cur.branch) changes.header.push({ field: 'shipBranch', from: cur.branch, to: want.branch });\nif (want.requiredDate !== cur.requiredDate) changes.header.push({ field: 'requiredDate', from: cur.requiredDate, to: want.requiredDate });\n\n// Convert to Order: every generation that keeps lines, plus the order's\n// other bid generations.\nconst statusOps = [];\nif (v.orderStatus) {\n  const conv = liveRefs.map((ref) => ({ ref, shipDate: want.shipDate }));\n  for (const g of others) {\n    const ref = 'g:' + gidOf(g);\n    if (!liveRefs.includes(ref)) conv.push({ ref, shipDate: day(g.shipDate) });\n  }\n  for (const x of conv) statusOps.push({ ref: x.ref, status: v.orderStatus, shipDate: x.shipDate });\n  changes.status = v.orderStatus;\n}\n\nconst nothing = !creates.length && !posts.length && !puts.length && !prices.length && !deletes.length &&\n  !headerOps.length && !statusOps.length && !cancelHome;\nif (nothing) {\n  // Nothing to change: answer straight away (ok: false only routes to Respond).\n  return [{ json: { ok: false, statusCode: 200, body: { success: true, unchanged: true, e_sorder_id: v.eSorderId, order_id: v.oid } } }];\n}\nconst state = {\n  oid: v.oid, home, homeGenId: v.genId, creates, posts, puts, prices,\n  deletes,\n  headerOps, statusOps, cancelHome, liveRefs, changes,\n};\nif (!creates.length) return [{ json: { ok: true, create: false, state } }];\nreturn creates.map((c, i) => ({ json: { ok: true, create: true, oid: v.oid, ...c, state: i === 0 ? state : undefined } }));\n"
       },
       "id": "4bbe4cee-d047-5c67-b988-a4a50a2a72e3",
       "name": "Plan",
@@ -153,8 +161,8 @@
           },
           "conditions": [
             {
-              "id": "06b5e7ec-0635-5dc4-89a0-dc1c5ac2117a",
-              "leftValue": "={{ $('Plan').first().json.hasDeletes }}",
+              "id": "65c8561d-8f2c-5b3f-8519-bdcfc4f3255c",
+              "leftValue": "={{ $json.create }}",
               "rightValue": "",
               "operator": {
                 "type": "boolean",
@@ -167,10 +175,10 @@
         },
         "options": {}
       },
-      "id": "0c61ad82-776b-568c-9af3-53ad06318640",
-      "name": "Has deletes?",
+      "name": "Create gens?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
+      "id": "0506b3eb-82d7-5f55-913c-a233f1ad8bf5",
       "position": [
         1440,
         0
@@ -179,35 +187,39 @@
     {
       "parameters": {
         "resource": "salesOrder",
-        "operation": "deleteLineItem",
-        "deleteLineItemOrderId": "={{ $('Plan').first().json.eSorderId }}",
-        "deleteLineItemLineItemId": "={{ $('Plan').first().json.plan.deleteIds }}"
+        "operation": "createShipment",
+        "shipmentSalesOrderId": "={{ $json.oid }}",
+        "generationId": "={{ $('Validate').first().json.genId }}",
+        "requiredDate": "={{ $json.requiredDate }}",
+        "shipmentShipDate": "={{ $json.shipDate }}",
+        "shipBranch": "={{ $json.shipBranch }}",
+        "shipStatus": "={{ $json.shipStatus }}"
       },
-      "id": "0a52f2e6-823d-5c29-94c5-be4d3ebba706",
-      "name": "Eclipse: DELETE /LineItems",
+      "name": "Eclipse: create shipment",
       "type": "CUSTOM.eclipseApi",
       "typeVersion": 1,
-      "position": [
-        1680,
-        0
-      ],
       "credentials": {
         "eclipseApi": {
           "id": "PVIgwtzRL74PSVft",
           "name": "Eclipse account"
         }
       },
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "id": "a897447d-5b63-5389-9463-1c442d9cc067",
+      "position": [
+        1680,
+        0
+      ]
     },
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const plan = $('Plan').first().json;\nconst r = $input.first().json;\nif (r.error) {\n  return [{ json: { ok: false, statusCode: 502, body: { success: false, step: 'deleteLineItems', changes: plan.changes,\n    error: 'Eclipse DELETE /LineItems failed on ' + plan.eSorderId + ': ' + r.error + ' ' + JSON.stringify(r.message || '').substring(0, 500) +\n      ' Some changes may already be saved; reload the bid to see where it stands.' } } }];\n}\nreturn [{ json: { ok: true } }];\n"
+        "jsCode": "// The plan with real generation ids (new ones from Create Shipment),\n// grouped into the calls each Eclipse step makes.\nconst state = $('Plan').first().json.state;\nconst pad = (g) => String(g).padStart(4, '0');\n// The new generation's id from a Create Shipment answer. v1 read\n// generationId at the top level; a { results: [order] } answer (the shape of\n// SO Create) is handled too, taking the highest generation on that branch.\nconst shipmentGenId = (res, branch) => {\n  if (!res || typeof res !== 'object') return '';\n  const direct = res.generationId || res.generationID;\n  if (direct) return String(Number(direct));\n  const r0 = Array.isArray(res.results) ? res.results[0] : null;\n  if (!r0) return '';\n  if (r0.generationId) return String(Number(r0.generationId));\n  const gens = (Array.isArray(r0.generations) ? r0.generations : [])\n    .filter((g) => String(g.shipBranch) === String(branch) && String(g.status) !== 'Cancel');\n  const ids = gens.map((g) => Number(g.generationId)).filter((n) => n > 0).sort((a, b) => b - a);\n  return ids.length ? String(ids[0]) : '';\n};\nconst ran = (n) => { try { return $(n).isExecuted; } catch (e) { return false; } };\nconst shipments = ran('Eclipse: create shipment') ? $('Eclipse: create shipment').all() : [];\nconst newGen = {};\nfor (let i = 0; i < state.creates.length; i++) {\n  const c = state.creates[i];\n  const res = shipments[i] ? shipments[i].json : null;\n  const gid = res && !res.error ? shipmentGenId(res, c.shipBranch) : '';\n  if (!gid) {\n    const why = !res ? 'no response' : res.error ? res.error + ' ' + JSON.stringify(res.message || '').substring(0, 500)\n      : 'no generation id in ' + JSON.stringify(res).substring(0, 300);\n    return [{ json: { ok: false, statusCode: 502, body: { success: false, step: 'createShipment', changes: state.changes,\n      error: 'Eclipse could not add a generation for branch ' + c.shipBranch + ' (' + why + '). Nothing else was changed; ' +\n        (i ? 'an empty bid generation may have been added. ' : '') + 'reload the bid and try again.' } } }];\n  }\n  newGen['n:' + i] = gid;\n  state.changes.generations.push({ e_sorder_id: state.oid + '.' + pad(gid), ship_branch: c.shipBranch, created: true });\n}\nconst orderIdOf = (ref) => state.oid + '.' + pad(ref.startsWith('g:') ? ref.slice(2) : newGen[ref]);\nconst homeId = orderIdOf(state.home);\n\nconst postGroups = {};\nfor (const p of state.posts) {\n  const id = orderIdOf(p.ref);\n  (postGroups[id] = postGroups[id] || { orderId: id, items: [] }).items.push(p.item);\n}\nconst header = (kind) => state.headerOps.filter((o) => o.kind === kind).map((o) => ({ orderId: orderIdOf(o.ref), value: o.value }));\nconst ops = {\n  posts: Object.values(postGroups),\n  qty: state.puts.length ? [{ orderId: homeId, items: state.puts }] : [],\n  prices: state.prices.length ? [{ orderId: homeId, items: state.prices }] : [],\n  deletes: state.deletes.length ? [{ orderId: homeId, lineIds: state.deletes.join(',') }] : [],\n  shipVia: header('shipVia'),\n  shipDate: header('shipDate'),\n  instructions: header('instructions'),\n  notes: header('notes'),\n  status: state.statusOps.map((s) => ({ orderId: orderIdOf(s.ref), status: s.status, shipDate: s.shipDate })),\n  cancels: state.cancelHome ? [{ orderId: homeId }] : [],\n};\nconst has = {};\nfor (const k of Object.keys(ops)) has[k] = ops[k].length > 0;\nif (state.cancelHome) state.changes.cancelled.push(homeId);\n// The page reopens on the open generation, or where its lines went.\nconst live = state.liveRefs.map(orderIdOf);\nconst openId = state.cancelHome ? live[0] : homeId;\nconst syncIds = [...new Set([homeId].concat(live, ops.status.map((s) => s.orderId)))];\nreturn [{ json: { ok: true, ops, has, changes: state.changes, openId, syncIds } }];\n"
       },
-      "id": "901c845e-9445-58b1-aa00-5f2728ab5bd9",
-      "name": "Check deletes",
+      "name": "Resolve",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
+      "id": "55c888d5-c0e4-5a22-9bd6-1fc13f526630",
       "position": [
         1920,
         0
@@ -223,7 +235,7 @@
           },
           "conditions": [
             {
-              "id": "a2bcd76b-3562-53c0-b97b-b2885d6731d2",
+              "id": "b8634b66-ae85-5142-ad8c-d2263abcc46c",
               "leftValue": "={{ $json.ok }}",
               "rightValue": "",
               "operator": {
@@ -237,323 +249,12 @@
         },
         "options": {}
       },
-      "id": "54424150-72d3-51a2-a70d-f935e35fe91a",
-      "name": "Deletes ok?",
+      "name": "Resolved?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
+      "id": "442fc278-ac27-5ed1-96c4-ee1dadc819dc",
       "position": [
         2160,
-        0
-      ]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "loose"
-          },
-          "conditions": [
-            {
-              "id": "3a0573c5-9ab7-56aa-991d-bbdde1859779",
-              "leftValue": "={{ $('Plan').first().json.hasPuts }}",
-              "rightValue": "",
-              "operator": {
-                "type": "boolean",
-                "operation": "true",
-                "singleValue": true
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "156683dc-a743-54bc-9125-2e5f42abc463",
-      "name": "Has puts?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [
-        2400,
-        0
-      ]
-    },
-    {
-      "parameters": {
-        "resource": "salesOrder",
-        "operation": "updateLineItemQuantity",
-        "updateQtyOrderId": "={{ $('Plan').first().json.eSorderId }}",
-        "updateQtyInputMode": "json",
-        "updateQtyCustomJson": "={{ $('Plan').first().json.plan.puts }}"
-      },
-      "id": "cb7c89d0-0cf2-505f-9e88-ef95ee1f9da8",
-      "name": "Eclipse: PUT /QtyLineItems",
-      "type": "CUSTOM.eclipseApi",
-      "typeVersion": 1,
-      "position": [
-        2640,
-        0
-      ],
-      "credentials": {
-        "eclipseApi": {
-          "id": "PVIgwtzRL74PSVft",
-          "name": "Eclipse account"
-        }
-      },
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "const plan = $('Plan').first().json;\nconst r = $input.first().json;\nif (r.error) {\n  return [{ json: { ok: false, statusCode: 502, body: { success: false, step: 'putQtyLineItems', changes: plan.changes,\n    error: 'Eclipse PUT /QtyLineItems failed on ' + plan.eSorderId + ': ' + r.error + ' ' + JSON.stringify(r.message || '').substring(0, 500) +\n      ' Some changes may already be saved; reload the bid to see where it stands.' } } }];\n}\nreturn [{ json: { ok: true } }];\n"
-      },
-      "id": "05bac917-8f91-5c86-85b0-6bb56a2f600c",
-      "name": "Check puts",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        2880,
-        0
-      ]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "loose"
-          },
-          "conditions": [
-            {
-              "id": "8c251c1e-d412-5e70-a701-516b17cdc7a6",
-              "leftValue": "={{ $json.ok }}",
-              "rightValue": "",
-              "operator": {
-                "type": "boolean",
-                "operation": "true",
-                "singleValue": true
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "2fcc64eb-9dd5-57b4-abe2-0ba97c7ddfcb",
-      "name": "Puts ok?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [
-        3120,
-        0
-      ]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "loose"
-          },
-          "conditions": [
-            {
-              "id": "7501f7ef-7f4a-5437-a4ae-31cad33d0032",
-              "leftValue": "={{ $('Plan').first().json.hasPrices }}",
-              "rightValue": "",
-              "operator": {
-                "type": "boolean",
-                "operation": "true",
-                "singleValue": true
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "c570328c-013b-5943-88a6-ac6be2d1799d",
-      "name": "Has prices?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [
-        3360,
-        0
-      ]
-    },
-    {
-      "parameters": {
-        "resource": "salesOrder",
-        "operation": "updateLineItemPrice",
-        "updatePriceOrderId": "={{ $('Plan').first().json.eSorderId }}",
-        "updatePriceInputMode": "json",
-        "updatePriceCustomJson": "={{ $('Plan').first().json.plan.prices }}"
-      },
-      "id": "6cfa7181-9072-5f77-96f0-5835077cea23",
-      "name": "Eclipse: PUT /LineItems/Price",
-      "type": "CUSTOM.eclipseApi",
-      "typeVersion": 1,
-      "position": [
-        3600,
-        0
-      ],
-      "credentials": {
-        "eclipseApi": {
-          "id": "PVIgwtzRL74PSVft",
-          "name": "Eclipse account"
-        }
-      },
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "const plan = $('Plan').first().json;\nconst r = $input.first().json;\nif (r.error) {\n  return [{ json: { ok: false, statusCode: 502, body: { success: false, step: 'putLineItemPrices', changes: plan.changes,\n    error: 'Eclipse PUT /LineItems/Price failed on ' + plan.eSorderId + ': ' + r.error + ' ' + JSON.stringify(r.message || '').substring(0, 500) +\n      ' Some changes may already be saved; reload the bid to see where it stands.' } } }];\n}\nreturn [{ json: { ok: true } }];\n"
-      },
-      "id": "41eae707-067f-57e9-b7f7-38415b0de4db",
-      "name": "Check prices",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        3840,
-        0
-      ]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "loose"
-          },
-          "conditions": [
-            {
-              "id": "9e20116f-42e5-5ffb-bb80-a8ed868298ba",
-              "leftValue": "={{ $json.ok }}",
-              "rightValue": "",
-              "operator": {
-                "type": "boolean",
-                "operation": "true",
-                "singleValue": true
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "f29888c3-c34e-5e5f-be22-0e93ea9ffbc5",
-      "name": "Prices ok?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [
-        4080,
-        0
-      ]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "loose"
-          },
-          "conditions": [
-            {
-              "id": "6f459f17-15e9-5f46-a8e1-4037adc45fce",
-              "leftValue": "={{ $('Plan').first().json.hasPosts }}",
-              "rightValue": "",
-              "operator": {
-                "type": "boolean",
-                "operation": "true",
-                "singleValue": true
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "8eba4674-d103-5e8a-8dc5-982d0b55c876",
-      "name": "Has posts?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [
-        4320,
-        0
-      ]
-    },
-    {
-      "parameters": {
-        "resource": "salesOrder",
-        "operation": "createLineItem",
-        "createLineItemSalesOrderId": "={{ $('Plan').first().json.eSorderId }}",
-        "createLineItemLines": "={{ $('Plan').first().json.plan.posts }}"
-      },
-      "id": "aac252e0-491a-5e8f-9711-ae6d3d65bf58",
-      "name": "Eclipse: POST /LineItems",
-      "type": "CUSTOM.eclipseApi",
-      "typeVersion": 1,
-      "position": [
-        4560,
-        0
-      ],
-      "credentials": {
-        "eclipseApi": {
-          "id": "PVIgwtzRL74PSVft",
-          "name": "Eclipse account"
-        }
-      },
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "const plan = $('Plan').first().json;\nconst r = $input.first().json;\nif (r.error) {\n  return [{ json: { ok: false, statusCode: 502, body: { success: false, step: 'postLineItems', changes: plan.changes,\n    error: 'Eclipse POST /LineItems failed on ' + plan.eSorderId + ': ' + r.error + ' ' + JSON.stringify(r.message || '').substring(0, 500) +\n      ' Some changes may already be saved; reload the bid to see where it stands.' } } }];\n}\nreturn [{ json: { ok: true } }];\n"
-      },
-      "id": "ea63d967-b504-5c30-8d7e-dd72b42ddd9a",
-      "name": "Check posts",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        4800,
-        0
-      ]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "loose"
-          },
-          "conditions": [
-            {
-              "id": "c56ef8ad-db1e-53f0-9168-69b456efdb98",
-              "leftValue": "={{ $json.ok }}",
-              "rightValue": "",
-              "operator": {
-                "type": "boolean",
-                "operation": "true",
-                "singleValue": true
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "01787814-1a37-5fd1-b79c-58a4984ca38c",
-      "name": "Posts ok?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [
-        5040,
         0
       ]
     },
@@ -563,7 +264,7 @@
         "url": "https://n8n.fairbankequipment.com/webhook/update-hs-deal",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ e_sorder_ids: [$('Plan').first().json.eSorderId] }) }}",
+        "jsonBody": "={{ JSON.stringify({ e_sorder_ids: $('Resolve').first().json.syncIds }) }}",
         "options": {}
       },
       "id": "10339462-1bc1-50d9-aed0-e78e15b4d544",
@@ -571,7 +272,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        5280,
+        4800,
         0
       ],
       "onError": "continueRegularOutput",
@@ -580,14 +281,14 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const v = { eSorderId: $('Plan').first().json.eSorderId };\nconst plan = $('Plan').first().json;\nlet r = $input.first().json || {};\n// A non-JSON content type lands the body in `data` as text; parse it.\nif (!r.orders && typeof r.data === 'string') { try { r = JSON.parse(r.data); } catch (e) {} }\n// update-hs-deal answers { message, source, orders: [{ <hs_deal_id>: <e_sorder_id> }] }.\nconst pairs = [];\nfor (const o of (Array.isArray(r.orders) ? r.orders : [])) {\n  for (const [dealId, soId] of Object.entries(o || {})) pairs.push([String(dealId), String(soId)]);\n}\nconst base = (id) => String(id || '').split('.')[0].toUpperCase();\nconst hit = pairs.find((p) => p[1] === v.eSorderId) || pairs.find((p) => base(p[1]) === base(v.eSorderId)) || (pairs.length === 1 ? pairs[0] : null);\nconst hubspotSync = r.error ? { ok: false, error: String(r.error) } : { ok: true, orders: r.orders || null };\nreturn [{ json: { statusCode: 200, body: {\n  success: true,\n  e_sorder_id: v.eSorderId,\n  order_id: v.eSorderId.split('.')[0],\n  hs_deal_id: hit ? hit[0] : '',\n  changes: plan.changes,\n  hubspot_sync: hubspotSync,\n} } }];\n"
+        "jsCode": "const res = $('Resolve').first().json;\nlet r = $input.first().json || {};\n// A non-JSON content type lands the body in `data` as text; parse it.\nif (!r.orders && typeof r.data === 'string') { try { r = JSON.parse(r.data); } catch (e) {} }\n// update-hs-deal answers { message, source, orders: [{ <hs_deal_id>: <e_sorder_id> }] }.\nconst pairs = [];\nfor (const o of (Array.isArray(r.orders) ? r.orders : [])) {\n  for (const [dealId, soId] of Object.entries(o || {})) pairs.push([String(dealId), String(soId)]);\n}\nconst id = res.openId;\nconst base = (x) => String(x || '').split('.')[0].toUpperCase();\nconst hit = pairs.find((p) => p[1] === id) || pairs.find((p) => base(p[1]) === base(id)) || (pairs.length === 1 ? pairs[0] : null);\nconst hubspotSync = r.error ? { ok: false, error: String(r.error) } : { ok: true, orders: r.orders || null };\nreturn [{ json: { statusCode: 200, body: {\n  success: true,\n  // The generation to show next: the one that was open, or where its lines\n  // went when it was cancelled.\n  e_sorder_id: id,\n  order_id: id.split('.')[0],\n  e_sorder_ids: res.syncIds,\n  hs_deal_id: hit ? hit[0] : '',\n  changes: res.changes,\n  hubspot_sync: hubspotSync,\n} } }];\n"
       },
       "id": "23b27777-1801-516b-962a-10f7e730c556",
       "name": "Final",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        5520,
+        5040,
         0
       ]
     },
@@ -604,17 +305,1191 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
+        5280,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "17ec4ade-2033-5e93-aab1-d839aa3e1cfe",
+              "leftValue": "={{ $('Resolve').first().json.has.posts }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Has posts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "8eba4674-d103-5e8a-8dc5-982d0b55c876",
+      "position": [
+        2400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return $('Resolve').first().json.ops.posts.map((g) => ({ json: g }));\n"
+      },
+      "name": "Emit posts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "e6d50c95-4c6c-5e52-bc2c-a89a3b33bd2d",
+      "position": [
+        2400,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "createLineItem",
+        "createLineItemSalesOrderId": "={{ $json.orderId }}",
+        "createLineItemLines": "={{ $json.items }}"
+      },
+      "name": "Eclipse: POST /LineItems",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "id": "aac252e0-491a-5e8f-9711-ae6d3d65bf58",
+      "position": [
+        2400,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const ops = $('Resolve').first().json.ops.posts;\nconst out = $input.all();\nfor (let i = 0; i < out.length; i++) {\n  const r = out[i].json;\n  if (r.error) {\n    const error = 'Eclipse POST /LineItems failed on ' + ((ops[i] || {}).orderId || '?') + ': ' + r.error + ' ' + JSON.stringify(r.message || '').substring(0, 500);\n    return [{ json: { ok: false, statusCode: 502, error, body: { success: false, step: 'postLineItems', changes: $('Resolve').first().json.changes,\n      error: error + ' Some changes may already be saved; reload the bid to see where it stands.' } } }];\n  }\n}\nreturn [{ json: { ok: true } }];\n"
+      },
+      "name": "Check posts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "ea63d967-b504-5c30-8d7e-dd72b42ddd9a",
+      "position": [
+        2400,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "9b665cf4-38f1-521b-b9f1-b0b90d7fa4fd",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Posts ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "01787814-1a37-5fd1-b79c-58a4984ca38c",
+      "position": [
+        2400,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "245fd903-69fc-5e4f-acc9-d9e40696d3e8",
+              "leftValue": "={{ $('Resolve').first().json.has.qty }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Has qty?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "8337f19e-fed7-5138-85eb-2314d7707de5",
+      "position": [
+        2640,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return $('Resolve').first().json.ops.qty.map((g) => ({ json: g }));\n"
+      },
+      "name": "Emit qty",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "9bb06815-5011-5410-9a29-ddf55cf47bcb",
+      "position": [
+        2640,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "updateLineItemQuantity",
+        "updateQtyOrderId": "={{ $json.orderId }}",
+        "updateQtyInputMode": "json",
+        "updateQtyCustomJson": "={{ $json.items }}"
+      },
+      "name": "Eclipse: PUT /QtyLineItems",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "id": "cb7c89d0-0cf2-505f-9e88-ef95ee1f9da8",
+      "position": [
+        2640,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const ops = $('Resolve').first().json.ops.qty;\nconst out = $input.all();\nfor (let i = 0; i < out.length; i++) {\n  const r = out[i].json;\n  if (r.error) {\n    const error = 'Eclipse PUT /QtyLineItems failed on ' + ((ops[i] || {}).orderId || '?') + ': ' + r.error + ' ' + JSON.stringify(r.message || '').substring(0, 500);\n    return [{ json: { ok: false, statusCode: 502, error, body: { success: false, step: 'putQtyLineItems', changes: $('Resolve').first().json.changes,\n      error: error + ' Some changes may already be saved; reload the bid to see where it stands.' } } }];\n  }\n}\nreturn [{ json: { ok: true } }];\n"
+      },
+      "name": "Check qty",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "a40a01bd-4af2-5dfc-93c6-41d25072cfee",
+      "position": [
+        2640,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "557009a3-033c-5b1b-824b-93ac53797d60",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Qty ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "10d682c3-8ed7-5d8d-a88c-c91e90c7e0a4",
+      "position": [
+        2640,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "a7811f7c-c9d5-56ac-a80b-23ffc762d58d",
+              "leftValue": "={{ $('Resolve').first().json.has.prices }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Has prices?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "c570328c-013b-5943-88a6-ac6be2d1799d",
+      "position": [
         2880,
-        220
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return $('Resolve').first().json.ops.prices.map((g) => ({ json: g }));\n"
+      },
+      "name": "Emit prices",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "01abbafd-ac93-5d1e-84f2-8add0cea34a1",
+      "position": [
+        2880,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "updateLineItemPrice",
+        "updatePriceOrderId": "={{ $json.orderId }}",
+        "updatePriceInputMode": "json",
+        "updatePriceCustomJson": "={{ $json.items }}"
+      },
+      "name": "Eclipse: PUT /LineItems/Price",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "id": "6cfa7181-9072-5f77-96f0-5835077cea23",
+      "position": [
+        2880,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const ops = $('Resolve').first().json.ops.prices;\nconst out = $input.all();\nfor (let i = 0; i < out.length; i++) {\n  const r = out[i].json;\n  if (r.error) {\n    const error = 'Eclipse PUT /LineItems/Price failed on ' + ((ops[i] || {}).orderId || '?') + ': ' + r.error + ' ' + JSON.stringify(r.message || '').substring(0, 500);\n    return [{ json: { ok: false, statusCode: 502, error, body: { success: false, step: 'putLineItemPrices', changes: $('Resolve').first().json.changes,\n      error: error + ' Some changes may already be saved; reload the bid to see where it stands.' } } }];\n  }\n}\nreturn [{ json: { ok: true } }];\n"
+      },
+      "name": "Check prices",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "41eae707-067f-57e9-b7f7-38415b0de4db",
+      "position": [
+        2880,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "5a8c0b41-3962-5250-8ec8-3fccfe9d6688",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Prices ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "f29888c3-c34e-5e5f-be22-0e93ea9ffbc5",
+      "position": [
+        2880,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "db1af6bc-8a3b-55ff-ae01-34185ce16f72",
+              "leftValue": "={{ $('Resolve').first().json.has.deletes }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Has deletes?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "0c61ad82-776b-568c-9af3-53ad06318640",
+      "position": [
+        3120,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return $('Resolve').first().json.ops.deletes.map((g) => ({ json: g }));\n"
+      },
+      "name": "Emit deletes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "32f3d250-8a8d-5665-9c2c-73ce0110c83c",
+      "position": [
+        3120,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "deleteLineItem",
+        "deleteLineItemOrderId": "={{ $json.orderId }}",
+        "deleteLineItemLineItemId": "={{ $json.lineIds }}"
+      },
+      "name": "Eclipse: DELETE /LineItems",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "id": "0a52f2e6-823d-5c29-94c5-be4d3ebba706",
+      "position": [
+        3120,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const ops = $('Resolve').first().json.ops.deletes;\nconst out = $input.all();\nfor (let i = 0; i < out.length; i++) {\n  const r = out[i].json;\n  if (r.error) {\n    const error = 'Eclipse DELETE /LineItems failed on ' + ((ops[i] || {}).orderId || '?') + ': ' + r.error + ' ' + JSON.stringify(r.message || '').substring(0, 500);\n    return [{ json: { ok: false, statusCode: 502, error, body: { success: false, step: 'deleteLineItems', changes: $('Resolve').first().json.changes,\n      error: error + ' Some changes may already be saved; reload the bid to see where it stands.' } } }];\n  }\n}\nreturn [{ json: { ok: true } }];\n"
+      },
+      "name": "Check deletes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "901c845e-9445-58b1-aa00-5f2728ab5bd9",
+      "position": [
+        3120,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "fea84e14-c9f4-51eb-bd76-904cf298740d",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Deletes ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "54424150-72d3-51a2-a70d-f935e35fe91a",
+      "position": [
+        3120,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "eb641352-82f6-56f1-a8d4-8ad94f6f1b59",
+              "leftValue": "={{ $('Resolve').first().json.has.shipVia }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Has shipVia?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "dbce4fa3-b372-5c1c-90f2-4668f02e07f1",
+      "position": [
+        3360,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return $('Resolve').first().json.ops.shipVia.map((g) => ({ json: g }));\n"
+      },
+      "name": "Emit shipVia",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "568dc1af-282f-5a8c-8b5f-c274e33265e1",
+      "position": [
+        3360,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "updateShipVia",
+        "shipViaUpdateOrderId": "={{ $json.orderId }}",
+        "shipViaUpdateValue": "={{ $json.value }}"
+      },
+      "name": "Eclipse: PUT ship via",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "id": "9d331e51-e920-5d7b-9596-a5aeca3a2943",
+      "position": [
+        3360,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const ops = $('Resolve').first().json.ops.shipVia;\nconst out = $input.all();\nfor (let i = 0; i < out.length; i++) {\n  const r = out[i].json;\n  if (r.error) {\n    const error = 'Eclipse PUT ship via failed on ' + ((ops[i] || {}).orderId || '?') + ': ' + r.error + ' ' + JSON.stringify(r.message || '').substring(0, 500);\n    return [{ json: { ok: false, statusCode: 502, error, body: { success: false, step: 'updateShipVia', changes: $('Resolve').first().json.changes,\n      error: error + ' Some changes may already be saved; reload the bid to see where it stands.' } } }];\n  }\n}\nreturn [{ json: { ok: true } }];\n"
+      },
+      "name": "Check ship via",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "c31bd23d-1f2d-52a8-9f53-2f7de0684f88",
+      "position": [
+        3360,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "8455e46f-f530-5f7d-bd2c-0f006d7cbed7",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "ShipVia ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "3e39d640-4d3c-5459-a2b5-b8fd9429d29d",
+      "position": [
+        3360,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "0ff6b83c-fafb-55d9-b811-026cef890ca9",
+              "leftValue": "={{ $('Resolve').first().json.has.shipDate }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Has shipDate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "4a6a9f33-00cc-5390-8af8-8f3110e1ea22",
+      "position": [
+        3600,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return $('Resolve').first().json.ops.shipDate.map((g) => ({ json: g }));\n"
+      },
+      "name": "Emit shipDate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "21467db5-b0a1-5cc1-920f-0b7ad6c992e7",
+      "position": [
+        3600,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "updateShipDate",
+        "shipDateUpdateOrderId": "={{ $json.orderId }}",
+        "shipDateUpdateValue": "={{ $json.value }}"
+      },
+      "name": "Eclipse: PUT ship date",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "id": "427f4291-f58e-5dae-af6e-2d387d38357b",
+      "position": [
+        3600,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const ops = $('Resolve').first().json.ops.shipDate;\nconst out = $input.all();\nfor (let i = 0; i < out.length; i++) {\n  const r = out[i].json;\n  if (r.error) {\n    const error = 'Eclipse PUT ship date failed on ' + ((ops[i] || {}).orderId || '?') + ': ' + r.error + ' ' + JSON.stringify(r.message || '').substring(0, 500);\n    return [{ json: { ok: false, statusCode: 502, error, body: { success: false, step: 'updateShipDate', changes: $('Resolve').first().json.changes,\n      error: error + ' Some changes may already be saved; reload the bid to see where it stands.' } } }];\n  }\n}\nreturn [{ json: { ok: true } }];\n"
+      },
+      "name": "Check ship date",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "e93928f3-515a-5b15-89c0-bff2114a7954",
+      "position": [
+        3600,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "813ac28e-4141-5982-b386-493bce4a2de4",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "ShipDate ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "353290ce-2b4f-5d51-acf6-d1c57c4419ca",
+      "position": [
+        3600,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "f5921178-8867-52ee-8419-6aac8cb607a2",
+              "leftValue": "={{ $('Resolve').first().json.has.instructions }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Has instructions?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "66de1ea1-2c6a-545e-b05d-3a00a5657474",
+      "position": [
+        3840,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return $('Resolve').first().json.ops.instructions.map((g) => ({ json: g }));\n"
+      },
+      "name": "Emit instructions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "c3a249c5-c1dd-5137-9853-c8fd9a42afaf",
+      "position": [
+        3840,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "updateShippingInstructions",
+        "shippingInstructionsOrderId": "={{ $json.orderId }}",
+        "shippingInstructionsValue": "={{ $json.value }}"
+      },
+      "name": "Eclipse: PUT shipping instructions",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "id": "2505b57c-900a-5a27-8f7e-42418caa7786",
+      "position": [
+        3840,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const ops = $('Resolve').first().json.ops.instructions;\nconst out = $input.all();\nfor (let i = 0; i < out.length; i++) {\n  const r = out[i].json;\n  if (r.error) {\n    const error = 'Eclipse PUT shipping instructions failed on ' + ((ops[i] || {}).orderId || '?') + ': ' + r.error + ' ' + JSON.stringify(r.message || '').substring(0, 500);\n    return [{ json: { ok: false, statusCode: 502, error, body: { success: false, step: 'updateShippingInstructions', changes: $('Resolve').first().json.changes,\n      error: error + ' Some changes may already be saved; reload the bid to see where it stands.' } } }];\n  }\n}\nreturn [{ json: { ok: true } }];\n"
+      },
+      "name": "Check instructions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "d9377d38-45d0-55b3-a6e2-8d3895bad536",
+      "position": [
+        3840,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cbcb96f0-a8fd-5cf3-96b4-7de017855bee",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Instructions ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "f88066f0-5d27-5b4e-893b-55cc2f046452",
+      "position": [
+        3840,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "46787072-c1fb-51a9-9367-a43bef8bed54",
+              "leftValue": "={{ $('Resolve').first().json.has.notes }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Has notes?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "1c603f12-f81d-5f29-b8ba-0774effc6003",
+      "position": [
+        4080,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return $('Resolve').first().json.ops.notes.map((g) => ({ json: g }));\n"
+      },
+      "name": "Emit notes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "17637b60-7f21-56f3-9d09-6f191dbeee5c",
+      "position": [
+        4080,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "updateInternalNotes",
+        "internalNotesOrderId": "={{ $json.orderId }}",
+        "copyToAll": false,
+        "internalNotesValue": "={{ $json.value }}"
+      },
+      "name": "Eclipse: PUT internal notes",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "id": "d1afd827-5546-582a-a833-5f280484a02c",
+      "position": [
+        4080,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const ops = $('Resolve').first().json.ops.notes;\nconst out = $input.all();\nfor (let i = 0; i < out.length; i++) {\n  const r = out[i].json;\n  if (r.error) {\n    const error = 'Eclipse PUT internal notes failed on ' + ((ops[i] || {}).orderId || '?') + ': ' + r.error + ' ' + JSON.stringify(r.message || '').substring(0, 500);\n    return [{ json: { ok: false, statusCode: 502, error, body: { success: false, step: 'updateInternalNotes', changes: $('Resolve').first().json.changes,\n      error: error + ' Some changes may already be saved; reload the bid to see where it stands.' } } }];\n  }\n}\nreturn [{ json: { ok: true } }];\n"
+      },
+      "name": "Check notes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "eb9a9e91-0c3b-5a94-b406-d22a153b8a79",
+      "position": [
+        4080,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "3d7f1bc0-8ff4-5b87-a6f7-f907e1b26d05",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Notes ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "5d5354db-e980-5e78-9410-3eb4f3fb952c",
+      "position": [
+        4080,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "8e00efc4-ef35-56f4-936d-026646ccb798",
+              "leftValue": "={{ $('Resolve').first().json.has.status }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Has status?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "10e952df-94e4-543e-b07d-fc54d6b07f93",
+      "position": [
+        4320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return $('Resolve').first().json.ops.status.map((g) => ({ json: g }));\n"
+      },
+      "name": "Emit status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "80bc8fca-7009-5c34-83a5-1ec18344d071",
+      "position": [
+        4320,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "updateStatus",
+        "statusOrderId": "={{ $json.orderId }}",
+        "statusOrderStatus": "={{ $json.status }}",
+        "statusShipDate": "={{ $json.shipDate }}"
+      },
+      "name": "Eclipse: PUT status",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "id": "f2d136a4-c9e9-553e-8fb5-68f07583973b",
+      "position": [
+        4320,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const ops = $('Resolve').first().json.ops.status;\nconst out = $input.all();\nfor (let i = 0; i < out.length; i++) {\n  const r = out[i].json;\n  if (r.error) {\n    const error = 'Eclipse PUT status failed on ' + ((ops[i] || {}).orderId || '?') + ': ' + r.error + ' ' + JSON.stringify(r.message || '').substring(0, 500);\n    return [{ json: { ok: false, statusCode: 502, error, body: { success: false, step: 'updateStatus', changes: $('Resolve').first().json.changes,\n      error: error + ' Some changes may already be saved; reload the bid to see where it stands.' } } }];\n  }\n}\nreturn [{ json: { ok: true } }];\n"
+      },
+      "name": "Check status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "2406c050-c17a-5ada-8d01-bb55bb64358e",
+      "position": [
+        4320,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "512a4fc6-0995-5d80-882a-2aa6570443eb",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Status ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "06208390-c9e1-52e9-a51a-f079b05dd60f",
+      "position": [
+        4320,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "14a3987e-a0d8-5f04-b5c1-6aad51011fb3",
+              "leftValue": "={{ $('Resolve').first().json.has.cancels }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Has cancels?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "e256ea66-b4bf-5c69-8dd2-456e78fab240",
+      "position": [
+        4560,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return $('Resolve').first().json.ops.cancels.map((g) => ({ json: g }));\n"
+      },
+      "name": "Emit cancels",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "8fe9b551-6ac3-5616-82f9-5896444a2294",
+      "position": [
+        4560,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "updateStatus",
+        "statusOrderId": "={{ $json.orderId }}",
+        "statusOrderStatus": "Cancel"
+      },
+      "name": "Eclipse: cancel generation",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "id": "96200e35-afc8-523d-a604-cbbce5bc1e79",
+      "position": [
+        4560,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const ops = $('Resolve').first().json.ops.cancels;\nconst out = $input.all();\nfor (let i = 0; i < out.length; i++) {\n  const r = out[i].json;\n  if (r.error) {\n    const error = 'Eclipse cancel generation failed on ' + ((ops[i] || {}).orderId || '?') + ': ' + r.error + ' ' + JSON.stringify(r.message || '').substring(0, 500);\n    return [{ json: { ok: false, statusCode: 502, error, body: { success: false, step: 'cancelGeneration', changes: $('Resolve').first().json.changes,\n      error: error + ' Some changes may already be saved; reload the bid to see where it stands.' } } }];\n  }\n}\nreturn [{ json: { ok: true } }];\n"
+      },
+      "name": "Check cancels",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "da3ba97c-1ca5-5dc0-8ba7-e0b795cd73e5",
+      "position": [
+        4560,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "d5e98080-80f5-56a7-846c-2f341f5f2159",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Cancels ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "7d54776b-b26b-511f-a7ea-0df5cd630f2d",
+      "position": [
+        4560,
+        800
       ]
     }
   ],
   "connections": {
-    "Planned?": {
+    "Resolved?": {
       "main": [
         [
           {
-            "node": "Has deletes?",
+            "node": "Has posts?",
             "type": "main",
             "index": 0
           }
@@ -628,51 +1503,62 @@
         ]
       ]
     },
-    "Has deletes?": {
+    "Has posts?": {
       "main": [
         [
           {
-            "node": "Eclipse: DELETE /LineItems",
+            "node": "Emit posts",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Has puts?",
+            "node": "Has qty?",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Eclipse: DELETE /LineItems": {
+    "Emit posts": {
       "main": [
         [
           {
-            "node": "Check deletes",
+            "node": "Eclipse: POST /LineItems",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Check deletes": {
+    "Eclipse: POST /LineItems": {
       "main": [
         [
           {
-            "node": "Deletes ok?",
+            "node": "Check posts",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Deletes ok?": {
+    "Check posts": {
       "main": [
         [
           {
-            "node": "Has puts?",
+            "node": "Posts ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Posts ok?": {
+      "main": [
+        [
+          {
+            "node": "Has qty?",
             "type": "main",
             "index": 0
           }
@@ -686,11 +1572,11 @@
         ]
       ]
     },
-    "Has puts?": {
+    "Has qty?": {
       "main": [
         [
           {
-            "node": "Eclipse: PUT /QtyLineItems",
+            "node": "Emit qty",
             "type": "main",
             "index": 0
           }
@@ -704,29 +1590,40 @@
         ]
       ]
     },
+    "Emit qty": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: PUT /QtyLineItems",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Eclipse: PUT /QtyLineItems": {
       "main": [
         [
           {
-            "node": "Check puts",
+            "node": "Check qty",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Check puts": {
+    "Check qty": {
       "main": [
         [
           {
-            "node": "Puts ok?",
+            "node": "Qty ok?",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Puts ok?": {
+    "Qty ok?": {
       "main": [
         [
           {
@@ -748,14 +1645,25 @@
       "main": [
         [
           {
-            "node": "Eclipse: PUT /LineItems/Price",
+            "node": "Emit prices",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Has posts?",
+            "node": "Has deletes?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emit prices": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: PUT /LineItems/Price",
             "type": "main",
             "index": 0
           }
@@ -788,7 +1696,7 @@
       "main": [
         [
           {
-            "node": "Has posts?",
+            "node": "Has deletes?",
             "type": "main",
             "index": 0
           }
@@ -802,11 +1710,425 @@
         ]
       ]
     },
-    "Has posts?": {
+    "Has deletes?": {
       "main": [
         [
           {
-            "node": "Eclipse: POST /LineItems",
+            "node": "Emit deletes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Has shipVia?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emit deletes": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: DELETE /LineItems",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: DELETE /LineItems": {
+      "main": [
+        [
+          {
+            "node": "Check deletes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check deletes": {
+      "main": [
+        [
+          {
+            "node": "Deletes ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deletes ok?": {
+      "main": [
+        [
+          {
+            "node": "Has shipVia?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has shipVia?": {
+      "main": [
+        [
+          {
+            "node": "Emit shipVia",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Has shipDate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emit shipVia": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: PUT ship via",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: PUT ship via": {
+      "main": [
+        [
+          {
+            "node": "Check ship via",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check ship via": {
+      "main": [
+        [
+          {
+            "node": "ShipVia ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ShipVia ok?": {
+      "main": [
+        [
+          {
+            "node": "Has shipDate?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has shipDate?": {
+      "main": [
+        [
+          {
+            "node": "Emit shipDate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Has instructions?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emit shipDate": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: PUT ship date",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: PUT ship date": {
+      "main": [
+        [
+          {
+            "node": "Check ship date",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check ship date": {
+      "main": [
+        [
+          {
+            "node": "ShipDate ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ShipDate ok?": {
+      "main": [
+        [
+          {
+            "node": "Has instructions?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has instructions?": {
+      "main": [
+        [
+          {
+            "node": "Emit instructions",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Has notes?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emit instructions": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: PUT shipping instructions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: PUT shipping instructions": {
+      "main": [
+        [
+          {
+            "node": "Check instructions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check instructions": {
+      "main": [
+        [
+          {
+            "node": "Instructions ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Instructions ok?": {
+      "main": [
+        [
+          {
+            "node": "Has notes?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has notes?": {
+      "main": [
+        [
+          {
+            "node": "Emit notes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Has status?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emit notes": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: PUT internal notes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: PUT internal notes": {
+      "main": [
+        [
+          {
+            "node": "Check notes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check notes": {
+      "main": [
+        [
+          {
+            "node": "Notes ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notes ok?": {
+      "main": [
+        [
+          {
+            "node": "Has status?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has status?": {
+      "main": [
+        [
+          {
+            "node": "Emit status",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Has cancels?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emit status": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: PUT status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: PUT status": {
+      "main": [
+        [
+          {
+            "node": "Check status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check status": {
+      "main": [
+        [
+          {
+            "node": "Status ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status ok?": {
+      "main": [
+        [
+          {
+            "node": "Has cancels?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has cancels?": {
+      "main": [
+        [
+          {
+            "node": "Emit cancels",
             "type": "main",
             "index": 0
           }
@@ -820,29 +2142,40 @@
         ]
       ]
     },
-    "Eclipse: POST /LineItems": {
+    "Emit cancels": {
       "main": [
         [
           {
-            "node": "Check posts",
+            "node": "Eclipse: cancel generation",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Check posts": {
+    "Eclipse: cancel generation": {
       "main": [
         [
           {
-            "node": "Posts ok?",
+            "node": "Check cancels",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Posts ok?": {
+    "Check cancels": {
+      "main": [
+        [
+          {
+            "node": "Cancels ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cancels ok?": {
       "main": [
         [
           {
@@ -922,6 +2255,64 @@
         ]
       ]
     },
+    "Planned?": {
+      "main": [
+        [
+          {
+            "node": "Create gens?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create gens?": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: create shipment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resolve",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: create shipment": {
+      "main": [
+        [
+          {
+            "node": "Resolve",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve": {
+      "main": [
+        [
+          {
+            "node": "Resolved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Trigger HubSpot deal sync": {
       "main": [
         [
@@ -944,13 +2335,5 @@
         ]
       ]
     }
-  },
-  "settings": {
-    "executionOrder": "v1"
-  },
-  "pinData": {},
-  "meta": {
-    "templateCredsSetupCompleted": true
-  },
-  "active": false
+  }
 }

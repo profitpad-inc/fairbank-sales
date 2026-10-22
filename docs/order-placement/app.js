@@ -13,13 +13,18 @@
 //   5. Place as Bid (Alt+B) or as an Order (Alt+O), confirm, done.
 //
 // ?e_sorder_id=S123.0001 opens an existing order instead. A Bid can have
-// its lines changed (Update Bid, Alt+B); the header and customers stay locked.
-// Any order that is not invoiced or cancelled can be cancelled.
+// its lines and shipping header changed (Update Bid, Alt+B) and be turned
+// into an order (Convert to Order, Alt+O); customers, PO and release stay
+// locked. Any order that is not invoiced or cancelled can be cancelled.
+//
+// Each line ships from the branch picked on its inventory tiles (default:
+// the header's ship branch). Lines on several branches are placed as one
+// generation per branch.
 //
 // Backends (all n8n):
 //   e-order-placement/create-order  creates the Eclipse sales order
 //   e-order-placement/order         reads an existing order (one generation)
-//   e-order-placement/update-bid    changes a bid's lines
+//   e-order-placement/update-bid    changes a bid (lines, header, status)
 //   e-order-placement/cancel-order  sets an order's status to Cancel
 //   e-order-placement/customer      one call per customer: the customer,
 //                                   its bill-to and ship-tos (Eclipse) plus
@@ -154,6 +159,9 @@
   };
 
   function statusLabel(s) { return STATUS_LABELS[s] || s || "Unknown"; }
+
+  // Bill-to terms that pay up front, so a credit limit never blocks them.
+  var COD_TERMS = ["COD.CO.CHECK", "COD.CC"];
 
   // Grid columns that hold an input, in keyboard order.
   var COLS = ["product", "qty", "price"];
@@ -355,16 +363,26 @@
     var stripRow = -1;
     var lineSeq = 0;
     var quoteCache = {};         // productId → { loading, error, data }
-    var hsQuotes = {};           // e_sorder_id → { loading, error, data }: HubSpot quote (quote lookup flow)
+    var hsQuotes = {};           // e_sorder_id → "checking" | "creating": View Quote in flight (nothing cached)
 
     function newLine() {
       // comment: the line's Eclipse line comment (lineItemProduct.comments).
-      return { key: ++lineSeq, productId: "", description: "", qty: 1, price: null, priceOverride: false, comment: "" };
+      // branch: the branch this line ships from, picked on its inventory
+      // tiles; "" follows the header's ship branch (lineBranch()).
+      return { key: ++lineSeq, productId: "", description: "", qty: 1, price: null, priceOverride: false, comment: "", branch: "" };
     }
 
-    // Existing order: the header and customers are always locked; the lines
-    // only unlock for a Bid.
-    function headLocked() { return !!state.existing; }
+    // Existing order: the customers are always locked. A Bid unlocks its
+    // lines and the shipping fields of its header (BID_HEAD, sent by Update
+    // Bid); PO, release and every field of any other order stay locked.
+    // headLocked(key): that header field; headLocked(): the whole header.
+    var BID_HEAD = ["shipVia", "shipBranch", "shipDate", "requiredDate", "shippingInstructions", "internalNotes"];
+    function headLocked(key) {
+      var ex = state.existing;
+      if (!ex) return false;
+      if (!ex.editable) return true;
+      return key != null && BID_HEAD.indexOf(key) < 0;
+    }
     function linesLocked() { return !!state.existing && !state.existing.editable; }
 
     // Default ship branch: the ship-to's Eclipse home branch, else the
@@ -547,7 +565,7 @@
       state.changeLog = null;
       state.logModal = false;
       state.quoteModal = null;
-      hsQuotes = {};             // a reload checks HubSpot again
+      hsQuotes = {};
       render();
 
       getJson(API.order, { e_sorder_id: state.orderId })
@@ -583,12 +601,12 @@
         (g.invoice_number != null ? (short ? " / Inv. " : " / Invoice ") + g.invoice_number : "");
     }
 
-    // Keep the open tab's lines (and whether they differ from Eclipse) so
-    // switching away and back does not lose a bid's unsaved edits.
+    // Keep the open tab's lines and header (and whether they differ from
+    // Eclipse) so switching away and back does not lose a bid's unsaved edits.
     function saveGenEdits() {
       var ex = state.existing;
       if (!ex || !ex.editable || state.view !== "order") return;
-      state.genEdits[ex.generation_id] = { lines: state.lines, focus: state.focus, dirty: bidChanges().any };
+      state.genEdits[ex.generation_id] = { lines: state.lines, header: state.header, focus: state.focus, dirty: bidChanges().any };
     }
 
     function hasUnsavedEdits() {
@@ -629,6 +647,8 @@
         internalNotes: order.internal_notes || "",
         shippingInstructions: order.shipping_instructions || "",
       };
+      // A bid's unsaved header edits on this tab.
+      if (saved && saved.header) state.header = saved.header;
       // Loaded lines keep the order's price (keepPrice) until the rep edits
       // it; orig is what Eclipse has, so Update Bid sends only the changes.
       state.lines = saved ? saved.lines : (order.lines || []).map(function (l) {
@@ -652,7 +672,6 @@
       state.detailsModal = null;
       state.quoteModal = null;
       state.quoteError = null;
-      fetchHsQuote(order.e_sorder_id);
       state.lines.forEach(function (l) { if (l.productId) fetchQuote(l.productId); });
       // Not a bid: nothing is focused or highlighted on load (r -1); Alt+L or a
       // click still moves into the lines.
@@ -721,6 +740,7 @@
             .then(function () {
               inFlight--;
               refreshLinesFor(pid);
+              if (state.customModal && String(state.customModal.draft.variationSku) === pid) refreshCustomOrig();
               pumpQueue();
             });
         })(inquiryQueue.shift());
@@ -768,6 +788,14 @@
       return breakPrice(q.data, Number(line.qty) || 0);
     }
 
+    // Ceiling for any unit price: a loaded bid line's own Eclipse price (the
+    // original unit price already on the order), else the auto / qty-break
+    // price. Null when neither is known, same as minPrice.
+    function maxPrice(line) {
+      if (line.orig && line.orig.price != null) return line.orig.price;
+      return autoPrice(line);
+    }
+
     // True when the order must send an explicit unitPrice: the rep typed
     // one, or Eclipse's price is under the cost + $0.01 floor.
     function sendsPrice(line) {
@@ -789,11 +817,54 @@
       return breakPrice(q.data, Number(line.qty) || 0);
     }
 
+    // ── Ship branch per line ───────────────────────────────────────────────
+    // A line ships from the branch picked on its inventory tiles, else the
+    // header's ship branch. Lines on different branches are placed (or saved
+    // on a bid) as one generation per branch.
+
+    function lineBranch(line) {
+      return (line && !line.custom && line.branch) || (state.header ? state.header.shipBranch : "") || "";
+    }
+
+    // Branches the lines ship from, in line order (custom lines ship from
+    // the header's).
+    function orderBranches() {
+      var out = [];
+      sentLines().forEach(function (l) {
+        var b = lineBranch(l);
+        if (b && out.indexOf(b) < 0) out.push(b);
+      });
+      return out;
+    }
+
+    function branchName(id) {
+      var known = BRANCHES.filter(function (b) { return b[0] === String(id); })[0];
+      return id ? id + (known ? " - " + known[1] : "") : "";
+    }
+
+    // An inventory tile picked: line r ships from that branch. When every
+    // line with a product then ships from one branch, that becomes the
+    // header's ship branch (and the lines follow it again).
+    function pickBranch(r, id) {
+      var line = state.lines[r];
+      if (!line || line.custom || linesLocked() || !id) return;
+      line.branch = id === state.header.shipBranch ? "" : id;
+      state.branchMenu = null;
+      var ls = state.lines.filter(function (l) { return !l.custom && l.productId; });
+      var first = ls.length ? lineBranch(ls[0]) : "";
+      if (first && ls.every(function (l) { return lineBranch(l) === first; })) {
+        state.header.shipBranch = first;
+        state.lines.forEach(function (l) { l.branch = ""; });
+      }
+      state.focus = { r: r, c: state.focus.c };
+      render();
+    }
+
     function lineStock(line) {
       var q = quoteOf(line);
       if (!q || !q.data) return null;
       var stock = Array.isArray(q.data.stock_info) ? q.data.stock_info : [];
-      var branch = state.header ? state.header.shipBranch : "";
+      var branch = lineBranch(line);
       var atBranch = 0, total = 0;
       for (var i = 0; i < stock.length; i++) {
         var qty = parseInt(stock[i].warehouseQty, 10) || 0;
@@ -829,8 +900,11 @@
 
     // ── Custom lines ───────────────────────────────────────────────────────
     // A line for something that is not an Eclipse product yet (a one-off or
-    // a variation of an existing product). New orders only; an order with
-    // any custom line can only be placed as a bid (it needs approval).
+    // a variation of an existing product). New orders and bids; an order with
+    // any custom line can only be placed as a bid (it needs approval), and a
+    // bid can't be converted while one is unsaved. They go to Eclipse as
+    // product 15680 ("ITEM:") with their text in the line comment, so once
+    // saved they come back as regular lines.
     // Custom lines sit in state.lines like any other line (line.custom holds
     // the dialog's values), so they keep the position the rep added them at.
 
@@ -866,6 +940,8 @@
       if (!(qty > 0) || Math.round(qty) !== qty) errors.qty = "Enter a whole number above 0.";
       if (!isFinite(price) || price < 0) errors.price = "Enter a price (0 or more).";
       if (!isFinite(cogs) || cogs < 0) errors.cogs = "Enter the estimated COGS (0 or more).";
+      if (!errors.price && !errors.cogs && price < cogs) errors.price = BELOW_COGS;
+      if (!errors.name && customSameName(d)) errors.name = SAME_NAME;
       var vSku = d.variation ? d.variationSku.trim() : "";
       // The existing SKU must be picked from the product search (variationDesc
       // is set on pick and cleared when the rep types over it).
@@ -892,7 +968,7 @@
     // the rep is: in place of the focused line when that one is blank (the
     // blank moves down), else right after it.
     function openCustomModal(r) {
-      if (state.existing) return;
+      if (linesLocked()) return;
       var line = r >= 0 ? state.lines[r] : null;
       var at = state.lines.length;
       var f = state.lines[state.focus.r];
@@ -901,6 +977,8 @@
         r: line && line.custom ? r : -1, at: at,
         draft: line && line.custom ? customDraftFrom(line.custom) : emptyCustomDraft(), errors: {},
       };
+      // The variation's own pricing, for the "Original" hints.
+      if (state.customModal.draft.variationSku) fetchQuote(state.customModal.draft.variationSku);
       render();
     }
 
@@ -926,38 +1004,123 @@
       render();
     }
 
-    // Update Bid payload: every line the bid should end up with. Loaded lines
-    // carry line_id (unitPrice only when the price changed); new lines have
-    // none. Loaded lines left out (removed, or product retyped) are deleted
-    // by the update-bid flow.
+    // Custom lines as create-order and update-bid take them (both send them
+    // to Eclipse as product 15680, "ITEM:", with the text in the line
+    // comment). line_number: the line's place among all sent lines (regular
+    // and custom, 1-based, in page order).
+    function customPayload() {
+      return sentLines().map(function (l, i) { return { l: l, n: i + 1 }; }).filter(function (x) { return x.l.custom; }).map(function (x) {
+        var cl = x.l.custom;
+        return {
+          line_number: x.n,
+          name: cl.name,
+          ideal_sku: cl.idealSku,
+          quantity: cl.qty,
+          unit_price: cl.price,
+          est_cogs: cl.cogs,
+          variation_of: cl.variationSku ? { product_id: cl.variationSku, description: cl.variationDesc, serial_number: cl.serial } : null,
+          customizations: cl.customizations,
+          ship_branch: lineBranch(x.l),
+        };
+      });
+    }
+
+    // Header fields a bid can change (BID_HEAD), as update-bid takes them.
+    function headerPayload() {
+      var h = state.header;
+      return {
+        ship_via: h.shipVia, ship_branch: h.shipBranch, ship_date: h.shipDate, required_date: h.requiredDate,
+        shipping_instructions: h.shippingInstructions, internal_notes: h.internalNotes,
+      };
+    }
+
+    // The bid's header fields that differ from Eclipse: [{ label, from, to }].
+    function headChanges() {
+      var ex = state.existing, h = state.header;
+      var t = function (v) { return String(v == null ? "" : v).trim(); };
+      var out = [];
+      var add = function (label, from, to, show) {
+        if (t(from) !== t(to)) out.push({ label: label, from: show ? show(t(from)) : t(from), to: show ? show(t(to)) : t(to) });
+      };
+      add("Ship via", ex.ship_via, h.shipVia);
+      add("Ship branch", branchIdOf(ex.ship_branch), h.shipBranch, branchName);
+      add("Ship date", ex.ship_date, h.shipDate, dateText);
+      add("Required date", ex.required_date, h.requiredDate, dateText);
+      add("Shipping instructions", ex.shipping_instructions, h.shippingInstructions);
+      add("Internal notes", ex.internal_notes, h.internalNotes);
+      return out;
+    }
+
+    // Update Bid payload: the header, and every line the bid should end up
+    // with. Loaded lines carry line_id (unitPrice only when the price
+    // changed; comments when the rep added one, which re-creates the line);
+    // new lines have none. Each line says the branch it ships from: a line
+    // on another branch than the bid's moves to that branch's generation.
+    // Loaded lines left out (removed, or product retyped) are deleted by the
+    // update-bid flow.
     function bidChanges() {
+      var ex = state.existing;
       var kept = {};
-      var added = 0, changed = 0;
+      var added = 0, changed = 0, moved = 0, commented = 0;
+      var home = branchIdOf(ex.ship_branch);
       var lines = filledLines().map(function (l) {
         var qty = Number(l.qty);
+        var br = lineBranch(l);
+        var cmt = lineComment(l);
         if (l.orig) {
           kept[l.orig.lineId] = true;
-          var out = { line_id: l.orig.lineId, productId: l.productId, quantity: qty };
+          var out = { line_id: l.orig.lineId, productId: l.productId, quantity: qty, ship_branch: br };
           var p = linePrice(l);
           var priceChanged = p != null && (l.orig.price == null || Math.abs(p - l.orig.price) >= 0.0005);
           if (priceChanged) out.unitPrice = p;
-          if (priceChanged || qty !== l.orig.qty) changed++;
+          if (cmt) { out.comments = cmt; commented++; }
+          if (br !== home) moved++;
+          else if (priceChanged || qty !== l.orig.qty) changed++;
           return out;
         }
         added++;
-        var line = { productId: l.productId, quantity: qty };
+        var line = { productId: l.productId, quantity: qty, ship_branch: br };
         if (sendsPrice(l)) line.unitPrice = linePrice(l);
-        if (lineComment(l)) line.comments = lineComment(l);
+        if (cmt) line.comments = cmt;
         return line;
       });
-      var removed = (state.existing.lines || []).filter(function (l) { return !kept[l.line_id]; }).length;
-      return { lines: lines, added: added, changed: changed, removed: removed, any: added + changed + removed > 0 };
+      var custom = customPayload();
+      added += custom.length;
+      var removed = (ex.lines || []).filter(function (l) { return !kept[l.line_id]; }).length;
+      var head = headChanges();
+      return {
+        header: headerPayload(), lines: lines, custom_lines: custom, head: head,
+        added: added, changed: changed, removed: removed, moved: moved, commented: commented,
+        any: added + changed + removed + moved + commented + head.length > 0,
+      };
     }
 
-    // The comment sent with a new line (create-order and update-bid pass it
-    // to Eclipse as lineItemProduct.comments); "" for none.
+    // The comment sent with a line (create-order and update-bid pass it to
+    // Eclipse as lineItemProduct.comments); "" for none. On a loaded bid
+    // line it is added to the line's comments (update-bid re-creates it).
     function lineComment(l) {
-      return l.orig ? "" : String(l.comment || "").trim();
+      return String(l.comment || "").trim();
+    }
+
+    // Over the bill-to's credit limit: blocks an order (and Convert to
+    // Order), not a bid, unless the bill-to pays COD (cash, check or card
+    // up front at order time, so there is nothing to extend credit for).
+    function creditLimitReason() {
+      var bt = state.customer && state.customer.bill_to;
+      var cl = bt && bt.credit_limit;
+      if (!bt || !cl || cl.value == null || !isFinite(cl.value)) return null;
+      if (COD_TERMS.indexOf(bt.terms_code) !== -1) return null;
+      if (orderTotal().total <= cl.value) return null;
+      return "Over the credit limit (" + money(cl.value) + "); it can only be placed as a bid.";
+    }
+
+    // Ship via "SEE INSTRUCTION" is not useful on its own: require real
+    // shipping instructions (at least 5 characters) before a bid, order,
+    // update or convert, in every mode.
+    function seeInstructionReason() {
+      if (state.header.shipVia !== "SEE INSTRUCTION") return null;
+      if (String(state.header.shippingInstructions || "").trim().length >= 5) return null;
+      return 'Ship via is "SEE INSTRUCTION": add at least 5 characters to Shipping instructions.';
     }
 
     function placeBlockedReason(mode) {
@@ -965,10 +1128,18 @@
       if (!filledLines().length && !customLines().length) return "Add at least one product with a quantity.";
       var missing = state.lines.filter(function (l) { return l.productId && l.notFound; })[0];
       if (missing) return "Product " + missing.productId + " was not found. Fix or remove that line.";
-      if (mode === "update") {
-        // Only the lines change, so the header checks below do not apply.
-        if (!state.existing || !state.existing.editable) return "Only a bid can be updated.";
+      if (seeInstructionReason()) return seeInstructionReason();
+      if (mode === "update" || mode === "convert") {
+        if (!state.existing || !state.existing.editable) return "Only a bid can be " + (mode === "update" ? "updated." : "converted.");
+        if (!h.shipBranch) return "Pick a ship branch.";
+        // Convert to Order: an order needs a ship via, and custom lines that
+        // are not saved yet keep it a bid (same rule as a new order).
+        if (mode === "convert" && customLines().length) return "An order with custom lines can only be placed as a bid.";
+        if (mode === "convert" && !h.shipVia) return "Pick a ship via.";
+        if (mode === "convert" && creditLimitReason()) return creditLimitReason();
+        if (h.requiredDate && h.shipDate && h.requiredDate < h.shipDate) return "Required date cannot be before ship date.";
         if (!user.e_user_id) return "Sign in again: no Eclipse user on this session.";
+        if (mode === "convert") return null;
         return bidChanges().any ? null : "No changes to save.";
       }
       if (state.existing) return "This order already exists.";
@@ -978,6 +1149,7 @@
       // Ship via is required for an order but not a bid; a blank bid is sent
       // without one (the create-order flow omits shipVia).
       if (mode !== "bid" && !h.shipVia) return "Pick a ship via.";
+      if (mode === "order" && creditLimitReason()) return creditLimitReason();
       if (h.requiredDate && h.shipDate && h.requiredDate < h.shipDate) return "Required date cannot be before ship date.";
       if (!user.e_user_id) return "Sign in again: no Eclipse user on this session.";
       return null;
@@ -1030,6 +1202,19 @@
       if (target === strip.scrollLeft) return;
       if (slide) strip.scrollTo({ left: target, behavior: "smooth" });
       else strip.scrollLeft = target;
+    }
+
+    // Phones: the action bar is `position: fixed`, so the page needs bottom
+    // padding at least as tall as it, or content underneath (the header's
+    // notes fields, the last line) renders hidden behind it. The bar's
+    // height varies (Last modified on its own row, the number of buttons,
+    // whether they wrap to a second row), so it's measured after every
+    // render instead of guessed at in CSS (--fop-bar-h on <html>, read by
+    // .fop-app's padding-bottom).
+    function syncBarSpace() {
+      var bar = root.querySelector(".fop-bar");
+      if (!bar) { document.documentElement.style.removeProperty("--fop-bar-h"); return; }
+      document.documentElement.style.setProperty("--fop-bar-h", (bar.offsetHeight + 16) + "px");
     }
 
     // Grow a notes textarea to fit its text (never below its 1.5-line CSS minimum).
@@ -1122,6 +1307,16 @@
       if (fp && fp.isOpen && fp.altInput && fp.config.allowInput) fp.altInput.value = fp.input.value;
     }
 
+    // Earliest pickable date: today (ship date) or the ship date (required
+    // date). On a bid a date already in the past stays pickable, because
+    // flatpickr clears a selected date that falls below minDate.
+    function dateMin(key) {
+      var h = state.header;
+      var min = key === "requiredDate" && h.shipDate ? h.shipDate : isoDate(0);
+      if (state.existing && h[key] && h[key] < min) min = h[key];
+      return min;
+    }
+
     function initDatePickers() {
       datePickers.forEach(function (fp) { fp.destroy(); });
       datePickers = [];
@@ -1130,16 +1325,17 @@
       for (var i = 0; i < els.length; i++) {
         (function (el) {
           var key = el.getAttribute("data-date");
+          var locked = headLocked(key);
           var fp = window.flatpickr(el, {
             dateFormat: "Y-m-d",           // state + create-order keep YYYY-MM-DD
             altInput: true,
             altFormat: "M j, Y",           // "Oct 26, 2026"
             altInputClass: "fop-input fop-date-alt",
             defaultDate: state.header[key] || undefined,
-            // An existing order's dates can be in the past, and are locked.
-            // Required date cannot be before the ship date.
-            minDate: headLocked() ? null : (key === "requiredDate" && state.header.shipDate) || "today",
-            clickOpens: !headLocked(),
+            // A locked order's dates can be in the past. Required date cannot
+            // be before the ship date.
+            minDate: locked ? null : dateMin(key),
+            clickOpens: !locked,
             disableMobile: true,           // keep the themed calendar on phones
             // The field can be typed in. While the calendar is open it shows
             // YYYY-MM-DD (onOpen / onValueUpdate below); typed text is read
@@ -1150,7 +1346,7 @@
             parseDate: typedDateParser(function () { return fp; }),
             onChange: function (_dates, dateStr) {
               state.header[key] = dateStr;
-              if (key === "shipDate" && !headLocked()) {
+              if (key === "shipDate" && !headLocked("requiredDate")) {
                 datePickers.forEach(function (p) {
                   if (p.input.getAttribute("data-date") === "requiredDate") p.set("minDate", dateStr || "today");
                 });
@@ -1182,7 +1378,7 @@
             if (d && fp.isOpen) fp.jumpToDate(d);
           });
           if (fp.altInput) fp.altInput.setAttribute("aria-label", key === "shipDate" ? "Ship date" : "Required date");
-          if (fp.altInput && headLocked()) fp.altInput.disabled = true;
+          if (fp.altInput && locked) fp.altInput.disabled = true;
           datePickers.push(fp);
         })(els[i]);
       }
@@ -1253,6 +1449,7 @@
         var nb = root.querySelector("[data-action=new-order]");
         if (nb) nb.focus();
       }
+      syncBarSpace();
     }
 
     function titleHtml(kicker, title) {
@@ -1413,14 +1610,15 @@
       );
     }
 
-    // Header inputs are disabled on an existing order (lines only).
-    function lockAttr() { return headLocked() ? " disabled" : ""; }
+    // Header inputs are disabled on an existing order, except a bid's
+    // shipping fields (headLocked(key)).
+    function lockAttr(key) { return headLocked(key) ? " disabled" : ""; }
 
     function selectHtml(field, options, value, placeholder, groups) {
-      var html = '<select class="fop-input" data-head="' + field + '" id="fop-h-' + field + '"' + lockAttr() + ">";
+      var html = '<select class="fop-input" data-head="' + field + '" id="fop-h-' + field + '"' + lockAttr(field) + ">";
       // Placeholder only while nothing is picked (both selects are required).
-      // A locked header (existing order) shows a blank box, not "Select…".
-      if (placeholder && !value) html += '<option value="" selected disabled>' + (headLocked() ? "" : esc(placeholder)) + "</option>";
+      // A locked field (existing order) shows a blank box, not "Select…".
+      if (placeholder && !value) html += '<option value="" selected disabled>' + (headLocked(field) ? "" : esc(placeholder)) + "</option>";
       var opt = function (o) {
         return '<option value="' + esc(o[1]) + '"' + (String(o[1]) === String(value) ? " selected" : "") + ">" + esc(o[0]) + "</option>";
       };
@@ -1454,6 +1652,14 @@
       return list.map(function (b) {
         return [b.id + " - " + b.name + (b.mi != null ? " · " + Math.round(b.mi).toLocaleString("en-US") + " mi" : ""), b.id];
       });
+    }
+
+    // Under Ship branch while the lines ship from more than one branch.
+    function branchHintHtml() {
+      if (linesLocked()) return "";
+      var bs = orderBranches();
+      if (bs.length < 2) return "";
+      return "Lines ship from branches " + esc(bs.join(", ")) + ": one generation per branch.";
     }
 
     // "2026-04-16" → "Apr 16, 2026" (same look as the date pickers).
@@ -1634,22 +1840,25 @@
         '<div class="fop-head__grid">' +
         // Phones: ship via and ship branch each take a full row (--mfull).
         field("Ship via", selectHtml("shipVia", SHIP_VIAS, h.shipVia, "Select…", COMMON_SHIP_VIAS), "fop-field--row fop-field--mfull") +
-        field("Ship branch", selectHtml("shipBranch", branches, h.shipBranch, "Select…"), "fop-field--mfull") +
+        // Lines on several branches: the hint under it says so (it is the
+        // branch of the lines that follow the header).
+        field("Ship branch", selectHtml("shipBranch", branches, h.shipBranch, "Select…") +
+          '<span class="fop-branch-hint" data-cell="branch-hint">' + branchHintHtml() + "</span>", "fop-field--mfull") +
         priceBranchField() +
         // Flatpickr calendars (initDatePickers) replace these plain inputs.
-        field("Ship date", '<input class="fop-input fop-date" data-date="shipDate" value="' + esc(h.shipDate) + '"' + lockAttr() + ">", "fop-field--row") +
-        field("Required date", '<input class="fop-input fop-date" data-date="requiredDate" value="' + esc(h.requiredDate) + '"' + lockAttr() + ">") +
+        field("Ship date", '<input class="fop-input fop-date" data-date="shipDate" value="' + esc(h.shipDate) + '"' + lockAttr("shipDate") + ">", "fop-field--row") +
+        field("Required date", '<input class="fop-input fop-date" data-date="requiredDate" value="' + esc(h.requiredDate) + '"' + lockAttr("requiredDate") + ">") +
         // Order date is never editable: the order's own, or today on a new
         // order (Eclipse dates it when it is created).
         field("Order date", '<input class="fop-input" value="' + esc(dateText(state.existing ? state.existing.order_date : isoDate(0))) + '" disabled>') +
         orderInfoField("writer", "fop-field--row") + orderInfoField("outsideSales") + orderInfoField("insideSales") +
-        field("Customer P/O #", '<input class="fop-input" data-head="po" maxlength="30" value="' + esc(h.po) + '"' + lockAttr() + ">", "fop-field--row") +
-        field("Customer release #", '<input class="fop-input" data-head="release" maxlength="30" value="' + esc(h.release) + '"' + lockAttr() + ">") +
+        field("Customer P/O #", '<input class="fop-input" data-head="po" maxlength="30" value="' + esc(h.po) + '"' + lockAttr("po") + ">", "fop-field--row") +
+        field("Customer release #", '<input class="fop-input" data-head="release" maxlength="30" value="' + esc(h.release) + '"' + lockAttr("release") + ">") +
         orderInfoField("printStatus") +
         // Bottom row: shipping instructions left, internal notes right.
         // Multi-line notes; textareas grow with their content (autosize()).
-        field("Shipping instructions", '<textarea class="fop-input fop-notes" rows="1" data-head="shippingInstructions"' + lockAttr() + ">" + esc(h.shippingInstructions) + "</textarea>", "fop-field--half") +
-        field("Internal notes (no credit cards)", '<textarea class="fop-input fop-notes" rows="1" data-head="internalNotes"' + lockAttr() + ">" + esc(h.internalNotes) + "</textarea>", "fop-field--half") +
+        field("Shipping instructions", '<textarea class="fop-input fop-notes" rows="1" data-head="shippingInstructions"' + lockAttr("shippingInstructions") + ">" + esc(h.shippingInstructions) + "</textarea>", "fop-field--half") +
+        field("Internal notes (no credit cards)", '<textarea class="fop-input fop-notes" rows="1" data-head="internalNotes"' + lockAttr("internalNotes") + ">" + esc(h.internalNotes) + "</textarea>", "fop-field--half") +
         trackingHtml() +
         "</div></section>"
       );
@@ -1720,17 +1929,18 @@
       var on = stripShown(r);
       var hid = on ? "" : " hidden";
       var withStock = !noStock();
-      return (withStock ? '<div class="fop-stockstrip" data-cell="strip"' + hid + ">" + (on ? stockStripHtml(line) : "") + "</div>" : "") +
+      return (withStock ? '<div class="fop-stockstrip" data-cell="strip"' + hid + ">" + (on ? stockStripHtml(line, false, r) : "") + "</div>" : "") +
         (withStock ? '<div class="fop-stockstrip" data-cell="breaks"' + hid + ">" + (on ? breaksStripHtml(line) : "") + "</div>" : "") +
         '<div class="fop-stockstrip fop-stockstrip--comment' + (withStock ? "" : " fop-stockstrip--solo") +
         (commentClosed(line) ? " fop-stockstrip--cmt-closed" : "") + '" data-cell="comment"' + hid + ">" +
         commentFieldHtml(line, r, "fop-ic-" + line.key) + "</div>";
     }
 
-    // Line comment box (inline strip and the Line details dialog). Only new
-    // lines take a comment: order-lookup does not return Eclipse's line
-    // comments and update-bid cannot change them on an existing line.
-    function commentEditable(line) { return !line.orig && !linesLocked(); }
+    // Line comment box (inline strip and the Line details dialog). Every
+    // line of a new order or a bid takes one. On a loaded bid line it is
+    // added to the line's Eclipse comments (shown under the description):
+    // Eclipse cannot edit a line's comments, so update-bid re-creates the line.
+    function commentEditable(line) { return !linesLocked() && !line.custom; }
 
     // Phones: an empty comment box stays folded behind an "Add line comment"
     // button (CSS shows the button only under 768px; desktop always shows the
@@ -1739,8 +1949,9 @@
 
     function commentFieldHtml(line, r, id, value) {
       var lbl = '<label class="fop-strip__lbl" for="' + id + '">Line comment</label>';
-      if (!commentEditable(line)) return lbl + '<span class="fop-muted">Comments can only be added to new lines.</span>';
+      if (!commentEditable(line)) return lbl + '<span class="fop-muted">Comments can only be added on a new order or a bid.</span>';
       return lbl + '<textarea class="fop-input fop-line-comment" id="' + id + '" data-comment="' + r + '" rows="1" maxlength="500" ' +
+        (line.orig ? 'placeholder="Added to this line\'s comments on Update Bid" ' : "") +
         'aria-label="Comment, line ' + (r + 1) + '">' + esc(value != null ? value : line.comment) + "</textarea>" +
         '<button type="button" class="fop-btn fop-btn--ghost fop-btn--sm fop-addcmt" tabindex="-1" data-action="open-comment" data-r="' + r + '">+ Add line comment</button>';
     }
@@ -1788,10 +1999,11 @@
     // "Custom line" dialog: add or edit one custom line.
     function customModalHtml() {
       var m = state.customModal, d = m.draft, er = m.errors;
-      var input = function (key, label, attrs, cls) {
+      var input = function (key, label, attrs, cls, origCell) {
         return '<div class="fop-field ' + (cls || "") + '"><label class="fop-label" for="fop-cf-' + key + '">' + label + "</label>" +
           '<input class="fop-input' + (er[key] ? " fop-input--err" : "") + '" id="fop-cf-' + key + '" data-cf="' + key + '" autocomplete="off" ' +
           (attrs || "") + ' value="' + esc(d[key]) + '">' +
+          (origCell ? '<span class="fop-muted fop-block fop-custom-orig" data-cell="' + origCell + '">' + customOrigHtml(d, key) + "</span>" : "") +
           (er[key] ? '<span class="fop-warn-text fop-block">' + esc(er[key]) + "</span>" : "") + "</div>";
       };
       return (
@@ -1799,26 +2011,27 @@
         '<div class="fop-modal__box">' +
         '<h2 class="fop-h2" id="fop-custom-title">' + (m.r >= 0 ? "Edit custom line " + (m.r + 1) : "Add custom line") + "</h2>" +
         '<div class="fop-custom-form">' +
-        input("name", "Name", 'maxlength="120"', "fop-custom-form__wide") +
-        input("idealSku", "Ideal SKU", 'maxlength="40" spellcheck="false"', "fop-custom-form__wide") +
-        input("qty", "Quantity", 'inputmode="numeric"') +
-        input("price", "Unit price", 'inputmode="decimal" placeholder="0.00"') +
-        input("cogs", "Unit COGS (estimate)", 'inputmode="decimal" placeholder="0.00"') +
-        '<div class="fop-custom-form__wide fop-custom-margin" data-cell="custom-margin">' + customMarginHtml(d) + "</div>" +
         // Slider switch (a styled checkbox, so Space and the change events still work).
+        // First, so a picked product can fill the name, price and COGS below.
         '<label class="fop-toggle fop-custom-form__wide"><input type="checkbox" role="switch" data-cf="variation"' + (d.variation ? " checked" : "") + ">" +
         '<span class="fop-toggle__track" aria-hidden="true"></span>Variation of an existing product</label>' +
         '<div class="fop-custom-form__wide fop-custom-var" data-cell="custom-var"' + (d.variation ? "" : " hidden") + ">" +
         variationFieldHtml(d, er) +
         input("serial", 'Serial number <span class="fop-muted">(optional)</span>', 'maxlength="60" spellcheck="false"') +
         "</div>" +
+        input("name", "Suggested Name", 'maxlength="120"', "fop-custom-form__wide") +
+        input("qty", "Quantity", 'inputmode="numeric"') +
+        input("price", "Unit price", 'inputmode="decimal" placeholder="0.00"', "", "orig-price") +
+        input("cogs", "Unit COGS (estimate)", 'inputmode="decimal" placeholder="0.00"', "", "orig-cogs") +
+        '<div class="fop-custom-form__wide fop-custom-margin" data-cell="custom-margin">' + customMarginHtml(d) + "</div>" +
         '<div class="fop-field fop-custom-form__wide"><label class="fop-label" for="fop-cf-customizations">Customizations <span class="fop-muted">(one per line, e.g. 3" rear fill)</span></label>' +
         '<textarea class="fop-input fop-notes" id="fop-cf-customizations" data-cf="customizations" rows="3">' + esc(d.customizations) + "</textarea></div>" +
         "</div>" +
-        '<div class="fop-alert fop-alert--info">An order with custom lines can only be placed as a bid.</div>' +
+        '<div class="fop-alert fop-alert--info">' + (state.existing ? "Saved to the bid with Update Bid, as Eclipse product 15680 (ITEM:) with these details in its line comment. A bid with unsaved custom lines can't be converted to an order."
+          : "An order with custom lines can only be placed as a bid. They go to Eclipse as product 15680 (ITEM:) with these details in the line comment.") + "</div>" +
         '<div class="fop-row fop-row--end">' +
         '<button class="fop-btn fop-btn--ghost" data-action="close-custom">Cancel <span class="fop-key">Esc</span></button>' +
-        '<button class="fop-btn" data-action="save-custom">' + (m.r >= 0 ? "Save" : "Add line") + ' <span class="fop-key fop-key--dark">Enter</span></button>' +
+        '<button class="fop-btn" data-action="save-custom"' + (customSaveBlock(d) ? ' aria-disabled="true" title="' + customSaveBlock(d) + '"' : "") + ">" + (m.r >= 0 ? "Save" : "Add line") + ' <span class="fop-key fop-key--dark">Enter</span></button>' +
         "</div></div></div>"
       );
     }
@@ -1832,6 +2045,82 @@
         '<div class="fop-ac__list" role="listbox"></div></div>' +
         '<span class="fop-muted fop-block fop-custom-pick" data-cell="variation-desc">' + esc(d.variationDesc) + "</span>" +
         (er.variationSku ? '<span class="fop-warn-text fop-block">' + esc(er.variationSku) + "</span>" : "") + "</div>";
+    }
+
+    // The picked product's own unit price (for the dialog's qty) or unit
+    // cost, from the product-inquiry lookup, shown under the Unit price and
+    // Unit COGS fields of a variation. Empty with no product picked.
+    function customOrigHtml(d, key) {
+      if (!d.variation || !d.variationDesc || !d.variationSku) return "";
+      var q = quoteCache[String(d.variationSku)];
+      if (!q || q.loading) return "Original: loading…";
+      if (!q.data) return "Original: not available";
+      var v = key === "price" ? breakPrice(q.data, Number(d.qty) || 1) : parseFloat(q.data.unit_cost);
+      return v != null && isFinite(v) ? "Original: " + money(v) : "Original: not available";
+    }
+
+    // Refresh the "Original" hints and fill Name, Unit price and Unit COGS
+    // from the picked product where the rep left them blank.
+    function refreshCustomOrig() {
+      var m = state.customModal;
+      if (!m) return;
+      var d = m.draft;
+      var q = d.variation && d.variationDesc ? quoteCache[String(d.variationSku)] : null;
+      if (q && q.data) {
+        var fill = { price: breakPrice(q.data, Number(d.qty) || 1), cogs: parseFloat(q.data.unit_cost) };
+        Object.keys(fill).forEach(function (k) {
+          if (String(d[k]).trim() !== "" || fill[k] == null || !isFinite(fill[k])) return;
+          d[k] = String(Math.round(fill[k] * 100) / 100);
+          var inp = root.querySelector("#fop-cf-" + k);
+          if (inp) inp.value = d[k];
+        });
+      }
+      refreshCustomMargin(d);
+      ["price", "cogs"].forEach(function (k) {
+        var el = root.querySelector('[data-cell="orig-' + k + '"]');
+        if (el) el.textContent = customOrigHtml(d, k);
+      });
+    }
+
+    // A custom line can't be added while it is priced below its estimated
+    // COGS, or while a variation keeps the picked product's own name: Add
+    // line / Save is soft-disabled (a click or Enter still runs the
+    // validation, which marks the field).
+    var BELOW_COGS = "The price is below the estimated COGS.";
+    var SAME_NAME = "Change the name: it matches the original product.";
+    function customBelowCogs(d) {
+      var p = String(d.price).trim(), c = String(d.cogs).trim();
+      return p !== "" && c !== "" && isFinite(p) && isFinite(c) && Number(p) < Number(c);
+    }
+    // Names compare on letters and digits only, ignoring case, so an added
+    // space, dot or other punctuation does not count as a change.
+    function customSameName(d) {
+      if (!d.variation || !d.variationDesc) return false;
+      var norm = function (v) { return String(v).toLowerCase().replace(/[^a-z0-9]/g, ""); };
+      return norm(d.name) !== "" && norm(d.name) === norm(d.variationDesc);
+    }
+    function customSaveBlock(d) {
+      return customSameName(d) ? SAME_NAME : customBelowCogs(d) ? BELOW_COGS : "";
+    }
+
+    // Live ext and margin, and the Add line button's state, after an edit.
+    function refreshCustomMargin(d) {
+      var mg = root.querySelector('[data-cell="custom-margin"]');
+      if (mg) mg.innerHTML = customMarginHtml(d);
+      var btn = root.querySelector('[data-action="save-custom"]');
+      if (btn) setSoftDisabled(btn, customSaveBlock(d));
+      // Fixing the field clears its error from a save attempt.
+      var er = state.customModal.errors;
+      [["price", BELOW_COGS, customBelowCogs], ["name", SAME_NAME, customSameName]].forEach(function (c) {
+        if (er[c[0]] !== c[1] || c[2](d)) return;
+        delete er[c[0]];
+        var inp = root.querySelector("#fop-cf-" + c[0]);
+        if (inp) {
+          inp.classList.remove("fop-input--err");
+          var msg = inp.parentNode.querySelector(".fop-warn-text");
+          if (msg) msg.remove();
+        }
+      });
     }
 
     // Live ext and margin under the price fields while the rep types.
@@ -1875,32 +2164,60 @@
 
 
     // Per-branch stock for one line (side box, inline strip, details dialog).
-    // Branches with stock in branch-number order; the ship branch is always
-    // shown and highlighted.
+    // Branches with stock in branch-number order; the line's ship branch is
+    // always shown and highlighted. On a new order or a bid each tile is a
+    // button: a click ships line r from that branch (pickBranch).
     // withTotal: label reads "Inventory (1,136)" (side and details layouts, which
     // have no All column).
-    function stockStripHtml(line, withTotal) {
+    function stockStripHtml(line, withTotal, r) {
       var q = quoteOf(line);
       // Labelled in every state, so the strip's columns stay aligned.
       if (!q || q.loading) return '<span class="fop-strip__lbl">Inventory</span><span class="fop-dots">···</span>';
       if (q.error) return '<span class="fop-strip__lbl">Inventory</span><span class="fop-warn-text">' + esc(q.error) + "</span>";
       var s = lineStock(line);
-      var ship = state.header.shipBranch;
+      var ship = lineBranch(line);
+      var pick = r != null && r >= 0 && !linesLocked();
       var need = Number(line.qty) || 1;
       var rows = s.rows.map(function (x) {
         var id = branchIdOf(x.warehouse);
         var known = BRANCHES.filter(function (b) { return b[0] === id; })[0];
         return { id: id, name: known ? known[1] : String(x.warehouse || "").replace(/^\d+\s*-\s*/, ""), qty: parseInt(x.warehouseQty, 10) || 0 };
       }).filter(function (x) { return x.qty > 0 || (ship && x.id === ship); });
+      // A ship branch with no stock row at all still gets its tile.
+      if (ship && !rows.some(function (x) { return x.id === ship; })) {
+        var sk = BRANCHES.filter(function (b) { return b[0] === ship; })[0];
+        rows.push({ id: ship, name: sk ? sk[1] : "", qty: 0 });
+      }
       // Branch-number order (1 → 17), not by quantity.
       rows.sort(function (a, b) { return (Number(a.id) || 999) - (Number(b.id) || 999); });
       var lbl = '<span class="fop-strip__lbl">Inventory' + (withTotal ? " (" + s.total.toLocaleString("en-US") + ")" : "") + "</span>";
-      if (!rows.length) return lbl + '<span class="fop-muted">No stock at any branch.</span>';
+      if (!rows.length) return lbl + '<span class="fop-muted">No stock at any branch.</span>' + (pick ? branchMoreHtml(rows, r) : "");
       return lbl + rows.map(function (x) {
-        return '<span class="fop-chip' + (ship && x.id === ship ? " fop-chip--ship" : "") + '">' +
-          '<span class="fop-chip__br">' + esc(x.id) + " " + esc(x.name) + '</span><span class="fop-stock ' +
-          stockClass(x.qty, need) + '">' + x.qty + "</span></span>";
-      }).join("");
+        var on = ship && x.id === ship;
+        var inner = '<span class="fop-chip__br">' + esc(x.id) + " " + esc(x.name) + '</span><span class="fop-stock ' +
+          stockClass(x.qty, need) + '">' + x.qty + "</span>";
+        if (!pick || !x.id) return '<span class="fop-chip' + (on ? " fop-chip--ship" : "") + '">' + inner + "</span>";
+        return '<button type="button" class="fop-chip fop-chip--pick' + (on ? " fop-chip--ship" : "") + '" tabindex="-1" data-action="pick-branch" data-r="' + r +
+          '" data-branch="' + esc(x.id) + '" aria-pressed="' + !!on + '" title="' + (on ? "Ships from " : "Ship this line from ") + esc(x.id + " " + x.name) + '">' + inner + "</button>";
+      }).join("") + (pick ? branchMoreHtml(rows, r) : "");
+    }
+
+    // The + after the inventory tiles lists the branches without a tile
+    // (no stock there), so a line can ship from one anyway. A click on one
+    // picks it like a tile (pickBranch); the + closes the list again.
+    function branchMoreHtml(shown, r) {
+      var rest = BRANCHES.filter(function (b) {
+        return !shown.some(function (x) { return x.id === b[0]; });
+      });
+      if (!rest.length) return "";
+      var open = state.branchMenu === r;
+      return '<button type="button" class="fop-chip fop-chip--pick fop-chip--more" tabindex="-1" data-action="branch-menu" data-r="' + r +
+        '" aria-expanded="' + open + '" title="' + (open ? "Hide the other branches" : "Ship from a branch with no stock") + '">' + (open ? "−" : "+") + "</button>" +
+        (open ? rest.map(function (b) {
+          return '<button type="button" class="fop-chip fop-chip--pick fop-chip--empty" tabindex="-1" data-action="pick-branch" data-r="' + r +
+            '" data-branch="' + esc(b[0]) + '" title="Ship this line from ' + esc(b[0] + " " + b[1]) + ' (no stock)">' +
+            '<span class="fop-chip__br">' + esc(b[0]) + " " + esc(b[1]) + '</span><span class="fop-stock ' + stockClass(0, Number((state.lines[r] || {}).qty) || 1) + '">0</span></button>';
+        }).join("") : "");
     }
 
     // Side layout: Alt+S / the "Stock & qty breaks" button open or close the
@@ -1922,7 +2239,18 @@
       var autoLow = !line.priceOverride && a != null && m != null && a < m;
       var raised = (line.priceRaised || autoLow) && m != null
         ? '<span class="fop-warn-text fop-block">Price raised to the minimum, cost + $0.01 (' + unitMoney(m) + ")</span>" : "";
-      return esc(line.description || "") + err + raised + eclipseCommentsHtml(line);
+      var mx = maxPrice(line);
+      var capped = line.priceCapped && mx != null
+        ? '<span class="fop-warn-text fop-block">Price capped at the original unit price (' + unitMoney(mx) + ")</span>" : "";
+      return esc(line.description || "") + err + raised + capped + lineBranchHtml(line) + eclipseCommentsHtml(line);
+    }
+
+    // A line shipping from another branch than the header's says so under
+    // its description (every width, so phones see it too).
+    function lineBranchHtml(line) {
+      var b = lineBranch(line);
+      if (!b || b === state.header.shipBranch) return "";
+      return '<span class="fop-line-br">Ships from ' + esc(branchName(b)) + "</span>";
     }
 
     // A loaded line's Eclipse comments under its description, each on its
@@ -1967,9 +2295,13 @@
       var s = lineStock(line);
       if (!s) return '<span class="fop-dots">···</span>';
       // No ship branch picked yet: no branch count to show.
-      if (!state.header.shipBranch) return '<span class="fop-muted">-</span>';
-      return '<span class="fop-mlabel">At branch </span><span class="fop-stock ' + stockClass(s.atBranch, Number(line.qty) || 1) +
-        '">' + s.atBranch + "</span>";
+      if (!lineBranch(line)) return '<span class="fop-muted">-</span>';
+      // The count is at the line's own branch; one that differs from the
+      // header's (the column title) is prefixed with its id.
+      var b = lineBranch(line);
+      var other = b !== state.header.shipBranch;
+      return '<span class="fop-mlabel">At branch </span>' + (other ? '<span class="fop-muted" title="At branch ' + esc(branchName(b)) + '">' + esc(b) + ": </span>" : "") +
+        '<span class="fop-stock ' + stockClass(s.atBranch, Number(line.qty) || 1) + '">' + s.atBranch + "</span>";
     }
 
     function totalStockHtml(line) {
@@ -2003,11 +2335,22 @@
       return s;
     }
 
+    // A new order or an editable bid over the bill-to's credit limit: a red
+    // "Over credit limit" tag, title = the full reason. Shown below the
+    // subtotal box on desktop (.fop-credit-tag--sum) and next to the Total
+    // in the action bar on phones (.fop-credit-tag--bar); CSS picks one.
+    function creditTagHtml() {
+      var ex = state.existing;
+      var overLimit = (!ex || ex.editable) && creditLimitReason();
+      return overLimit ? '<span class="fop-status fop-status--cancel" title="' + esc(overLimit) + '">Over credit limit</span>' : "";
+    }
+
     // Bottom bar: the order total only (cost is in the summary box).
     function totalsHtml() {
       var s = summary();
       return '<b class="fop-total">' + money(s.total) + "</b>" +
-        (s.unknown ? ' <span class="fop-muted">(some prices pending)</span>' : "");
+        (s.unknown ? ' <span class="fop-muted">(some prices pending)</span>' : "") +
+        '<span class="fop-credit-tag--bar">' + creditTagHtml() + "</span>";
     }
 
     // The summary box under the lines, right-aligned (like a quote's totals).
@@ -2061,7 +2404,7 @@
           '<span class="fop-side__desc" title="' + esc(name) + '">' + esc(short) + "</span></div>" +
           // Stock (left) and qty breaks (right) side by side.
           '<div class="fop-side__cols">' +
-          '<div class="fop-side__sec">' + stockStripHtml(line, true) + "</div>" +
+          '<div class="fop-side__sec">' + stockStripHtml(line, true, r) + "</div>" +
           '<div class="fop-side__sec">' + breaksStripHtml(line) + "</div></div></div>";
       }).join("");
       return head + (items || '<div class="fop-muted fop-side__empty">Add products to see stock by branch and quantity breaks.</div>');
@@ -2098,16 +2441,23 @@
       if (noStock() && !commentEditable(line)) return;
       state.detailsModal = {
         r: r, comment: line.comment || "",
-        orig: { qty: line.qty, price: line.price, priceOverride: line.priceOverride, keepPrice: line.keepPrice, priceRaised: line.priceRaised },
+        orig: { qty: line.qty, price: line.price, priceOverride: line.priceOverride, keepPrice: line.keepPrice, priceRaised: line.priceRaised, priceCapped: line.priceCapped },
+        // A branch tile picked here can move the header's ship branch and
+        // every line's branch (pickBranch), so Cancel puts all of them back.
+        branches: state.lines.map(function (l) { return l.branch; }), shipBranch: state.header.shipBranch,
       };
       render();
     }
 
-    // keep: false (Esc / Cancel) restores the line's qty and price.
+    // keep: false (Esc / Cancel) restores the line's qty, price and branch.
     function closeDetails(keep) {
       var m = state.detailsModal;
       var line = state.lines[m.r];
-      if (!keep && line) Object.assign(line, m.orig);
+      if (!keep && line) {
+        Object.assign(line, m.orig);
+        state.lines.forEach(function (l, i) { l.branch = m.branches[i]; });
+        state.header.shipBranch = m.shipBranch;
+      }
       state.detailsModal = null;
       state.focus = { r: m.r, c: state.focus.c };
       render();
@@ -2126,7 +2476,7 @@
     function detailsStockHtml(line) {
       if (noStock()) return "";
       return '<div class="fop-details__cols">' +
-        '<div class="fop-side__sec" data-cell="details-stock">' + stockStripHtml(line, true) + "</div>" +
+        '<div class="fop-side__sec" data-cell="details-stock">' + stockStripHtml(line, true, state.detailsModal.r) + "</div>" +
         '<div class="fop-side__sec" data-cell="details-breaks">' + breaksStripHtml(line) + "</div></div>";
     }
 
@@ -2163,8 +2513,9 @@
         '<div class="fop-field fop-details__comment">' +
         (editable
           ? '<label class="fop-label" for="fop-details-comment">Line comment</label>' +
-            '<textarea class="fop-input fop-line-comment" id="fop-details-comment" data-details-comment rows="3" maxlength="500">' + esc(m.comment) + "</textarea>"
-          : '<span class="fop-label">Line comment</span><span class="fop-muted">Comments can only be added to new lines.</span>') +
+            '<textarea class="fop-input fop-line-comment" id="fop-details-comment" data-details-comment rows="3" maxlength="500"' +
+            (line.orig ? ' placeholder="Added to this line\'s comments on Update Bid"' : "") + ">" + esc(m.comment) + "</textarea>"
+          : '<span class="fop-label">Line comment</span><span class="fop-muted">Comments can only be added on a new order or a bid.</span>') +
         "</div>" +
         '<div class="fop-row fop-row--end">' +
         (canSave
@@ -2219,10 +2570,11 @@
       if (!ex) {
         var bidReason = placeBlockedReason("bid");
         var orderReason = placeBlockedReason("order");
-        return '<button class="fop-btn fop-btn--ghost" data-action="place-bid"' + (bidReason ? ' disabled title="' + esc(bidReason) + '"' : "") +
+        // Every place / bid button is aria-disabled, not disabled: a disabled
+        // button gets no clicks, and a click on a blocked one must reach
+        // requestPlace() so it flashes the field at fault (flashBlockedField).
+        return '<button class="fop-btn fop-btn--ghost" data-action="place-bid"' + (bidReason ? ' aria-disabled="true" title="' + esc(bidReason) + '"' : "") +
           ">Place as Bid <span class=\"fop-key\">" + altKey("B") + "</span></button>" +
-          // aria-disabled, not disabled: a disabled button gets no clicks, and a
-          // click while ship via is blank flashes the Ship via box.
           '<button class="fop-btn" data-action="place-order"' + (orderReason ? ' aria-disabled="true" title="' + esc(orderReason) + '"' : "") +
           ">Place Order <span class=\"fop-key fop-key--dark\">" + altKey("O") + "</span></button>";
       }
@@ -2230,8 +2582,13 @@
         ? '<button class="fop-btn fop-btn--danger" data-action="ask-cancel">Cancel ' + (ex.editable ? "Bid" : "Order") + "</button>" : "");
       if (ex.editable) {
         var updReason = placeBlockedReason("update");
-        html += '<button class="fop-btn" data-action="update-bid"' + (updReason ? ' disabled title="' + esc(updReason) + '"' : "") +
-          ">Update Bid <span class=\"fop-key fop-key--dark\">" + altKey("B") + "</span></button>";
+        var convReason = placeBlockedReason("convert");
+        // aria-disabled like Place Order, so a blocked click still flashes
+        // the field at fault. Convert also saves any changes on the page.
+        html += '<button class="fop-btn fop-btn--ghost" data-action="update-bid"' + (updReason ? ' aria-disabled="true" title="' + esc(updReason) + '"' : "") +
+          ">Update Bid <span class=\"fop-key\">" + altKey("B") + "</span></button>" +
+          '<button class="fop-btn" data-action="convert-bid"' + (convReason ? ' aria-disabled="true" title="' + esc(convReason) + '"' : "") +
+          '><span class="fop-lbl-full">Convert to Order</span><span class="fop-lbl-short">To Order</span> <span class="fop-key fop-key--dark">' + altKey("O") + "</span></button>";
       }
       return html;
     }
@@ -2241,11 +2598,13 @@
       var ex = state.existing;
       if (!ex) return "";
       var msg = ex.editable
-        ? "Only the lines can be changed on an existing bid. The header and customers stay as they are in Eclipse."
+        ? "On a bid the lines, ship via, ship branch, dates and notes can be changed (Update Bid), and Convert to Order makes it an order. " +
+          "Customers, PO and release stay as they are in Eclipse."
         : "This order is " + statusLabel(ex.status) + ", so it can't be edited here." +
           (ex.cancellable ? " It can still be cancelled." : "");
       var n = state.notice;
       return (n ? '<div class="fop-alert fop-alert--success">' + esc(n.text) + "</div>" +
+          (n.warning ? '<div class="fop-alert fop-alert--warning">' + esc(n.warning) + "</div>" : "") +
           (n.hubspotError ? '<div class="fop-alert fop-alert--warning">HubSpot sync did not start: ' + esc(n.hubspotError) +
             ". The deal will appear on the next scheduled sync.</div>" : "") : "") +
         '<div class="fop-alert fop-alert--info">' + esc(msg) + "</div>";
@@ -2271,13 +2630,26 @@
           return '<button class="fop-tab' + (on ? " fop-tab--active" : "") + '" role="tab" aria-selected="' + on + '" data-gen="' + esc(g.generation_id) +
             '" title="' + esc(g.e_sorder_id + " · " + statusLabel(g.status)) + '">' +
             // Full words on desktop, "Gen. 1 / Inv. 2" on phones (CSS swaps them).
-            '<span class="fop-tab__full">' + esc(genLabel(g)) + '</span><span class="fop-tab__short">' + esc(genLabel(g, true)) + "</span></button>";
+            '<span class="fop-tab__full">' + esc(genLabel(g)) + '</span><span class="fop-tab__short">' + esc(genLabel(g, true)) + "</span>" +
+            tabStatusHtml(g) + "</button>";
         }).join("") + "</div>" : "") +
         // Far right of the row (on request): Change log, then Exit.
         '<div class="fop-row fop-switch__end">' +
         '<button class="fop-btn fop-btn--ghost fop-btn--sm" data-action="change-log">Change log</button>' +
         exitBtnHtml() + "</div>" +
         "</div>";
+    }
+
+    // A generation tab's status (2026-10-20, on request): one word in a small
+    // tile like the header's status (2026-10-21),
+    // Bid (gray), Open (blue: any order status still to ship, e.g. Ship When
+    // Complete), Invoiced (green), Cancelled (red). The tab's tooltip keeps
+    // Eclipse's full status.
+    function tabStatusHtml(g) {
+      var s = String(g.status || "");
+      var kind = s === "Bid" ? "bid" : s === "Invoice" ? "invoice" : s === "Cancel" ? "cancel" : "open";
+      var word = { bid: "Bid", invoice: "Invoiced", cancel: "Cancelled", open: "Open" }[kind];
+      return '<span class="fop-tabst fop-tabst--' + kind + '">' + word + "</span>";
     }
 
     function exitBtnHtml() {
@@ -2382,47 +2754,32 @@
       render();
     }
 
-    // ── View Quote (2026-10-19) ──────────────────────────────────────────
+    // ── View Quote (2026-10-19; live check 2026-10-21) ──────────────────
     // An existing order's HubSpot quote (the generation's deal's newest quote
-    // with a public link), from the quote lookup flow. With no quote yet,
-    // View Quote makes one first (create-quote flow) and then opens it. It is
-    // grayed out while checking, while making one, and when the order has no
-    // HubSpot deal yet (a quote hangs off the deal).
+    // with a public link). Nothing is remembered: every click asks the quote
+    // lookup flow in the moment, opens the quote it finds, and with none yet
+    // makes one (create-quote flow) and opens that. Grayed out (disabled)
+    // while checking or making one. On a bid with unsaved changes it is
+    // grayed out too (aria-disabled, so a click still lands and flashes
+    // Update Bid): the quote shows what is saved, so save first. Not shown on
+    // invoiced or cancelled orders (quoteBtnHtml).
 
-    function fetchHsQuote(id) {
-      if (!id || (hsQuotes[id] && !hsQuotes[id].error)) return;
-      hsQuotes[id] = { loading: true };
-      getJson(API.quote, { e_sorder_id: id })
-        .then(function (d) { hsQuotes[id] = { data: d }; })
-        .catch(function (err) { hsQuotes[id] = { error: err.message }; })
-        .then(refreshQuoteBtn);
-    }
-
-    function hsQuoteFor(ex) {
-      var q = ex && hsQuotes[ex.e_sorder_id];
-      return q && q.data && q.data.quote && q.data.quote.link ? q.data.quote : null;
-    }
-
-    // Why View Quote is grayed out, or null when it can open.
+    // Why View Quote can't open now, or null when it can.
     function quoteBlockedReason() {
-      var q = state.existing && hsQuotes[state.existing.e_sorder_id];
-      if (!q || q.loading) return "Checking HubSpot for a quote…";
-      if (q.creating) return "Creating the quote in HubSpot…";
-      if (q.error) return "Could not check HubSpot for a quote: " + q.error;
-      if (hsQuoteFor(state.existing)) return null;
-      return q.data && q.data.hs_deal_id ? null : "No HubSpot deal for this order yet, so there is nothing to quote.";
-    }
-
-    function quoteBtnText() {
-      var q = state.existing && hsQuotes[state.existing.e_sorder_id];
-      return q && q.creating ? "Creating quote…" : "View Quote";
+      var ex = state.existing, busy = ex && hsQuotes[ex.e_sorder_id];
+      if (busy === "checking") return "Checking HubSpot for a quote…";
+      if (busy === "creating") return "Creating the quote in HubSpot…";
+      if (ex && ex.editable && bidChanges().any) return "Save your changes with Update Bid first, so the quote matches the bid.";
+      return null;
     }
 
     function quoteBtnHtml() {
-      var why = quoteBlockedReason();
-      var tip = why || (hsQuoteFor(state.existing) ? "" : "No quote yet: this creates one in HubSpot.");
-      return '<button class="fop-btn fop-btn--ghost" data-action="view-quote"' + (why ? " disabled" : "") +
-        (tip ? ' title="' + esc(tip) + '"' : "") + ">" + quoteBtnText() + "</button>";
+      var ex = state.existing;
+      if (!ex || ex.status === "Invoice" || ex.status === "Cancel") return "";
+      var why = quoteBlockedReason(), busy = hsQuotes[ex.e_sorder_id];
+      return '<button class="fop-btn fop-btn--ghost" data-action="view-quote"' +
+        (busy ? " disabled" : why ? ' aria-disabled="true"' : "") +
+        (why ? ' title="' + esc(why) + '"' : "") + ">" + (busy === "creating" ? "Creating quote…" : "View Quote") + "</button>";
     }
 
     // Only the button: a full render would reload an open quote's iframe.
@@ -2441,37 +2798,44 @@
 
     function openQuote() {
       var ex = state.existing;
-      if (!ex) return;
-      var q = hsQuoteFor(ex);
-      if (q) {
-        showQuoteError(null);
-        state.quoteModal = { id: ex.e_sorder_id, quote: q, emails: [], sending: false, note: null };
-        render();
+      if (!ex || hsQuotes[ex.e_sorder_id]) return;
+      if (ex.editable && bidChanges().any) {
+        flashField(root.querySelector("[data-action=update-bid]"));
         return;
       }
-      // No quote yet: make one (create-quote returns an existing one instead
-      // if another click or rep got there first), then open it.
-      var id = ex.e_sorder_id, cur = hsQuotes[id];
-      if (!cur || !cur.data || cur.creating) return;
-      cur.creating = true;
+      var id = ex.e_sorder_id, fail = "Could not check HubSpot for a quote: ";
+      var here = function () { return state.existing && state.existing.e_sorder_id === id; };
+      var show = function (q) {
+        delete hsQuotes[id];
+        if (here() && !state.quoteModal) {
+          state.quoteModal = { id: id, quote: q, emails: [], sending: false, note: null };
+          render();
+        } else refreshQuoteBtn();
+      };
+      hsQuotes[id] = "checking";
       showQuoteError(null);
       refreshQuoteBtn();
-      postJson(API.createQuote, { e_sorder_id: id })
+      getJson(API.quote, { e_sorder_id: id })
         .then(function (d) {
-          hsQuotes[id] = { data: d };
-          if (!(d.quote && d.quote.link)) throw new Error("HubSpot made the quote but has not published its link yet. Try View Quote again in a minute.");
-          var here = state.existing && state.existing.e_sorder_id === id;
-          // create-quote waits (up to 20 s) for the new quote's page to stop
-          // answering 404; page_ready false means it was still not up.
-          if (d.page_ready === false) {
-            if (here) showQuoteError("HubSpot is still preparing the quote. Try View Quote again in a moment.");
-            refreshQuoteBtn();
-          } else if (here && !state.quoteModal) openQuote();
-          else refreshQuoteBtn();
+          if (d.quote && d.quote.link) return show(d.quote);
+          if (!d.hs_deal_id) { fail = ""; throw new Error("No HubSpot deal for this order yet, so there is nothing to quote."); }
+          // No quote yet: make one (create-quote returns an existing one
+          // instead if another rep got there first), then open it.
+          hsQuotes[id] = "creating";
+          fail = "Could not create the quote: ";
+          refreshQuoteBtn();
+          return postJson(API.createQuote, { e_sorder_id: id }).then(function (c) {
+            fail = "";
+            if (!(c.quote && c.quote.link)) throw new Error("HubSpot made the quote but has not published its link yet. Try View Quote again in a minute.");
+            // create-quote waits (up to 20 s) for the new quote's page to stop
+            // answering 404; page_ready false means it was still not up.
+            if (c.page_ready === false) throw new Error("HubSpot is still preparing the quote. Try View Quote again in a moment.");
+            show(c.quote);
+          });
         })
         .catch(function (err) {
-          cur.creating = false;
-          if (state.existing && state.existing.e_sorder_id === id) showQuoteError("Could not create the quote: " + err.message);
+          delete hsQuotes[id];
+          if (here()) showQuoteError(fail + err.message);
           refreshQuoteBtn();
         });
     }
@@ -2647,7 +3011,12 @@
         lastTap = 0;
       } else lastTap = now;
     }
-    window.addEventListener("resize", function () { if (state.quoteModal) fitQuoteFrame(); });
+    window.addEventListener("resize", function () {
+      if (state.quoteModal) fitQuoteFrame();
+      // Orientation change / font reflow can rewrap the action bar's buttons
+      // without a render happening on its own.
+      syncBarSpace();
+    });
 
     function sendNoteHtml() {
       var n = state.quoteModal.note;
@@ -2849,12 +3218,13 @@
         // Under the lines: grid buttons left, the totals summary box right.
         '<div class="fop-gridfoot"><div class="fop-row fop-gridtools">' +
         (linesLocked() ? "" : '<button class="fop-btn fop-btn--ghost fop-btn--sm" data-action="add-line">+ Add line <span class="fop-key">Ins</span></button>') +
-        // Custom lines: new orders only (they go out as a bid for approval).
-        (state.existing ? "" : '<button class="fop-btn fop-btn--ghost fop-btn--sm" data-action="add-custom">+ Custom line</button>') +
+        // Custom lines: new orders and bids (they go to Eclipse as product 15680).
+        (linesLocked() ? "" : '<button class="fop-btn fop-btn--ghost fop-btn--sm" data-action="add-custom">+ Custom line</button>') +
         // Stock & qty breaks button: side layout only.
         (noStock() || !sideLayout ? "" : '<button class="fop-btn fop-btn--ghost fop-btn--sm' + (stockShown() ? " fop-btn--on" : "") + '" data-action="toggle-stock" aria-pressed="' + stockShown() + '">' +
         (stockShown() ? "Hide" : "Show") + ' stock &amp; qty breaks <span class="fop-key">' + altKey("S") + '</span></button>') +
         "</div>" + '<div class="fop-sum" data-cell="summary" aria-label="Order totals">' + summaryHtml() + "</div></div>" +
+        '<div class="fop-credit-tag--sum" data-cell="credit-tag">' + creditTagHtml() + "</div>" +
         // Order header sits below the lines (user request).
         headerHtml() +
         // Error + action bar: in the side layout they stay in the left column
@@ -2902,10 +3272,11 @@
     // Keep the dialog title and button in step with the picked status.
     function refreshConfirmText() {
       var isBid = confirmIsBid();
+      var placing = state.confirm.mode === "bid" || state.confirm.mode === "order";
       var title = root.querySelector("#fop-confirm-title");
       var btn = root.querySelector("[data-action=confirm-place]");
-      if (title) title.textContent = isBid ? "Place as Bid?" : "Place Order?";
-      if (btn && !state.placing) btn.innerHTML = (isBid ? "Place Bid" : "Place Order") + ' <span class="fop-key fop-key--dark">Enter</span>';
+      if (title && placing) title.textContent = isBid ? "Place as Bid?" : "Place Order?";
+      if (btn && placing && !state.placing) btn.innerHTML = (isBid ? "Place Bid" : "Place Order") + ' <span class="fop-key fop-key--dark">Enter</span>';
       if (btn) {
         if (needsStatus()) { btn.setAttribute("aria-disabled", "true"); btn.title = "Pick an order status."; }
         else { btn.removeAttribute("aria-disabled"); btn.removeAttribute("title"); }
@@ -2915,30 +3286,44 @@
     // An order (not a bid) with no status picked yet: Place Order is grayed
     // out (aria-disabled, so a click still reaches place() and flashes the box).
     function needsStatus() {
-      return state.confirm && state.confirm.mode === "order" && !state.header.orderStatus;
+      return state.confirm && (state.confirm.mode === "order" || state.confirm.mode === "convert") && !state.header.orderStatus;
     }
 
     // A line's comment under its description in the confirm dialogs.
     function commentNoteHtml(l) {
       var c = lineComment(l);
-      return c ? '<span class="fop-muted fop-block fop-confirm-comment">Comment: ' + esc(c) + "</span>" : "";
+      return c ? '<span class="fop-muted fop-block fop-confirm-comment">' + (l.orig ? "Add comment: " : "Comment: ") + esc(c) + "</span>" : "";
+    }
+
+    // Several ship branches: the Br column in the confirm tables and a note
+    // that each branch is its own generation.
+    function branchesNoteHtml(what) {
+      var bs = orderBranches();
+      if (bs.length < 2) return "";
+      return '<div class="fop-alert fop-alert--info">The lines ship from ' + bs.length + " branches (" + esc(bs.join(", ")) +
+        "), so this " + what + " one generation per branch.</div>";
+    }
+
+    function brCellHtml(l, on) {
+      return on ? '<td class="fop-num">' + esc(lineBranch(l)) + "</td>" : "";
     }
 
     function confirmHtml() {
-      if (state.confirm.mode === "update") return updateConfirmHtml();
+      if (state.confirm.mode === "update" || state.confirm.mode === "convert") return updateConfirmHtml();
       var h = state.header;
       var isBid = confirmIsBid();
       var t = orderTotal();
+      var multi = orderBranches().length > 1;
       // Regular and custom lines in page order.
       var nCustom = customLines().length;
       var rows = sentLines().map(function (l) {
         if (l.custom) {
           var cl = l.custom;
           return '<tr><td><span class="fop-badge">Custom</span> ' + esc(cl.idealSku) + "</td><td>" + esc(cl.name) +
-            '</td><td class="fop-num">' + cl.qty + '</td><td class="fop-num">' + money(cl.price * cl.qty) + "</td></tr>";
+            "</td>" + brCellHtml(l, multi) + '<td class="fop-num">' + cl.qty + '</td><td class="fop-num">' + money(cl.price * cl.qty) + "</td></tr>";
         }
         var p = linePrice(l);
-        return "<tr><td>" + esc(l.productId) + "</td><td>" + esc(l.description) + commentNoteHtml(l) + '</td><td class="fop-num">' + esc(l.qty) +
+        return "<tr><td>" + esc(l.productId) + "</td><td>" + esc(l.description) + commentNoteHtml(l) + "</td>" + brCellHtml(l, multi) + '<td class="fop-num">' + esc(l.qty) +
           '</td><td class="fop-num">' + (p == null ? "Eclipse price" : money(p * Number(l.qty))) + "</td></tr>";
       }).join("");
       return (
@@ -2947,16 +3332,17 @@
         '<h2 class="fop-h2" id="fop-confirm-title">' + (isBid ? "Place as Bid?" : "Place Order?") + "</h2>" +
         (nCustom ? '<div class="fop-alert fop-alert--info">' + nCustom + " custom line" +
           (nCustom > 1 ? "s" : "") + " included, so this can only be placed as a bid.</div>" : "") +
+        branchesNoteHtml("places") +
         '<div class="fop-confirm-meta">' +
         "<div><span>Ship-to</span> " + esc(state.shipTo.name) + " (" + esc(state.shipTo.e_customer_id) + ")</div>" +
         "<div><span>Price level</span> " + esc(state.customer.bill_to.price_class || "Unknown") + "</div>" +
-        "<div><span>Branch</span> " + esc(h.shipBranch) + "</div>" +
+        "<div><span>Branch</span> " + esc(multi ? orderBranches().join(", ") : h.shipBranch) + "</div>" +
         "<div><span>Ship via</span> " + esc(h.shipVia || "None") + "</div>" +
         "<div><span>Ship / Req</span> " + esc(h.shipDate) + " / " + esc(h.requiredDate) + "</div>" +
         (h.po ? "<div><span>PO</span> " + esc(h.po) + "</div>" : "") +
         "</div>" +
         (state.confirm.mode === "order" ? statusPickerHtml() : "") +
-        '<div class="fop-table-wrap"><table class="fop-table"><thead><tr><th>Product</th><th>Description</th>' +
+        '<div class="fop-table-wrap"><table class="fop-table"><thead><tr><th>Product</th><th>Description</th>' + (multi ? '<th class="fop-num">Br</th>' : "") +
         '<th class="fop-num">Qty</th><th class="fop-num">Ext.</th></tr></thead><tbody>' + rows + "</tbody></table></div>" +
         (freightInValue() ? '<div class="fop-confirm-total fop-confirm-freight">Freight in ' + money(freightInValue()) + "</div>" : "") +
         '<div class="fop-confirm-total">Total ' + money(t.total + freightInValue()) + (t.unknown ? " + Eclipse pricing" : "") + "</div>" +
@@ -2970,39 +3356,71 @@
       );
     }
 
-    // Update Bid: each line marked New / Changed (qty or price), plus the
-    // lines that will be removed.
+    // Update Bid and Convert to Order: the header changes, each line marked
+    // New / Changed / Comment / branch, the lines that will be removed and,
+    // when the bid moves to another generation, why. Convert to Order adds
+    // the status picker and the generations it converts; it saves the same
+    // changes first (one update-bid call).
     function updateConfirmHtml() {
+      var ex = state.existing;
+      var convert = state.confirm.mode === "convert";
       var ch = bidChanges();
       var t = orderTotal();
+      var home = branchIdOf(ex.ship_branch);
+      var multi = orderBranches().length > 1 || orderBranches()[0] !== home;
       var rows = filledLines().map(function (l) {
         var p = linePrice(l);
-        var tag = !l.orig ? "New"
-          : (Number(l.qty) !== l.orig.qty || (p != null && (l.orig.price == null || Math.abs(p - l.orig.price) >= 0.0005))) ? "Changed" : "";
-        return "<tr><td>" + esc(l.productId) + "</td><td>" + esc(l.description) + commentNoteHtml(l) + '</td><td class="fop-num">' + esc(l.qty) +
-          '</td><td class="fop-num">' + (p == null ? "Eclipse price" : money(p * Number(l.qty))) + '</td><td class="fop-muted">' + tag + "</td></tr>";
+        var tags = [];
+        if (!l.orig) tags.push("New");
+        else if (Number(l.qty) !== l.orig.qty || (p != null && (l.orig.price == null || Math.abs(p - l.orig.price) >= 0.0005))) tags.push("Changed");
+        if (l.orig && lineComment(l)) tags.push("Comment added");
+        if (lineBranch(l) !== home) tags.push("To branch " + lineBranch(l));
+        return "<tr><td>" + esc(l.productId) + "</td><td>" + esc(l.description) + commentNoteHtml(l) + "</td>" + brCellHtml(l, multi) + '<td class="fop-num">' + esc(l.qty) +
+          '</td><td class="fop-num">' + (p == null ? "Eclipse price" : money(p * Number(l.qty))) + '</td><td class="fop-muted">' + esc(tags.join(" · ")) + "</td></tr>";
+      }).join("");
+      rows += customLines().map(function (l) {
+        var cl = l.custom;
+        return '<tr><td><span class="fop-badge">Custom</span> ' + esc(cl.idealSku) + "</td><td>" + esc(cl.name) + "</td>" + brCellHtml(l, multi) +
+          '<td class="fop-num">' + cl.qty + '</td><td class="fop-num">' + money(cl.price * cl.qty) + '</td><td class="fop-muted">New</td></tr>';
       }).join("");
       var kept = {};
       filledLines().forEach(function (l) { if (l.orig) kept[l.orig.lineId] = true; });
-      rows += (state.existing.lines || []).filter(function (l) { return !kept[l.line_id]; }).map(function (l) {
-        return '<tr class="fop-row--removed"><td>' + esc(l.product_id) + "</td><td>" + esc(l.description) + '</td><td class="fop-num">' + esc(l.qty) +
+      rows += (ex.lines || []).filter(function (l) { return !kept[l.line_id]; }).map(function (l) {
+        return '<tr class="fop-row--removed"><td>' + esc(l.product_id) + "</td><td>" + esc(l.description) + "</td>" + (multi ? "<td></td>" : "") + '<td class="fop-num">' + esc(l.qty) +
           '</td><td class="fop-num">-</td><td class="fop-warn-text">Removed</td></tr>';
       }).join("");
-      var summary = [ch.added && ch.added + " added", ch.changed && ch.changed + " changed", ch.removed && ch.removed + " removed"]
+      var summary = [ch.added && ch.added + " added", ch.changed && ch.changed + " changed", ch.commented && ch.commented + " commented",
+        ch.moved && ch.moved + " to another branch", ch.removed && ch.removed + " removed", ch.head.length && ch.head.length + " header field" + (ch.head.length > 1 ? "s" : "")]
         .filter(Boolean).join(" · ");
+      // A new required date, or no line left on the bid's branch, moves the
+      // lines to another generation and cancels this one.
+      var h = state.header;
+      var leaves = h.requiredDate !== (ex.required_date || "") || !filledLines().concat(customLines()).some(function (l) { return lineBranch(l) === home; });
+      var gens = convert ? ((state.order && state.order.generations) || []).filter(function (g) { return g.status === "Bid"; }).map(function (g) { return g.e_sorder_id; }) : [];
       return (
         '<div class="fop-modal" role="dialog" aria-modal="true" aria-labelledby="fop-confirm-title">' +
         '<div class="fop-modal__box">' +
-        '<h2 class="fop-h2" id="fop-confirm-title">Update bid ' + esc(state.existing.e_sorder_id) + "?</h2>" +
-        '<div class="fop-muted">' + esc(summary) + ". Only the lines change.</div>" +
-        '<div class="fop-table-wrap"><table class="fop-table"><thead><tr><th>Product</th><th>Description</th>' +
+        '<h2 class="fop-h2" id="fop-confirm-title">' + (convert ? "Convert bid " + esc(ex.e_sorder_id) + " to an order?" : "Update bid " + esc(ex.e_sorder_id) + "?") + "</h2>" +
+        (convert ? statusPickerHtml() +
+          '<div class="fop-muted fop-confirm-gens">Converts ' + (gens.length > 1 ? "every bid generation: " : "") + esc(gens.join(", ") || ex.e_sorder_id) + "." +
+          (ch.any ? " The changes below are saved first." : "") + "</div>" : "") +
+        (ch.any ? '<div class="fop-muted">' + esc(summary) + ".</div>" : "") +
+        (ch.head.length ? '<ul class="fop-confirm-head">' + ch.head.map(function (x) {
+          return "<li><span>" + esc(x.label) + "</span> " + esc(x.from || "--") + " → " + esc(x.to || "--") + "</li>";
+        }).join("") + "</ul>" : "") +
+        (ch.any && leaves ? '<div class="fop-alert fop-alert--info">Eclipse can\'t change a generation\'s ship branch or required date, so the lines move to ' +
+          "a generation that has them (a new one if needed) and " + esc(ex.e_sorder_id) + " is cancelled.</div>" : "") +
+        (ch.any && !leaves && ch.moved ? '<div class="fop-alert fop-alert--info">Lines for another branch move to that branch\'s generation (a new one if needed).</div>' : "") +
+        (ch.commented ? '<div class="fop-muted">A line that gets a comment is re-created in Eclipse with the same product, qty and price (Eclipse can\'t edit the comments of a line).</div>' : "") +
+        '<div class="fop-table-wrap"><table class="fop-table"><thead><tr><th>Product</th><th>Description</th>' + (multi ? '<th class="fop-num">Br</th>' : "") +
         '<th class="fop-num">Qty</th><th class="fop-num">Ext.</th><th></th></tr></thead><tbody>' + rows + "</tbody></table></div>" +
         '<div class="fop-confirm-total">Total ' + money(t.total) + (t.unknown ? " + Eclipse pricing" : "") + "</div>" +
         (state.placeError ? '<div class="fop-alert fop-alert--error">' + esc(state.placeError) + "</div>" : "") +
         '<div class="fop-row fop-row--end">' +
         '<button class="fop-btn fop-btn--ghost" data-action="cancel-place"' + (state.placing ? " disabled" : "") + ">Back <span class=\"fop-key\">Esc</span></button>" +
-        '<button class="fop-btn" data-action="confirm-place"' + (state.placing ? " disabled" : "") + ">" +
-        (state.placing ? "Updating…" : 'Update Bid <span class="fop-key fop-key--dark">Enter</span>') +
+        '<button class="fop-btn" data-action="confirm-place"' + (state.placing ? " disabled" : "") +
+        (needsStatus() ? ' aria-disabled="true" title="Pick an order status."' : "") + ">" +
+        (state.placing ? (convert ? "Converting…" : "Updating…") : (convert ? "Convert to Order" : "Update Bid") + ' <span class="fop-key fop-key--dark">Enter</span>') +
         "</button></div></div></div>"
       );
     }
@@ -3061,7 +3479,7 @@
       if (state.detailsModal && state.detailsModal.r === r) {
         var ds = root.querySelector('[data-cell="details-stock"]');
         var db = root.querySelector('[data-cell="details-breaks"]');
-        if (ds) ds.innerHTML = stockStripHtml(line, true);
+        if (ds) ds.innerHTML = stockStripHtml(line, true, r);
         if (db) db.innerHTML = breaksStripHtml(line);
         ["cost", "ext", "desc"].forEach(function (k) {
           var c = root.querySelector('[data-cell="details-' + k + '"]');
@@ -3091,7 +3509,7 @@
       var strip = el.querySelector('[data-cell="strip"]');
       var brk = el.querySelector('[data-cell="breaks"]');
       var cm = el.querySelector('[data-cell="comment"]');
-      if (strip) { strip.hidden = !on; if (on) strip.innerHTML = stockStripHtml(line); }
+      if (strip) { strip.hidden = !on; if (on) strip.innerHTML = stockStripHtml(line, false, r); }
       if (brk) { brk.hidden = !on; if (on) brk.innerHTML = breaksStripHtml(line); }
       if (cm) {
         var wasHidden = cm.hidden;
@@ -3136,23 +3554,27 @@
       var st = sm && sm.querySelector('[data-cell="sum-total"]');
       if (sm && !state.existing && st) st.innerHTML = sumTotalHtml(summary());
       else if (sm) sm.innerHTML = summaryHtml();
+      var ct = root.querySelector('[data-cell="credit-tag"]');
+      if (ct) ct.innerHTML = creditTagHtml();
       var bid = root.querySelector("[data-action=place-bid]");
       var ord = root.querySelector("[data-action=place-order]");
       var upd = root.querySelector("[data-action=update-bid]");
-      if (bid) setDisabled(bid, placeBlockedReason("bid"));
+      var conv = root.querySelector("[data-action=convert-bid]");
+      if (bid) setSoftDisabled(bid, placeBlockedReason("bid"));
       if (ord) setSoftDisabled(ord, placeBlockedReason("order"));
-      if (upd) setDisabled(upd, placeBlockedReason("update"));
+      if (upd) setSoftDisabled(upd, placeBlockedReason("update"));
+      if (conv) setSoftDisabled(conv, placeBlockedReason("convert"));
+      refreshQuoteBtn();
+      // Lines on several branches: the hint under Ship branch.
+      var hint = root.querySelector('[data-cell="branch-hint"]');
+      if (hint) hint.innerHTML = branchHintHtml();
     }
 
-    // Looks disabled but still takes clicks (Place Order).
+    // Looks disabled but still takes clicks (every place / bid button), so a
+    // blocked click can flash the field at fault.
     function setSoftDisabled(btn, reason) {
       if (reason) { btn.setAttribute("aria-disabled", "true"); btn.title = reason; }
       else { btn.removeAttribute("aria-disabled"); btn.removeAttribute("title"); }
-    }
-
-    function setDisabled(btn, reason) {
-      btn.disabled = !!reason;
-      if (reason) btn.title = reason; else btn.removeAttribute("title");
     }
 
     function refreshLinesFor(pid) {
@@ -3205,7 +3627,11 @@
       var el = cellInput(r, c);
       if (!el) return;
       state.focus = { r: r, c: c };
-      el.focus();
+      // Phones: a focused field already sits in view (it's a card the rep
+      // just tapped near, not an off-screen grid cell), so don't let focus()
+      // scroll the page out from under them when the keyboard opens.
+      if (window.matchMedia && window.matchMedia("(max-width: 767px), (hover: none) and (pointer: coarse)").matches) el.focus({ preventScroll: true });
+      else el.focus();
       if (el.select) el.select();
     }
 
@@ -3264,6 +3690,7 @@
         line.keepPrice = false;
         line.priceOverride = false;
         line.priceRaised = false;
+        line.priceCapped = false;
         line.price = null;
       } else if (isFinite(Number(s)) && Number(s) >= 0) {
         line.keepPrice = false;
@@ -3272,6 +3699,12 @@
         var m = minPrice(line);
         line.priceRaised = m != null && v < m;
         if (line.priceRaised) v = m;
+        // Ceiling: never let the rep raise a price above the original unit
+        // price (checked after the floor, so a line priced under cost still
+        // gets raised to the floor even if that is above the ceiling).
+        var mx = maxPrice(line);
+        line.priceCapped = mx != null && v > mx;
+        if (line.priceCapped) v = mx;
         if (auto == null || Math.abs(v - auto) >= 0.0005) {
           line.priceOverride = true;
           line.price = v;
@@ -3344,6 +3777,15 @@
       if (inp) inp.value = m.draft.variationSku;
       var vd = root.querySelector('[data-cell="variation-desc"]');
       if (vd) vd.textContent = m.draft.variationDesc;
+      // A blank Name takes the product's; price and COGS fill when its
+      // pricing arrives (refreshCustomOrig).
+      if (!m.draft.name.trim() && m.draft.variationDesc) {
+        m.draft.name = m.draft.variationDesc.slice(0, 120);
+        var nm = root.querySelector("#fop-cf-name");
+        if (nm) nm.value = m.draft.name;
+      }
+      fetchQuote(m.draft.variationSku);
+      refreshCustomOrig();
       var sn = root.querySelector("#fop-cf-serial");
       if (sn) sn.focus();
     }
@@ -3367,14 +3809,31 @@
 
     // ── Placing ────────────────────────────────────────────────────────────
 
+    // Every placeBlockedReason() message that points at one header field
+    // flashes that field (so Alt+B / Alt+O, or a soft-disabled click on
+    // Place Order / Convert to Order, always shows the rep exactly what to
+    // fix, not just a tooltip on the button). A reason with no single field
+    // to blame (no lines, a product not found, custom lines, over the
+    // credit limit, no Eclipse user, no changes to save) flashes nothing.
+    function flashBlockedField(blocked) {
+      var field =
+        blocked === "Pick a ship branch." ? "shipBranch" :
+        blocked === "Pick a ship via." ? "shipVia" :
+        blocked === seeInstructionReason() ? "shippingInstructions" :
+        blocked === "Required date cannot be before ship date." ? "requiredDate" : null;
+      if (field) flashField(root.querySelector('#fop-head [data-head="' + field + '"]'));
+    }
+
     function requestPlace(mode) {
       if (state.placing) return;
       var blocked = placeBlockedReason(mode);
       if (blocked) {
-        // Place Order (click or shortcut) without a ship via: flash the box.
-        if (mode === "order" && !state.header.shipVia && blocked === "Pick a ship via.") flashField(root.querySelector('#fop-head [data-head="shipVia"]'));
+        flashBlockedField(blocked);
         return;
       }
+      // Convert to Order: the status is picked in the dialog (a bid's header
+      // holds "Bid" until then).
+      if (mode === "convert") state.header.orderStatus = "";
       state.confirm = { mode: mode };
       state.placeError = null;
       render();
@@ -3410,8 +3869,11 @@
           var what = data.what === "bid" ? "Bid " : "Order ";
           state.notice = {
             text: data.mode === "cancel" ? what + (data.e_sorder_id || id) + " cancelled."
-              : placed ? (data.mode === "bid" ? "Bid " : "Order ") + (data.e_sorder_id || id) + " placed."
-              : data.unchanged ? "Nothing to update; the bid already matched Eclipse." : "Bid updated.",
+              : placed ? (data.mode === "bid" ? "Bid " : "Order ") + (data.e_sorder_id || id) + " placed." + splitNote(data)
+              : data.mode === "convert" ? "Bid converted to an order (" + statusLabel(data.status) + ")" + savedAt(o) + "." + movedNote(data)
+              : data.unchanged ? "Nothing to update; the bid already matched Eclipse." : "Bid updated" + savedAt(o) + "." + movedNote(data),
+            // create-order: a generation for another branch could not be finished.
+            warning: data.warning || "",
             hubspotError: data.hubspot_sync && data.hubspot_sync.ok === false ? String(data.hubspot_sync.error || "") : "",
           };
           state.orderId = String(id).toUpperCase();
@@ -3432,18 +3894,49 @@
         });
     }
 
-    function updateBid() {
+    // " Oct 20, 2026, 9:14 AM CDT": when Eclipse last changed the reloaded
+    // order (order-lookup's last_modified, Eclipse lastUpdateDateTime), for
+    // the "Bid updated" note; "" when Eclipse sent none.
+    function savedAt(o) {
+      return o && o.last_modified ? " " + dateTimeText(o.last_modified) : "";
+    }
+
+    // Placed on several branches: the other generations, after "… placed."
+    function splitNote(data) {
+      var gens = (data.generations || []).slice(1);
+      if (!gens.length) return "";
+      return " One generation per ship branch: " + gens.map(function (g) { return g.e_sorder_id + " (branch " + g.ship_branch + ")"; }).join(", ") + ".";
+    }
+
+    // Update Bid / Convert: generations made or cancelled on the way.
+    function movedNote(data) {
+      var c = data.changes || {};
+      var made = (c.generations || []).map(function (g) { return g.e_sorder_id + " (branch " + g.ship_branch + ")"; });
+      var out = made.length ? " New generation" + (made.length > 1 ? "s " : " ") + made.join(", ") + "." : "";
+      if ((c.cancelled || []).length) out += " " + c.cancelled.join(", ") + " was cancelled; its lines moved.";
+      return out;
+    }
+
+    // Update Bid, or Convert to Order (orderStatus: the picked status). One
+    // update-bid call saves the header and line changes, then converts.
+    function updateBid(orderStatus) {
       var ex = state.existing;
+      var ch = bidChanges();
       state.placing = true;
       state.placeError = null;
       render();
-      postJson(API.updateBid, {
+      var body = {
         e_sorder_id: ex.e_sorder_id,
         writer: user.e_user_id,
-        lines: bidChanges().lines,
-      })
+        header: ch.header,
+        lines: ch.lines,
+        custom_lines: ch.custom_lines,
+      };
+      if (orderStatus) body.order_status = orderStatus;
+      postJson(API.updateBid, body)
         .then(function (data) {
-          data.mode = "update";
+          data.mode = orderStatus ? "convert" : "update";
+          data.status = orderStatus;
           state.result = data;
           state.ordersList = null;  // the list shows the old totals
           // Back on the bid itself, reloaded from Eclipse.
@@ -3498,15 +3991,16 @@
 
     function place() {
       var mode = state.confirm.mode;
-      if (mode === "update") { updateBid(); return; }
       var h = state.header;
+      if (mode === "update") { updateBid(); return; }
       // An order needs a status picked in the dialog; blank flashes the box.
-      if (mode === "order" && !h.orderStatus) {
+      if ((mode === "order" || mode === "convert") && !h.orderStatus) {
         var st = root.querySelector("#fop-confirm-status");
         flashField(st);
         if (st) st.focus();
         return;
       }
+      if (mode === "convert") { updateBid(h.orderStatus); return; }
       var c = state.customer;
       state.placing = true;
       state.placeError = null;
@@ -3531,28 +4025,16 @@
         writer: user.e_user_id,
         outside_sales: user.territory || "",
         email: user.email || "",
+        // ship_branch per line: lines on another branch than the header's
+        // become their own generation (one per branch) in create-order.
         lines: filledLines().map(function (l) {
-          var line = { productId: l.productId, quantity: Number(l.qty) };
+          var line = { productId: l.productId, quantity: Number(l.qty), ship_branch: lineBranch(l) };
           if (sendsPrice(l)) line.unitPrice = linePrice(l);
           if (lineComment(l)) line.comments = lineComment(l);
           return line;
         }),
-        // Custom lines (bid only). create-order does not read these yet.
-        // line_number: the line's place among all sent lines (regular and
-        // custom, 1-based, in page order), so the order can be kept later.
-        custom_lines: sentLines().map(function (l, i) { return { l: l, n: i + 1 }; }).filter(function (x) { return x.l.custom; }).map(function (x) {
-          var cl = x.l.custom;
-          return {
-            line_number: x.n,
-            name: cl.name,
-            ideal_sku: cl.idealSku,
-            quantity: cl.qty,
-            unit_price: cl.price,
-            est_cogs: cl.cogs,
-            variation_of: cl.variationSku ? { product_id: cl.variationSku, description: cl.variationDesc, serial_number: cl.serial } : null,
-            customizations: cl.customizations,
-          };
-        }),
+        // Custom lines (bid only), placed in their page order as product 15680.
+        custom_lines: customPayload(),
       })
         .then(function (data) {
           data.mode = mode;
@@ -3668,6 +4150,9 @@
           break;
         }
         case "update-bid": requestPlace("update"); break;
+        case "convert-bid": requestPlace("convert"); break;
+        case "pick-branch": pickBranch(r, el.getAttribute("data-branch")); break;
+        case "branch-menu": state.branchMenu = state.branchMenu === r ? null : r; render(); break;
         case "new-from-list": newOrderFromList(); break;
         case "change-log": openChangeLog(); break;
         case "close-log": closeChangeLog(); break;
@@ -3712,6 +4197,7 @@
         var box = root.querySelector('[data-cell="custom-var"]');
         if (box) box.hidden = !t.checked;
         if (t.checked) { var sku = root.querySelector("#fop-cf-variationSku"); if (sku) sku.focus(); }
+        refreshCustomOrig();
         return;
       }
       d[key] = t.value;
@@ -3721,14 +4207,19 @@
           d.variationDesc = "";
           var vd = root.querySelector('[data-cell="variation-desc"]');
           if (vd) vd.textContent = "";
+          refreshCustomOrig();
         }
         acSearch(t, "variation", null);
         return;
       }
       if (key === "customizations") autosize(t);
-      if (key === "qty" || key === "price" || key === "cogs") {
-        var mg = root.querySelector('[data-cell="custom-margin"]');
-        if (mg) mg.innerHTML = customMarginHtml(d);
+      if (key === "qty" || key === "price" || key === "cogs" || key === "name") {
+        refreshCustomMargin(d);
+      }
+      // The original price follows the qty (quantity breaks).
+      if (key === "qty") {
+        var op = root.querySelector('[data-cell="orig-price"]');
+        if (op) op.textContent = customOrigHtml(d, "price");
       }
     }
 
@@ -3742,6 +4233,8 @@
         var cl = state.lines[Number(t.getAttribute("data-comment"))];
         if (cl) cl.comment = t.value;
         autosize(t);
+        // On a bid a comment is a change Update Bid saves.
+        if (state.existing) refreshTotals();
         return;
       }
       if (state.detailsModal && t.hasAttribute("data-details-comment")) { state.detailsModal.comment = t.value; autosize(t); return; }
@@ -3759,6 +4252,10 @@
       if (t.classList.contains("fop-notes")) {
         autosizeNotes(t);
         state.header[t.getAttribute("data-head")] = t.value;
+        // A bid's notes count as a change for Update Bid; shipping
+        // instructions also feed the "SEE INSTRUCTION" ship via check on
+        // every mode, including a new order, so this always refreshes.
+        refreshTotals();
         return;
       }
       if (t.classList.contains("fop-grid-in")) {
@@ -3804,7 +4301,11 @@
       }
       if (key) {
         state.header[key] = t.value;
-        if (key === "shipBranch") refreshAllRows();
+        // A ship branch picked in the header: every line ships from it again.
+        if (key === "shipBranch") {
+          state.lines.forEach(function (l) { l.branch = ""; });
+          refreshAllRows();
+        }
         if (key === "shipVia") refreshAllRows();
         if (key === "orderStatus") refreshConfirmText();
         refreshTotals();
@@ -4118,13 +4619,14 @@
 
       // Page-level shortcuts: Alt (Control on a Mac) + a letter, matched on
       // e.code.
-      // Existing order: Alt+B is Update Bid (bids only); Alt+O does nothing.
+      // Existing order: Alt+B is Update Bid and Alt+O Convert to Order (bids
+      // only; requestPlace refuses anything else).
       if (isShortcutMod(e)) {
         var focusEl = function (sel) { var el = root.querySelector(sel); if (el) el.focus(); };
         switch (e.code) {
           case "KeyQ": e.preventDefault(); if (confirmLeave()) exitToOrders(); return;
           case "KeyB": e.preventDefault(); requestPlace(state.existing ? "update" : "bid"); return;
-          case "KeyO": e.preventDefault(); if (!state.existing) requestPlace("order"); return;
+          case "KeyO": e.preventDefault(); requestPlace(state.existing ? "convert" : "order"); return;
           case "KeyH": e.preventDefault(); focusEl("#fop-head [data-head]"); return;
           case "KeyL": e.preventDefault(); focusCell(state.focus.r, state.focus.c); return;
           case "KeyS": e.preventDefault(); toggleStock(); return;
@@ -4140,6 +4642,16 @@
       if (e.key === "Enter" && t.tagName === "SELECT" && t.hasAttribute("data-head") && !t.disabled) {
         e.preventDefault();
         try { if (t.showPicker) t.showPicker(); } catch (err) { /* not allowed here */ }
+        return;
+      }
+
+      // Backspace on Ship via clears it (a native select has no other way
+      // to blank a picked value); ship via is optional on a bid.
+      if (e.key === "Backspace" && t.tagName === "SELECT" && t.getAttribute("data-head") === "shipVia" && !t.disabled && state.header.shipVia) {
+        e.preventDefault();
+        state.header.shipVia = t.value = "";
+        refreshAllRows();
+        refreshTotals();
         return;
       }
 
