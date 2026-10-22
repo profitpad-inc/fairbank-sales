@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <script src="../auth.js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fairbank | Outlook Sync</title>
+  <link rel="icon" href="../favicon.png" type="image/png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700&family=Barlow:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="styles.css">
+  <script src="index.js" defer></script>
+</head>
+<body>
+  <div class="fairbank-outlook-module">
+
+    <!-- ── Left sidebar / tab switcher ── -->
+    <aside class="fom-sidebar">
+      <div class="fom-brand">
+        <div class="fom-logo" aria-hidden="true">
+          <svg viewBox="0 0 20 20" fill="none">
+            <rect x="2.5" y="4.5" width="15" height="11" rx="1.8" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M3 5.5l7 5 7-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="fom-brand-text">
+          <div class="fom-brand-name">Outlook Sync</div>
+          <div class="fom-brand-sub">Fairbank Equipment</div>
+        </div>
+      </div>
+
+      <nav class="fom-nav" role="tablist" aria-orientation="vertical">
+        <button class="fom-nav-btn" role="tab" data-tab="dashboard" aria-selected="false">
+          <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M3 8.5L10 3l7 5.5V16a1 1 0 0 1-1 1h-3.5v-5h-5v5H4a1 1 0 0 1-1-1V8.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+          </svg>
+          <span>Dashboard</span>
+        </button>
+        <button class="fom-nav-btn active" role="tab" data-tab="settings" aria-selected="true">
+          <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M3 5h8M15 5h2M3 10h2M9 10h8M3 15h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <circle cx="13" cy="5" r="2" stroke="currentColor" stroke-width="1.5"/>
+            <circle cx="7" cy="10" r="2" stroke="currentColor" stroke-width="1.5"/>
+            <circle cx="15" cy="15" r="2" stroke="currentColor" stroke-width="1.5"/>
+          </svg>
+          <span>Settings</span>
+          <span class="fom-dirty-dot" id="fom-dirty-dot" title="Unsaved changes"></span>
+        </button>
+      </nav>
+    </aside>
+
+    <section class="fom-main">
+
+      <!-- ── Dashboard tab ── -->
+      <div class="fom-panel" id="fom-panel-dashboard" role="tabpanel">
+        <div class="fom-panel-head">
+          <div>
+            <div class="page-title">Overview</div>
+            <h1>Dashboard</h1>
+          </div>
+          <button class="fom-ghost-btn" id="fom-info-refresh">
+            <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <path d="M16 10a6 6 0 1 1-1.76-4.24M16 3.5v3.5h-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span>Refresh</span>
+          </button>
+        </div>
+
+        <div class="state-box" id="fom-info-error">
+          <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+            <circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="2"/>
+            <path d="M10 6v4M10 14h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <span class="state-msg"></span>
+        </div>
+
+        <!-- Headline totals -->
+        <div class="fom-tiles" id="fom-info-tiles"></div>
+
+        <!-- Per-user sent / received chart -->
+        <div class="fom-card fom-chart-card" id="fom-chart-card">
+          <div class="fom-card-head">
+            <span>Emails by User</span>
+            <span class="fom-card-meta" id="fom-info-meta"></span>
+          </div>
+
+          <div class="fom-chart-toolbar">
+            <div class="fom-legend" aria-label="Legend">
+              <span class="fom-legend-item"><span class="fom-swatch fom-swatch-sent"></span>Sent</span>
+              <span class="fom-legend-item"><span class="fom-swatch fom-swatch-recv"></span>Received</span>
+            </div>
+            <div class="fom-chart-controls">
+              <label class="fom-select-wrap">
+                <span>Sort</span>
+                <select id="fom-chart-sort">
+                  <option value="sent" selected>Sent</option>
+                  <option value="total">Total</option>
+                  <option value="received">Received</option>
+                  <option value="id">Eclipse User ID</option>
+                </select>
+              </label>
+              <div class="fom-segmented" role="group" aria-label="View">
+                <button type="button" class="active" data-view="chart">Chart</button>
+                <button type="button" data-view="table">Table</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="fom-chart-wrap" id="fom-chart-wrap">
+            <div class="fom-chart" id="fom-chart">
+              <span class="fom-loading"><span class="dd-spinner"></span>Loading…</span>
+            </div>
+            <div class="fom-chart-table" id="fom-chart-table"></div>
+            <div class="fom-tip" id="fom-chart-tip" role="tooltip"></div>
+          </div>
+        </div>
+
+        <!-- Raw JSON, collapsed by default -->
+        <div class="fom-card fom-code-card fom-collapsible" id="fom-raw-card">
+          <button type="button" class="fom-card-head fom-card-toggle" id="fom-raw-toggle" aria-expanded="false" aria-controls="fom-raw-collapse">
+            <span>Raw Response</span>
+            <span class="fom-card-head-right"><svg class="fom-chevron" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M3.5 5.25L7 8.75l3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          </button>
+          <div class="fom-collapse" id="fom-raw-collapse">
+            <pre class="fom-code" id="fom-info-code"></pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Settings tab ── -->
+      <div class="fom-panel active" id="fom-panel-settings" role="tabpanel">
+        <div class="fom-panel-head">
+          <div>
+            <div class="page-title">Configuration</div>
+            <h1>Settings</h1>
+          </div>
+          <button class="fom-ghost-btn" id="fom-settings-refresh">
+            <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <path d="M16 10a6 6 0 1 1-1.76-4.24M16 3.5v3.5h-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span>Reload</span>
+          </button>
+        </div>
+
+        <div class="state-box" id="fom-settings-error">
+          <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+            <circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="2"/>
+            <path d="M10 6v4M10 14h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <span class="state-msg"></span>
+        </div>
+
+        <div class="fom-loading-block" id="fom-settings-loading">
+          <span class="dd-spinner"></span>Loading settings…
+        </div>
+
+        <div id="fom-settings-body">
+
+          <!-- Users to sync -->
+          <div class="fom-card fom-collapsible" id="fom-users-card">
+            <button type="button" class="fom-card-head fom-card-toggle" id="fom-users-toggle" aria-expanded="false" aria-controls="fom-users-collapse">
+              <span>Users to Sync</span>
+              <span class="fom-card-head-right">
+                <span class="fom-count" id="fom-users-count">0</span>
+                <svg class="fom-chevron" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M3.5 5.25L7 8.75l3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+            </button>
+            <div class="fom-card-desc">Mailboxes whose Outlook activity is synced to HubSpot.</div>
+
+            <!-- Rollup summary, always visible -->
+            <div class="fom-rollup">
+              <div class="fom-rollup-stats" id="fom-users-rollup"></div>
+              <button type="button" class="fom-link-btn" id="fom-users-expand">Show users</button>
+            </div>
+
+            <!-- Full list, collapsed by default -->
+            <div class="fom-collapse" id="fom-users-collapse">
+              <div class="fom-list-tools">
+                <div class="fom-search-wrap">
+                  <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                    <circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="2"/>
+                    <path d="M13 13L17 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  </svg>
+                  <input type="search" id="fom-users-search" placeholder="Filter by email, Eclipse user ID or owner ID" autocomplete="off" />
+                </div>
+                <span class="fom-filter-count" id="fom-users-filter-count"></span>
+              </div>
+
+              <div class="fom-table" id="fom-users-table">
+                <div class="fom-table-head fom-users-grid">
+                  <span>Email</span>
+                  <span>Eclipse User ID</span>
+                  <span>HubSpot Owner ID</span>
+                  <span></span>
+                </div>
+                <div class="fom-table-scroll" id="fom-users-rows"></div>
+              </div>
+            </div>
+
+            <form class="fom-add-row fom-users-grid" id="fom-users-form" autocomplete="off" novalidate>
+              <label class="fom-field">
+                <span class="fom-field-label">Email</span>
+                <input type="email" name="email" placeholder="name@fairbankequipment.com" required />
+              </label>
+              <label class="fom-field">
+                <span class="fom-field-label">Eclipse User ID</span>
+                <input type="text" name="e_user_id" placeholder="e.g. ALTCAS" pattern="[A-Z]{6}" maxlength="6" title="Exactly 6 capital letters" required />
+              </label>
+              <label class="fom-field">
+                <span class="fom-field-label">HubSpot Owner ID <em>Optional</em></span>
+                <input type="text" name="hs_owner_id" placeholder="e.g. 91217120" inputmode="numeric" />
+              </label>
+              <button type="submit" class="fom-add-btn" title="Add user">
+                <svg viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2v10M2 7h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                <span>Add</span>
+              </button>
+            </form>
+            <div class="fom-field-error" id="fom-users-form-error"></div>
+          </div>
+
+          <!-- Domains to exclude -->
+          <div class="fom-card">
+            <div class="fom-card-head">
+              <span>Domains to Exclude</span>
+              <span class="fom-count" id="fom-domains-count">0</span>
+            </div>
+            <div class="fom-card-desc">Messages to or from any address at these domains are skipped.</div>
+
+            <div class="fom-chips" id="fom-domains-chips"></div>
+
+            <form class="fom-add-inline" id="fom-domains-form" autocomplete="off" novalidate>
+              <input type="text" name="value" placeholder="example.com, example.org" />
+              <button type="submit" class="fom-add-btn" title="Add domain">
+                <svg viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2v10M2 7h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                <span>Add</span>
+              </button>
+            </form>
+            <div class="fom-field-error" id="fom-domains-form-error"></div>
+          </div>
+
+          <!-- Emails to exclude -->
+          <div class="fom-card">
+            <div class="fom-card-head">
+              <span>Emails to Exclude</span>
+              <span class="fom-count" id="fom-emails-count">0</span>
+            </div>
+            <div class="fom-card-desc">Messages to or from these addresses are skipped.</div>
+
+            <div class="fom-chips" id="fom-emails-chips"></div>
+
+            <form class="fom-add-inline" id="fom-emails-form" autocomplete="off" novalidate>
+              <input type="text" name="value" placeholder="someone@example.com, another@example.com" />
+              <button type="submit" class="fom-add-btn" title="Add email">
+                <svg viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2v10M2 7h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                <span>Add</span>
+              </button>
+            </form>
+            <div class="fom-field-error" id="fom-emails-form-error"></div>
+          </div>
+
+        </div><!-- /fom-settings-body -->
+      </div>
+
+      <!-- ── Save / cancel bar (shown when settings are dirty) ── -->
+      <div class="fom-savebar" id="fom-savebar" aria-live="polite">
+        <span class="fom-savebar-msg" id="fom-savebar-msg">You have unsaved changes</span>
+        <div class="fom-savebar-actions">
+          <button class="fom-ghost-btn" id="fom-cancel-btn">Cancel</button>
+          <button class="search-btn" id="fom-save-btn">
+            <div class="spinner" id="fom-save-spinner"></div>
+            <span id="fom-save-label">Save</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="fom-toast" id="fom-toast"></div>
+
+    </section>
+  </div><!-- /fairbank-outlook-module -->
+</body>
+</html>

@@ -20,6 +20,7 @@ docs/
                                   index.html = inline layout (default), strip under the focused line; side.html = same app, side panel;
                                   details.html = same app, a Details dialog per line
   archive/order-placement-v1/     port of the deal-based Branch Fulfillment card
+  outlook-integration/            Outlook Sync admin page (plain page: index.html, styles.css, index.js), webhook outlook-dash
 n8n-flows/
   auth-hubspot.json               GET  e-order-placement/auth/hubspot   (HubSpot OAuth redirect URI, live workflow GwJbTHp6sQAN8EQT)
   auth-refresh.json               GET  e-order-placement/auth/refresh   (sliding 48 h session renewal, live workflow ySZs7NS0ka2Mvwnh)
@@ -44,6 +45,8 @@ n8n-flows/
 `product-inquiry` and `archive/order-placement-v1` use the HubSpot-module layout: an `index.html` loader fetches `module.html`, strips HubSpot template tags, then loads `module.js`, with styles in `module.css`. The `hide-header` snippet hides their "LocalHost" header on `profitpad-inc.github.io`.
 
 `order-placement` is a normal web page: `index.html` holds the markup and loads `../auth.js`, `styles.css`, and `app.js` (deferred, mounts on `#app`). Do not convert it to the module layout.
+
+`outlook-integration` is also a normal web page (2026-10-22, on request). It was ported from the HubSpot module in `../outlook-integration/` (outside this repo): `module.html` became `index.html` (the old loader `index.html` was dropped), `module.css` became `styles.css` and `module.js` became `index.js`. All HubL was removed: the `require_css` for Google Fonts is now a `<link>` in the `<head>`, and `{# ... #}` comments are `<!-- ... -->`. The page background gradient moved from the old loader into `styles.css` (`body`). `index.html` loads `../auth.js` (like the other pages), `styles.css` and `index.js` (deferred). Class names, `fom-` IDs, the `.fairbank-outlook-module` scoping in `styles.css` and the JS are unchanged. The webhook is unchanged: `https://n8n.fairbankequipment.com/webhook/outlook-dash` (GET `?request=info`, GET `?request=settings`, POST the full settings object; a POST overwrites live sync settings). `auth.js` adds no Bearer header to `outlook-dash` (it is not in `PROTECTED`). The original folder's `HANDOFF.md` describes the UI, API shapes and validation rules in full. CORS checked with curl GETs on 2026-10-22: `outlook-dash` echoes the request's `Origin` in `Access-Control-Allow-Origin` (tried `http://localhost:8765`, `http://localhost:8779` and `https://sales.fairbankequipment.com`). Checked in the browser pane the same day (scratchpad copy of the page with `auth.js` stubbed to skip sign-in, GETs only, Save never clicked): Settings loads live data (26 users, 6 domains, 2 emails), Users list expands, Dashboard tiles, chart and hover card render, no console errors, phone width (375px) stacks with no sideways scroll. The real sign-in gate was not exercised.
 
 Style: navy and gold palette, Barlow and Barlow Condensed fonts. The colour tokens match `product-inquiry/module.css` (`--navy #0e2245`, `--gold #c8962a`, and so on).
 

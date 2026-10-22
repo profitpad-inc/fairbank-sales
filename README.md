@@ -11,9 +11,10 @@ Internal sales tools for Fairbank Equipment reps, served as a static site from G
 | `docs/order-placement/side.html` | Same order page with stock and qty breaks for every line in a box on the right, instead of in a strip under the focused line (the default `index.html` layout). |
 | `docs/order-placement/details.html` | Same order page with no stock box: a Details button on each line opens its stock, qty breaks and line comment. |
 | `docs/archive/order-placement-v1/` | Port of the original deal-based "Branch Fulfillment" card. Open with `?dealId=<HubSpot deal id>`. |
+| `docs/outlook-integration/` | Outlook Sync admin: a dashboard of emails sent and received per user, and the sync settings (users to sync, emails and domains to exclude). Talks to the `outlook-dash` webhook. |
 | `docs/index.html` | Redirects to order placement. |
 
-Product inquiry and order placement v1 keep the HubSpot CMS module layout (a thin `index.html` loader plus `module.html`, `module.js`, `module.css`). The new order placement page is a plain web page: `index.html`, `styles.css`, `app.js`.
+Product inquiry and order placement v1 keep the HubSpot CMS module layout (a thin `index.html` loader plus `module.html`, `module.js`, `module.css`). The new order placement page is a plain web page: `index.html`, `styles.css`, `app.js`. Outlook integration is a plain web page too: `index.html`, `styles.css`, `index.js`.
 
 ## Sign-in
 

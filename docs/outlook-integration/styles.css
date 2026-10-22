@@ -1,0 +1,1507 @@
+/* ============================================================
+   Fairbank: Outlook Sync
+   Styles for index.html. Rules are scoped to
+   .fairbank-outlook-module (the page wrapper) with fom- classes.
+   ============================================================ */
+
+/* ── Page ── */
+body {
+  margin: 0;
+  background: linear-gradient(to bottom right, #081529, #003057);
+  min-height: 100vh;
+}
+
+/* ── CSS custom properties (scoped, cascade to all descendants) ── */
+.fairbank-outlook-module {
+  --navy:      #0e2245;
+  --navy-mid:  #162f5e;
+  --navy-dark: #091529;
+  --gold:      #c8962a;
+  --gold-lt:   #e0aa38;
+  --gold-dim:  #a87a1e;
+  --white:     #ffffff;
+  --off-white: #f0f4fa;
+  --muted:     #8fa4c2;
+  --border:    rgba(200, 150, 42, 0.25);
+  --card-bg:   rgba(22, 47, 94, 0.55);
+  --row-even:  rgba(255, 255, 255, 0.04);
+  --row-hover: rgba(200, 150, 42, 0.08);
+  --success:   #3ecf8e;
+  --error:     #ff5f5f;
+}
+
+/* ── Box-sizing reset scoped to module ── */
+.fairbank-outlook-module *,
+.fairbank-outlook-module *::before,
+.fairbank-outlook-module *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* ── Module wrapper: full-height sidebar + main ── */
+.fairbank-outlook-module {
+  position: relative;
+  font-family: 'Barlow', sans-serif;
+  color: var(--white);
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+/* ── Sidebar ── */
+.fairbank-outlook-module .fom-sidebar {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 22px 14px;
+  background: rgba(6, 17, 31, 0.85);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Brand block: logo mark + two-line name */
+.fairbank-outlook-module .fom-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 8px 26px;
+}
+
+.fairbank-outlook-module .fom-logo {
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: linear-gradient(135deg, var(--gold) 0%, var(--gold-lt) 100%);
+  color: var(--navy-dark);
+  box-shadow: 0 4px 14px rgba(200, 150, 42, 0.25);
+}
+
+.fairbank-outlook-module .fom-logo svg {
+  width: 20px;
+  height: 20px;
+}
+
+.fairbank-outlook-module .fom-brand-text {
+  min-width: 0;
+}
+
+.fairbank-outlook-module .fom-brand-name {
+  font-family: 'Barlow', sans-serif;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--white);
+}
+
+.fairbank-outlook-module .fom-brand-sub {
+  font-size: 14px;
+  line-height: 1.3;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Nav */
+.fairbank-outlook-module .fom-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fairbank-outlook-module .fom-nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 12px;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  color: rgba(240, 244, 250, 0.82);
+  font-family: 'Barlow', sans-serif;
+  font-size: 15px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: background 0.15s, color 0.15s;
+}
+
+.fairbank-outlook-module .fom-nav-btn svg {
+  width: 19px;
+  height: 19px;
+  flex-shrink: 0;
+  color: var(--muted);
+  transition: color 0.15s;
+}
+
+.fairbank-outlook-module .fom-nav-btn:hover {
+  color: var(--white);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.fairbank-outlook-module .fom-nav-btn:hover svg {
+  color: var(--off-white);
+}
+
+.fairbank-outlook-module .fom-nav-btn.active {
+  color: var(--white);
+  background: var(--navy-mid);
+}
+
+.fairbank-outlook-module .fom-nav-btn.active svg {
+  color: var(--gold-lt);
+}
+
+/* Accent bar on the left edge of the active pill */
+.fairbank-outlook-module .fom-nav-btn.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--gold);
+}
+
+.fairbank-outlook-module .fom-nav-btn:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px rgba(200, 150, 42, 0.5);
+}
+
+.fairbank-outlook-module .fom-dirty-dot {
+  display: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--gold);
+  margin-left: auto;
+  box-shadow: 0 0 0 3px rgba(200, 150, 42, 0.2);
+}
+
+.fairbank-outlook-module .fom-dirty-dot.show {
+  display: block;
+}
+
+/* ── Main area ── */
+.fairbank-outlook-module .fom-main {
+  min-width: 0;
+  position: relative;
+  width: 100%;
+  max-width: 1040px;
+  padding: 36px 40px 60px;
+}
+
+.fairbank-outlook-module .fom-panel {
+  display: none;
+}
+
+.fairbank-outlook-module .fom-panel.active {
+  display: block;
+  animation: fbi-fade-up 0.3s ease both;
+}
+
+.fairbank-outlook-module .fom-panel-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+/* ── Page title / H1 ── */
+.fairbank-outlook-module .page-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 8px;
+}
+
+.fairbank-outlook-module h1 {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 42px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  color: var(--white);
+}
+
+/* ── Cards ── */
+.fairbank-outlook-module .fom-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0 0 20px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow:
+    0 4px 32px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+
+.fairbank-outlook-module .fom-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px;
+  background: rgba(200, 150, 42, 0.1);
+  border-bottom: 1px solid var(--border);
+}
+
+.fairbank-outlook-module .fom-card-head > span:first-child {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--gold-lt);
+}
+
+.fairbank-outlook-module .fom-card-meta {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.fairbank-outlook-module .fom-count {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--navy-dark);
+  background: var(--gold);
+  border-radius: 4px;
+  padding: 1px 8px;
+  min-width: 26px;
+  text-align: center;
+}
+
+.fairbank-outlook-module .fom-card-desc {
+  font-size: 13px;
+  color: var(--muted);
+  padding: 14px 20px 6px;
+}
+
+/* ── Code view (dashboard) ── */
+.fairbank-outlook-module .fom-code-card {
+  padding-bottom: 0;
+}
+
+.fairbank-outlook-module .fom-code {
+  margin: 0;
+  padding: 18px 20px;
+  background: rgba(6, 17, 31, 0.6);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--off-white);
+  white-space: pre;
+  overflow: auto;
+  max-height: calc(100vh - 260px);
+  min-height: 160px;
+  tab-size: 2;
+}
+
+.fairbank-outlook-module .fom-code::-webkit-scrollbar        { width: 8px; height: 8px; }
+.fairbank-outlook-module .fom-code::-webkit-scrollbar-track  { background: transparent; }
+.fairbank-outlook-module .fom-code::-webkit-scrollbar-corner { background: transparent; }
+.fairbank-outlook-module .fom-code::-webkit-scrollbar-thumb {
+  background: rgba(200, 150, 42, 0.3);
+  border-radius: 4px;
+}
+
+.fairbank-outlook-module .tok-key  { color: var(--gold-lt); }
+.fairbank-outlook-module .tok-str  { color: #a9c7ee; }
+.fairbank-outlook-module .tok-num  { color: var(--success); }
+.fairbank-outlook-module .tok-bool { color: #e58fb3; }
+.fairbank-outlook-module .tok-null { color: var(--muted); font-style: italic; }
+
+.fairbank-outlook-module .fom-loading,
+.fairbank-outlook-module .fom-loading-block {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: 'Barlow', sans-serif;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.fairbank-outlook-module .fom-loading-block {
+  display: none;
+  padding: 24px 4px;
+}
+
+.fairbank-outlook-module .fom-loading-block.show {
+  display: flex;
+}
+
+.fairbank-outlook-module #fom-settings-body {
+  display: none;
+}
+
+.fairbank-outlook-module #fom-settings-body.show {
+  display: block;
+}
+
+/* ── Dashboard: tiles ── */
+.fairbank-outlook-module {
+  --series-sent: #4a8ad8;   /* validated pair vs card surface (dark) */
+  --series-recv: #bc8a1f;
+}
+
+.fairbank-outlook-module .fom-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.fairbank-outlook-module .fom-tile {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 20px;
+  box-shadow: 0 4px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.fairbank-outlook-module .fom-tile-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.fairbank-outlook-module .fom-tile-value {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--white);
+}
+
+.fairbank-outlook-module .fom-tile-of {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* ── Dashboard: legend + controls ── */
+.fairbank-outlook-module .fom-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.fairbank-outlook-module .fom-swatch-sent { background: var(--series-sent); }
+.fairbank-outlook-module .fom-swatch-recv { background: var(--series-recv); }
+
+.fairbank-outlook-module .fom-chart-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 20px 4px;
+}
+
+.fairbank-outlook-module .fom-legend {
+  display: flex;
+  gap: 18px;
+}
+
+.fairbank-outlook-module .fom-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--off-white);
+}
+
+.fairbank-outlook-module .fom-chart-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.fairbank-outlook-module .fom-select-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fairbank-outlook-module .fom-select-wrap > span {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.fairbank-outlook-module .fom-select-wrap select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: rgba(6, 17, 31, 0.7) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14' fill='none'%3E%3Cpath d='M3.5 5.25L7 8.75l3.5-3.5' stroke='%238fa4c2' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 10px center / 12px;
+  border: 1px solid rgba(200, 150, 42, 0.3);
+  border-radius: 6px;
+  padding: 6px 30px 6px 12px;
+  font-family: 'Barlow', sans-serif;
+  font-size: 14px;
+  color: var(--white);
+  cursor: pointer;
+  outline: none;
+}
+
+.fairbank-outlook-module .fom-select-wrap select:focus {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px rgba(200, 150, 42, 0.18);
+}
+
+.fairbank-outlook-module .fom-select-wrap option {
+  background: var(--navy-dark);
+}
+
+.fairbank-outlook-module .fom-segmented {
+  display: inline-flex;
+  padding: 2px;
+  background: rgba(6, 17, 31, 0.7);
+  border: 1px solid rgba(200, 150, 42, 0.3);
+  border-radius: 7px;
+}
+
+.fairbank-outlook-module .fom-segmented button {
+  background: none;
+  border: none;
+  border-radius: 5px;
+  padding: 5px 12px;
+  font-family: 'Barlow', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.fairbank-outlook-module .fom-segmented button:hover  { color: var(--off-white); }
+.fairbank-outlook-module .fom-segmented button.active { background: var(--navy-mid); color: var(--white); }
+
+/* ── Dashboard: bar chart ── */
+.fairbank-outlook-module .fom-chart-card {
+  overflow: visible;     /* tooltip may extend past the card */
+}
+
+.fairbank-outlook-module .fom-chart-card > .fom-card-head {
+  border-radius: 10px 10px 0 0;
+}
+
+.fairbank-outlook-module .fom-chart-wrap {
+  position: relative;
+  padding: 10px 20px 0;
+}
+
+.fairbank-outlook-module .fom-chart {
+  --label-w: 64px;
+  --label-gap: 12px;
+}
+
+.fairbank-outlook-module .fom-chart > .fom-loading {
+  padding: 20px 0;
+}
+
+.fairbank-outlook-module .fom-chart-body {
+  position: relative;
+}
+
+.fairbank-outlook-module .fom-chart-grid {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--label-w) + var(--label-gap));
+  right: 0;
+  pointer-events: none;
+}
+
+.fairbank-outlook-module .fom-gridline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.fairbank-outlook-module .fom-gridline.is-zero {
+  background: rgba(143, 164, 194, 0.45);
+}
+
+.fairbank-outlook-module .fom-bar-rows {
+  position: relative;
+}
+
+.fairbank-outlook-module .fom-bar-row {
+  display: grid;
+  grid-template-columns: var(--label-w) minmax(0, 1fr);
+  column-gap: var(--label-gap);
+  align-items: center;
+  padding: 4px 0;
+  border-radius: 6px;
+  cursor: default;
+  outline: none;
+  transition: background 0.12s;
+}
+
+.fairbank-outlook-module .fom-bar-row.hover,
+.fairbank-outlook-module .fom-bar-row:focus-visible {
+  background: rgba(200, 150, 42, 0.08);
+}
+
+.fairbank-outlook-module .fom-bar-row:focus-visible {
+  box-shadow: inset 0 0 0 1px rgba(200, 150, 42, 0.5);
+}
+
+.fairbank-outlook-module .fom-bar-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--off-white);
+  text-align: right;
+  padding-right: 2px;
+}
+
+.fairbank-outlook-module .fom-bar-row.hover .fom-bar-label,
+.fairbank-outlook-module .fom-bar-row:focus-visible .fom-bar-label {
+  color: var(--gold-lt);
+}
+
+.fairbank-outlook-module .fom-bar-row.is-idle .fom-bar-label {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.fairbank-outlook-module .fom-bar-plot {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;              /* surface gap between the paired bars */
+}
+
+.fairbank-outlook-module .fom-bar {
+  display: block;
+  height: 8px;
+  border-radius: 0 4px 4px 0;   /* rounded data end, square at the baseline */
+  transition: width 0.35s ease;
+}
+
+.fairbank-outlook-module .fom-bar-sent { background: var(--series-sent); }
+.fairbank-outlook-module .fom-bar-recv { background: var(--series-recv); }
+
+.fairbank-outlook-module .fom-chart-axis {
+  display: grid;
+  grid-template-columns: var(--label-w) minmax(0, 1fr);
+  column-gap: var(--label-gap);
+  margin-top: 6px;
+}
+
+.fairbank-outlook-module .fom-axis-ticks {
+  position: relative;
+  height: 16px;
+}
+
+.fairbank-outlook-module .fom-tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.fairbank-outlook-module .fom-axis-title {
+  padding-left: calc(var(--label-w) + var(--label-gap));
+  margin-top: 2px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* ── Dashboard: tooltip card ── */
+.fairbank-outlook-module .fom-tip {
+  position: absolute;
+  z-index: 30;
+  width: 270px;
+  padding: 14px 16px;
+  background: rgba(9, 21, 41, 0.97);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s;
+}
+
+.fairbank-outlook-module .fom-tip.show {
+  opacity: 1;
+  visibility: visible;
+}
+
+.fairbank-outlook-module .fom-tip-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.fairbank-outlook-module .fom-tip-email {
+  font-size: 13px;
+  color: var(--off-white);
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+
+.fairbank-outlook-module .fom-tip-head .fom-user-id {
+  max-width: none;
+  overflow: visible;
+}
+
+.fairbank-outlook-module .fom-tip-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fairbank-outlook-module .fom-tip-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.fairbank-outlook-module .fom-tip-row > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fairbank-outlook-module .fom-tip-row strong {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--white);
+}
+
+.fairbank-outlook-module .fom-tip-total {
+  padding-top: 6px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+.fairbank-outlook-module .fom-tip-total > span {
+  padding-left: 18px;
+}
+
+.fairbank-outlook-module .fom-tip-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.fairbank-outlook-module .fom-tip-owner {
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  color: var(--off-white);
+}
+
+.fairbank-outlook-module .fom-muted {
+  color: var(--muted);
+}
+
+/* ── Dashboard: table view ── */
+.fairbank-outlook-module .fom-chart-table {
+  display: none;
+  overflow-x: auto;
+  margin-bottom: 4px;
+}
+
+.fairbank-outlook-module .fom-chart-card.show-table .fom-chart-table { display: block; }
+.fairbank-outlook-module .fom-chart-card.show-table .fom-chart       { display: none; }
+
+.fairbank-outlook-module .fom-chart-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.fairbank-outlook-module .fom-chart-table th {
+  padding: 8px 12px;
+  text-align: left;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.fairbank-outlook-module .fom-chart-table td {
+  padding: 8px 12px;
+  color: var(--off-white);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  white-space: nowrap;
+}
+
+.fairbank-outlook-module .fom-chart-table tbody tr:nth-child(even) { background: var(--row-even); }
+.fairbank-outlook-module .fom-chart-table tbody tr:hover           { background: var(--row-hover); }
+
+.fairbank-outlook-module .fom-chart-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Inputs ── */
+.fairbank-outlook-module input {
+  background: rgba(6, 17, 31, 0.7);
+  border: 1px solid rgba(200, 150, 42, 0.3);
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-family: 'Barlow', sans-serif;
+  font-size: 15px;
+  color: var(--white);
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  width: 100%;
+  min-width: 0;
+}
+
+.fairbank-outlook-module input::placeholder {
+  color: rgba(143, 164, 194, 0.45);
+  font-size: 14px;
+}
+
+.fairbank-outlook-module input:focus {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px rgba(200, 150, 42, 0.18);
+}
+
+.fairbank-outlook-module input.invalid {
+  border-color: var(--error);
+  box-shadow: 0 0 0 3px rgba(255, 95, 95, 0.15);
+}
+
+/* ── Collapsible card (users rollup) ── */
+.fairbank-outlook-module .fom-card-toggle {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.fairbank-outlook-module .fom-card-toggle:hover {
+  background: rgba(200, 150, 42, 0.16);
+}
+
+.fairbank-outlook-module .fom-card-toggle:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px rgba(200, 150, 42, 0.5);
+}
+
+.fairbank-outlook-module .fom-card-head-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.fairbank-outlook-module .fom-chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--gold-lt);
+  transition: transform 0.2s;
+}
+
+.fairbank-outlook-module .fom-collapsible.expanded .fom-chevron {
+  transform: rotate(180deg);
+}
+
+.fairbank-outlook-module .fom-collapse {
+  display: none;
+}
+
+.fairbank-outlook-module .fom-collapsible.expanded .fom-collapse {
+  display: block;
+  animation: fbi-fade-up 0.2s ease both;
+}
+
+.fairbank-outlook-module .fom-rollup {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 20px 0;
+}
+
+.fairbank-outlook-module .fom-rollup-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fairbank-outlook-module .fom-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(6, 17, 31, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.fairbank-outlook-module .fom-stat strong {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--off-white);
+}
+
+.fairbank-outlook-module .fom-stat-add           { border-color: rgba(62, 207, 142, 0.5); }
+.fairbank-outlook-module .fom-stat-add strong    { color: var(--success); }
+.fairbank-outlook-module .fom-stat-remove        { border-color: rgba(255, 95, 95, 0.45); }
+.fairbank-outlook-module .fom-stat-remove strong { color: var(--error); }
+
+.fairbank-outlook-module .fom-link-btn {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  padding: 4px 0;
+  color: var(--gold-dim);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.fairbank-outlook-module .fom-link-btn:hover {
+  color: var(--gold-lt);
+}
+
+.fairbank-outlook-module .fom-list-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 20px 0;
+}
+
+.fairbank-outlook-module .fom-search-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.fairbank-outlook-module .fom-search-wrap svg {
+  position: absolute;
+  left: 13px;
+  top: 50%;
+  width: 15px;
+  height: 15px;
+  transform: translateY(-50%);
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.fairbank-outlook-module .fom-search-wrap input {
+  padding-left: 38px;
+}
+
+.fairbank-outlook-module .fom-filter-count {
+  flex-shrink: 0;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.fairbank-outlook-module .fom-table-scroll {
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.fairbank-outlook-module .fom-table-scroll::-webkit-scrollbar       { width: 6px; }
+.fairbank-outlook-module .fom-table-scroll::-webkit-scrollbar-track { background: transparent; }
+.fairbank-outlook-module .fom-table-scroll::-webkit-scrollbar-thumb {
+  background: rgba(200, 150, 42, 0.3);
+  border-radius: 3px;
+}
+
+/* ── Users table ── */
+.fairbank-outlook-module .fom-users-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.2fr) 84px;
+  gap: 12px;
+  align-items: center;
+}
+
+.fairbank-outlook-module .fom-table {
+  margin: 10px 20px 0;
+  background: rgba(6, 17, 31, 0.5);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.fairbank-outlook-module .fom-table-head {
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.fairbank-outlook-module .fom-table-head span {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.fairbank-outlook-module .fom-user-row {
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  transition: background 0.15s;
+}
+
+.fairbank-outlook-module .fom-user-row:last-child      { border-bottom: none; }
+.fairbank-outlook-module .fom-user-row:nth-child(even) { background: var(--row-even); }
+.fairbank-outlook-module .fom-user-row:hover           { background: var(--row-hover); }
+
+.fairbank-outlook-module .fom-user-row.is-new {
+  box-shadow: inset 3px 0 0 var(--success);
+}
+
+.fairbank-outlook-module .fom-user-email {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--off-white);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fairbank-outlook-module .fom-user-id {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--navy-dark);
+  background: var(--gold);
+  border-radius: 4px;
+  padding: 2px 8px;
+  justify-self: start;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fairbank-outlook-module .fom-owner-id {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--off-white);
+}
+
+.fairbank-outlook-module .fom-empty {
+  padding: 16px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* ── Remove button ── */
+.fairbank-outlook-module .fom-remove-btn {
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.fairbank-outlook-module .fom-remove-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.fairbank-outlook-module .fom-remove-btn:hover {
+  color: var(--error);
+  border-color: rgba(255, 95, 95, 0.35);
+  background: rgba(255, 95, 95, 0.08);
+}
+
+/* ── Add forms ── */
+.fairbank-outlook-module .fom-add-row.fom-users-grid {
+  align-items: end;     /* keep the Add button level with the inputs, below the labels */
+}
+
+.fairbank-outlook-module .fom-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fairbank-outlook-module .fom-field-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.fairbank-outlook-module .fom-field-label em {
+  font-style: normal;
+  letter-spacing: 0.1em;
+  color: rgba(143, 164, 194, 0.6);
+  margin-left: 4px;
+}
+
+.fairbank-outlook-module .fom-add-row {
+  margin: 12px 20px 0;
+  padding: 0 0 0 0;
+}
+
+.fairbank-outlook-module .fom-add-inline {
+  display: flex;
+  gap: 12px;
+  margin: 14px 20px 0;
+}
+
+.fairbank-outlook-module .fom-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 42px;
+  padding: 0 16px;
+  background: rgba(200, 150, 42, 0.12);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--gold-lt);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.fairbank-outlook-module .fom-add-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.fairbank-outlook-module .fom-add-btn:hover {
+  background: rgba(200, 150, 42, 0.22);
+  border-color: var(--gold);
+}
+
+.fairbank-outlook-module .fom-field-error {
+  display: none;
+  margin: 8px 20px 0;
+  font-size: 13px;
+  color: var(--error);
+}
+
+.fairbank-outlook-module .fom-field-error.show {
+  display: block;
+}
+
+.fairbank-outlook-module .fom-field-error.note {
+  color: var(--muted);
+}
+
+/* ── Chips (emails / domains) ── */
+.fairbank-outlook-module .fom-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 20px 0;
+}
+
+.fairbank-outlook-module .fom-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 4px 4px 12px;
+  background: rgba(6, 17, 31, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+  color: var(--off-white);
+  animation: fbi-fade-up 0.2s ease both;
+}
+
+.fairbank-outlook-module .fom-chip.is-new {
+  border-color: rgba(62, 207, 142, 0.5);
+}
+
+.fairbank-outlook-module .fom-chip .fom-remove-btn {
+  width: 22px;
+  height: 22px;
+}
+
+.fairbank-outlook-module .fom-chip .fom-remove-btn svg {
+  width: 10px;
+  height: 10px;
+}
+
+.fairbank-outlook-module .fom-chips .fom-empty {
+  padding: 6px 0 0;
+}
+
+/* ── Ghost button ── */
+.fairbank-outlook-module .fom-ghost-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.fairbank-outlook-module .fom-ghost-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.fairbank-outlook-module .fom-ghost-btn:hover {
+  color: var(--off-white);
+  border-color: var(--gold);
+  background: var(--row-hover);
+}
+
+.fairbank-outlook-module .fom-ghost-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.fairbank-outlook-module .fom-ghost-btn.spinning svg {
+  animation: fbi-spin 0.8s linear infinite;
+}
+
+/* ── Primary (gold) button ── */
+.fairbank-outlook-module .search-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px 28px;
+  background: linear-gradient(135deg, var(--gold) 0%, var(--gold-lt) 100%);
+  color: var(--navy-dark);
+  border: none;
+  border-radius: 6px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.12s;
+  position: relative;
+  overflow: hidden;
+}
+
+.fairbank-outlook-module .search-btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, transparent 40%, rgba(255, 255, 255, 0.2) 100%);
+  pointer-events: none;
+}
+
+.fairbank-outlook-module .search-btn:hover    { opacity: 0.92; transform: translateY(-1px); }
+.fairbank-outlook-module .search-btn:active   { transform: translateY(0); opacity: 1; }
+.fairbank-outlook-module .search-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+.fairbank-outlook-module .spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(9, 21, 41, 0.3);
+  border-top-color: var(--navy-dark);
+  border-radius: 50%;
+  animation: fbi-spin 0.7s linear infinite;
+  display: none;
+}
+
+.fairbank-outlook-module .dd-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(143, 164, 194, 0.2);
+  border-top-color: var(--gold);
+  border-radius: 50%;
+  animation: fbi-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+/* ── Save bar ── */
+.fairbank-outlook-module .fom-savebar {
+  position: sticky;
+  bottom: 20px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 8px;
+  padding: 12px 14px 12px 20px;
+  background: rgba(9, 21, 41, 0.92);
+  border: 1px solid var(--gold);
+  border-radius: 10px;
+  box-shadow:
+    0 10px 40px rgba(0, 0, 0, 0.55),
+    0 0 0 3px rgba(200, 150, 42, 0.12);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  opacity: 0;
+  transform: translateY(16px);
+  pointer-events: none;
+  visibility: hidden;
+  transition: opacity 0.2s, transform 0.2s, visibility 0s linear 0.2s;
+}
+
+.fairbank-outlook-module .fom-savebar.show {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+  visibility: visible;
+  transition: opacity 0.2s, transform 0.2s, visibility 0s;
+}
+
+.fairbank-outlook-module .fom-savebar-msg {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--gold-lt);
+}
+
+.fairbank-outlook-module .fom-savebar-msg.error {
+  color: var(--error);
+  text-transform: none;
+  letter-spacing: 0.02em;
+  font-family: 'Barlow', sans-serif;
+  font-weight: 500;
+}
+
+.fairbank-outlook-module .fom-savebar-actions {
+  display: flex;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+/* ── Toast ── */
+.fairbank-outlook-module .fom-toast {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 50;
+  padding: 12px 18px;
+  background: rgba(9, 21, 41, 0.95);
+  border: 1px solid rgba(62, 207, 142, 0.45);
+  border-radius: 8px;
+  color: var(--success);
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  transform: translateY(10px);
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+.fairbank-outlook-module .fom-toast.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── Error state box ── */
+.fairbank-outlook-module .state-box {
+  display: none;
+  background: var(--card-bg);
+  border: 1px solid rgba(255, 95, 95, 0.3);
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  color: var(--error);
+  font-size: 14px;
+  font-weight: 500;
+  align-items: center;
+  gap: 10px;
+}
+
+.fairbank-outlook-module .state-box svg {
+  flex-shrink: 0;
+}
+
+.fairbank-outlook-module .state-box.show {
+  display: flex;
+}
+
+/* ── Animations ── */
+@keyframes fbi-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes fbi-fade-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Responsive ── */
+@media (max-width: 860px) {
+  .fairbank-outlook-module {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+
+  .fairbank-outlook-module .fom-sidebar {
+    position: static;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 16px;
+    border-right: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .fairbank-outlook-module .fom-brand {
+    padding: 0;
+  }
+
+  .fairbank-outlook-module .fom-nav {
+    flex-direction: row;
+    margin-left: auto;
+  }
+
+  .fairbank-outlook-module .fom-main {
+    padding: 24px 16px 48px;
+  }
+
+  .fairbank-outlook-module .fom-nav-btn {
+    width: auto;
+    padding: 9px 18px 9px 12px;
+  }
+
+  .fairbank-outlook-module .fom-nav-btn.active::before {
+    top: auto;
+    right: 0;
+    width: auto;
+    height: 3px;
+  }
+}
+
+@media (max-width: 640px) {
+  .fairbank-outlook-module h1 { font-size: 32px; }
+
+  .fairbank-outlook-module .fom-sidebar { flex-direction: column; align-items: stretch; }
+  .fairbank-outlook-module .fom-nav     { margin-left: 0; }
+  .fairbank-outlook-module .fom-nav-btn { justify-content: center; }
+  .fairbank-outlook-module .fom-brand-sub { white-space: normal; }
+
+  .fairbank-outlook-module .fom-table-head { display: none; }
+
+  .fairbank-outlook-module .fom-user-row.fom-users-grid {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 6px;
+  }
+  .fairbank-outlook-module .fom-user-row .fom-user-email { grid-column: 1; }
+  .fairbank-outlook-module .fom-user-row .fom-remove-btn { grid-column: 2; grid-row: 1; }
+
+  .fairbank-outlook-module .fom-add-row.fom-users-grid { grid-template-columns: 1fr; }
+  .fairbank-outlook-module .fom-rollup                 { flex-direction: column; align-items: flex-start; }
+  .fairbank-outlook-module .fom-list-tools             { flex-direction: column; align-items: stretch; }
+  .fairbank-outlook-module .fom-add-inline             { flex-direction: column; }
+
+  .fairbank-outlook-module .fom-savebar { flex-direction: column; align-items: stretch; }
+  .fairbank-outlook-module .fom-savebar-actions > * { flex: 1; justify-content: center; }
+
+  .fairbank-outlook-module .fom-tiles         { grid-template-columns: 1fr; gap: 10px; }
+  .fairbank-outlook-module .fom-chart-wrap    { padding: 10px 12px 0; }
+  .fairbank-outlook-module .fom-tip           { width: 240px; }
+}

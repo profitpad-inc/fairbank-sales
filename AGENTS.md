@@ -24,6 +24,7 @@ Read [HANDOFF.md](HANDOFF.md) first. It describes what this project does, how it
 - Yes: `n8n-flows/*`
 - Yes: `docs/archive/order-placement-v1/*`
 - Yes: `docs/order-placement/*`
+- Yes: `docs/outlook-integration/*`
 - Yes: `docs/auth.js`, `README.md`, `HANDOFF.md`, `AGENTS.md`
 - One line only: the `auth.js` script tag in `docs/index.html` and `docs/product-inquiry/index.html`
 - No: `eclipse-branch-selector/*` (symlink to the original HubSpot project, read-only reference)
