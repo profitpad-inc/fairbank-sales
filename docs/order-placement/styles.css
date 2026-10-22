@@ -300,7 +300,7 @@ textarea.fop-notes { display: block; min-height: calc(2.1em + 18px); line-height
 .fop-grid { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); font-variant-numeric: tabular-nums; }
 .fop-line {
   display: grid; align-items: center;
-  grid-template-columns: 36px 150px minmax(160px, 1fr) 120px 110px 100px 110px 64px 64px 36px;
+  grid-template-columns: 36px 150px minmax(160px, 1fr) 120px 110px 100px 110px 80px 64px 36px;
   border-top: 1px solid var(--line);
 }
 .fop-line:first-child, .fop-lines-lbl + .fop-line { border-top: 0; }
@@ -358,6 +358,19 @@ textarea.fop-notes { display: block; min-height: calc(2.1em + 18px); line-height
 .fop-addcmt { display: none; }
 
 .fop-qty { display: flex; align-items: center; }
+/* Qty box + its "50 ft" overlay (showQty in app.js). While the overlay is up
+   the input's own text is hidden. The number uses the input's colours
+   (.fop-input, .fop-grid-in[readonly]) so it follows the theme. */
+.fop-qty__box { position: relative; display: flex; flex: 1 1 auto; min-width: 0; }
+.fop-qty__show {
+  position: absolute; inset: 0; display: none; align-items: center; color: var(--white);
+  font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; pointer-events: none;
+}
+.fop-qty__show > span { flex: 1 1 auto; min-width: 0; }
+.fop-grid-in[readonly] + .fop-qty__show { color: var(--text); }
+.fop-qty__um { color: var(--muted); }
+.fop-qty--unit .fop-qty__show { display: flex; }
+.fop-qty--unit .fop-input:not(:focus) { -webkit-text-fill-color: transparent; }
 .fop-step { display: none; }
 
 .fop-stock { display: inline-block; min-width: 30px; padding: 1px 6px; border-radius: 4px; font-weight: 600; text-align: center; }
@@ -688,7 +701,7 @@ span.flatpickr-weekday {
 .fop-side__desc { font-weight: 400; color: var(--white); }
 .fop-side__empty { padding: 4px 0 2px; }
 /* No "All" column in the side layout. */
-.fop-grid--noall .fop-line { grid-template-columns: 36px 150px minmax(160px, 1fr) 120px 110px 100px 110px 64px 36px; }
+.fop-grid--noall .fop-line { grid-template-columns: 36px 150px minmax(160px, 1fr) 120px 110px 100px 110px 80px 36px; }
 @media (max-width: 767px) {
   .fop-grid--noall .fop-line { grid-template-columns: 1fr 1fr; }
 }
@@ -894,11 +907,27 @@ html[data-theme="light"] .fop-status--partial { color: #a14d00; border-color: rg
 .fop-toggle input:checked + .fop-toggle__track { background: var(--gold); border-color: var(--gold); }
 .fop-toggle input:checked + .fop-toggle__track::after { transform: translateX(16px); background: var(--on-gold); }
 .fop-toggle input:focus-visible + .fop-toggle__track { outline: 2px solid var(--gold-lt); outline-offset: 2px; }
-/* Custom line dialog: the picked existing product's name under its search box. */
+/* Custom line dialog: a picked existing product shows as its id tile with its
+   name in a box to the right (fop-cpick--tiled). The search box stays
+   focusable but out of sight, so Tab still reaches it; focusing it removes
+   the tile (tileVariation in app.js). */
+.fop-cpick { display: flex; align-items: stretch; gap: 8px; }
+.fop-cpick .fop-ac { flex: 1; min-width: 0; }
+.fop-cpick__id, .fop-cpick__name { display: none; }
+.fop-cpick--tiled .fop-cpick__id { display: inline-flex; align-items: center; flex: none; padding: 0 10px; font-size: 14px; cursor: pointer; }
+.fop-cpick--tiled .fop-cpick__id:hover { border-color: var(--gold); }
+.fop-cpick--tiled .fop-cpick__name {
+  display: block; flex: 1; min-width: 0; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fop-cpick--tiled .fop-cpick__name:hover { border-color: var(--gold); }
+.fop-cpick--tiled .fop-ac {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap;
+}
 .fop-custom-orig { margin-top: 4px; font-size: 13px; font-variant-numeric: tabular-nums; min-height: 1em; }
-.fop-custom-pick { margin-top: 4px; font-size: 13px; min-height: 1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Blank (no product picked yet, or not a variation): no space, so the next field sits at the normal gap. */
-.fop-custom-pick:empty, .fop-custom-orig:empty { display: none; }
+.fop-custom-orig:empty { display: none; }
 
 /* ── Line comments and the details layout (2026-10-19) ── */
 /* Inline layout: stock, qty breaks and the comment form one panel under the
@@ -924,7 +953,7 @@ html[data-theme="light"] .fop-status--partial { color: #a14d00; border-color: rg
 
 /* Details layout: no All column; the last column holds the Details button
    and the × side by side. */
-.fop-grid--details .fop-line { grid-template-columns: 36px 150px minmax(160px, 1fr) 120px 110px 100px 110px 64px 64px; }
+.fop-grid--details .fop-line { grid-template-columns: 36px 150px minmax(160px, 1fr) 120px 110px 100px 110px 80px 64px; }
 .fop-grid--details .fop-cell--del { display: flex; justify-content: flex-end; align-items: center; gap: 2px; padding-left: 0; padding-right: 4px; }
 @media (max-width: 767px) {
   .fop-grid--details .fop-line { grid-template-columns: 1fr 1fr; }

@@ -656,6 +656,8 @@
         line.productId = String(l.product_id);
         line.description = l.description || "";
         line.qty = Number(l.qty) || 1;
+        // Eclipse's unit on the order line, shown when HubSpot has no e_uom.
+        line.orderUm = l.um || "";
         line.price = l.unit_price;
         line.priceOverride = l.unit_price != null;
         line.keepPrice = l.unit_price != null;
@@ -701,15 +703,16 @@
         .then(function (d) {
           var list = Array.isArray(d.e_products) ? d.e_products : [];
           var hit = list.filter(function (p) { return String(p.e_product_id) === String(pid); })[0];
-          return hit ? (hit.description || "") : null;
+          return hit || null;
         })
         .catch(function () { return null; })
-        .then(function (desc) {
+        .then(function (hit) {
           state.lines.forEach(function (l, r) {
             if (String(l.productId) !== String(pid) || !l.lookingUp) return;
             l.lookingUp = false;
-            l.description = desc == null ? "" : desc;
-            l.notFound = desc == null;
+            l.description = hit ? (hit.description || "") : "";
+            l.uom = hit ? (hit.uom || "") : "";
+            l.notFound = !hit;
             if (state.view === "order") refreshRow(r);
           });
         });
@@ -748,6 +751,44 @@
     }
 
     // ── Pricing / stock derivations ────────────────────────────────────────
+
+    // The line's unit, lower case ("ft", "ea"): the product search's uom,
+    // else the unit on the loaded order line, else none.
+    function uomOf(line) {
+      if (!line.productId) return "";
+      return String(line.uom || line.orderUm || "").toLowerCase();
+    }
+
+    // Qty box: the input always holds the bare number. While it is not
+    // focused and the line has a unit, its text is hidden and the overlay
+    // shows "50 ft" (unit in grey), matching the input's own padding,
+    // alignment and font, so the number does not move on focus. Its colour
+    // comes from styles.css (theme tokens), so a theme switch repaints it.
+    var QTY_STYLE = ["paddingLeft", "paddingRight", "textAlign", "fontFamily", "fontSize", "fontWeight"];
+    function showQty(r) {
+      var el = cellInput(r, 1);
+      var line = state.lines[r];
+      if (!el || !line) return;
+      el.value = String(line.qty);
+      var box = el.parentNode;
+      var show = box.querySelector(".fop-qty__show");
+      var um = uomOf(line);
+      var on = !!um && document.activeElement !== el;
+      box.classList.toggle("fop-qty--unit", on);
+      if (!show) return;
+      if (!on) { show.innerHTML = ""; return; }
+      var cs = getComputedStyle(el);
+      QTY_STYLE.forEach(function (k) { show.style[k] = cs[k]; });
+      // The overlay covers the border too, so add the border to the padding.
+      show.style.paddingLeft = (parseFloat(cs.paddingLeft) + parseFloat(cs.borderLeftWidth)) + "px";
+      show.style.paddingRight = (parseFloat(cs.paddingRight) + parseFloat(cs.borderRightWidth)) + "px";
+      show.innerHTML = "<span>" + esc(line.qty) + ' <span class="fop-qty__um">' + esc(um) + "</span></span>";
+    }
+
+    function showAllQty() {
+      if (state.view !== "order") return;
+      state.lines.forEach(function (l, r) { if (!l.custom) showQty(r); });
+    }
 
     function quoteOf(line) {
       return line.productId ? quoteCache[String(line.productId)] : null;
@@ -1387,6 +1428,7 @@
 
     function afterRender() {
       initDatePickers();
+      showAllQty();
       // Empty header values read "--" (HubSpot's empty property). After the
       // date pickers, whose visible inputs are created there.
       var heads = root.querySelectorAll(".fop-head input.fop-input:not([placeholder]), .fop-head textarea.fop-input:not([placeholder])");
@@ -1891,8 +1933,12 @@
         '<label class="fop-mlabel">Qty</label>' +
         '<div class="fop-qty">' +
         (ro ? "" : '<button class="fop-step" tabindex="-1" data-action="qty-dec" data-r="' + r + '" aria-label="Decrease">−</button>') +
+        // The box holds the bare number; showQty lays "50 ft" over it
+        // (unit in grey) while it is not focused.
+        '<span class="fop-qty__box">' +
         '<input class="fop-input fop-grid-in fop-num" data-r="' + r + '" data-c="1" inputmode="numeric" ' +
         'value="' + esc(line.qty) + '" aria-label="Quantity, line ' + (r + 1) + '"' + ro + ">" +
+        '<span class="fop-qty__show" aria-hidden="true"></span></span>' +
         (ro ? "" : '<button class="fop-step" tabindex="-1" data-action="qty-inc" data-r="' + r + '" aria-label="Increase">+</button>') +
         "</div></div>" +
         '<div class="fop-cell fop-cell--price" role="cell">' +
@@ -2037,14 +2083,33 @@
     }
 
     // Existing SKU: the same product search as the grid's Product cell
-    // (acSearch kind "variation"); the picked product's name shows under it.
+    // (acSearch kind "variation"). A picked product shows as its id tile with
+    // its name in a box to the right; a click on either, or focus reaching
+    // the search box, turns it back into the search box (tileVariation).
     function variationFieldHtml(d, er) {
+      var picked = !!(d.variationSku && d.variationDesc);
       return '<div class="fop-field"><label class="fop-label" for="fop-cf-variationSku">Existing product</label>' +
+        '<div class="fop-cpick' + (picked ? " fop-cpick--tiled" : "") + '" data-cell="variation-pick">' +
+        '<button type="button" class="fop-badge fop-cpick__id" tabindex="-1" data-action="edit-variation" title="Change product" aria-label="Change existing product">' + esc(d.variationSku) + "</button>" +
+        '<div class="fop-input fop-cpick__name" data-action="edit-variation" data-cell="variation-desc" title="' + esc(d.variationDesc) + '">' + esc(d.variationDesc) + "</div>" +
         '<div class="fop-ac"><input class="fop-input' + (er.variationSku ? " fop-input--err" : "") + '" id="fop-cf-variationSku" data-cf="variationSku" ' +
         'autocomplete="off" spellcheck="false" placeholder="Search…" aria-expanded="false" value="' + esc(d.variationSku) + '">' +
-        '<div class="fop-ac__list" role="listbox"></div></div>' +
-        '<span class="fop-muted fop-block fop-custom-pick" data-cell="variation-desc">' + esc(d.variationDesc) + "</span>" +
+        '<div class="fop-ac__list" role="listbox"></div></div></div>' +
         (er.variationSku ? '<span class="fop-warn-text fop-block">' + esc(er.variationSku) + "</span>" : "") + "</div>";
+    }
+
+    // Custom line dialog: on shows the picked product's id tile and name box
+    // (only while a product is picked), off shows the search box.
+    function tileVariation(on) {
+      var m = state.customModal;
+      var box = root.querySelector('[data-cell="variation-pick"]');
+      if (!m || !box) return;
+      var d = m.draft;
+      box.querySelector(".fop-cpick__id").textContent = d.variationSku;
+      var nm = box.querySelector(".fop-cpick__name");
+      nm.textContent = d.variationDesc;
+      nm.title = d.variationDesc;
+      box.classList.toggle("fop-cpick--tiled", !!(on && d.variationSku && d.variationDesc));
     }
 
     // The picked product's own unit price (for the dialog's qty) or unit
@@ -2759,26 +2824,32 @@
     // with a public link). Nothing is remembered: every click asks the quote
     // lookup flow in the moment, opens the quote it finds, and with none yet
     // makes one (create-quote flow) and opens that. Grayed out (disabled)
-    // while checking or making one. On a bid with unsaved changes it is
-    // grayed out too (aria-disabled, so a click still lands and flashes
-    // Update Bid): the quote shows what is saved, so save first. Not shown on
-    // invoiced or cancelled orders (quoteBtnHtml).
+    // while checking or making one. On a bid with unsaved changes a click
+    // opens the Update Bid confirm dialog instead (2026-10-22, was grayed out
+    // and flashed Update Bid): the quote shows what is saved, so save first.
+    // Not shown on invoiced or cancelled orders (quoteBtnHtml).
 
     // Why View Quote can't open now, or null when it can.
     function quoteBlockedReason() {
       var ex = state.existing, busy = ex && hsQuotes[ex.e_sorder_id];
       if (busy === "checking") return "Checking HubSpot for a quote…";
       if (busy === "creating") return "Creating the quote in HubSpot…";
-      if (ex && ex.editable && bidChanges().any) return "Save your changes with Update Bid first, so the quote matches the bid.";
       return null;
+    }
+
+    // A bid with unsaved changes: View Quote saves them first (Update Bid).
+    function quoteNeedsUpdate() {
+      var ex = state.existing;
+      return !!(ex && ex.editable && bidChanges().any);
     }
 
     function quoteBtnHtml() {
       var ex = state.existing;
       if (!ex || ex.status === "Invoice" || ex.status === "Cancel") return "";
-      var why = quoteBlockedReason(), busy = hsQuotes[ex.e_sorder_id];
+      var busy = hsQuotes[ex.e_sorder_id];
+      var why = quoteBlockedReason() || (quoteNeedsUpdate() ? "Your changes are saved with Update Bid first, so the quote matches the bid." : null);
       return '<button class="fop-btn fop-btn--ghost" data-action="view-quote"' +
-        (busy ? " disabled" : why ? ' aria-disabled="true"' : "") +
+        (busy ? " disabled" : "") +
         (why ? ' title="' + esc(why) + '"' : "") + ">" + (busy === "creating" ? "Creating quote…" : "View Quote") + "</button>";
     }
 
@@ -2799,8 +2870,8 @@
     function openQuote() {
       var ex = state.existing;
       if (!ex || hsQuotes[ex.e_sorder_id]) return;
-      if (ex.editable && bidChanges().any) {
-        flashField(root.querySelector("[data-action=update-bid]"));
+      if (quoteNeedsUpdate()) {
+        requestPlace("update");
         return;
       }
       var id = ex.e_sorder_id, fail = "Could not check HubSpot for a quote: ";
@@ -3013,6 +3084,8 @@
     }
     window.addEventListener("resize", function () {
       if (state.quoteModal) fitQuoteFrame();
+      // Phone and desktop qty boxes differ in padding and alignment.
+      showAllQty();
       // Orientation change / font reflow can rewrap the action bar's buttons
       // without a render happening on its own.
       syncBarSpace();
@@ -3491,6 +3564,9 @@
           if (!(opts && opts.keepPrice) && document.activeElement !== dp) dp.value = priceText(line);
         }
       }
+      // A focused qty box keeps what the rep is typing.
+      var qtyIn = el.querySelector('[data-c="1"]');
+      if (qtyIn && document.activeElement !== qtyIn) showQty(r);
       var priceIn = el.querySelector('[data-c="2"]');
       if (priceIn && !(opts && opts.keepPrice) && document.activeElement !== priceIn) {
         priceIn.value = priceText(line);
@@ -3659,6 +3735,8 @@
       var line = state.lines[r];
       line.productId = String(product.e_product_id);
       line.description = product.description || "";
+      line.uom = product.uom || "";
+      line.orderUm = "";
       line.lookingUp = false;
       line.notFound = false;
       line.priceOverride = false;
@@ -3775,8 +3853,7 @@
       m.draft.variationDesc = item.description || "";
       var inp = root.querySelector("#fop-cf-variationSku");
       if (inp) inp.value = m.draft.variationSku;
-      var vd = root.querySelector('[data-cell="variation-desc"]');
-      if (vd) vd.textContent = m.draft.variationDesc;
+      tileVariation(true);
       // A blank Name takes the product's; price and COGS fill when its
       // pricing arrives (refreshCustomOrig).
       if (!m.draft.name.trim() && m.draft.variationDesc) {
@@ -4142,6 +4219,7 @@
         case "add-line": if (!linesLocked()) addLine(); break;
         case "remove-line": if (!linesLocked()) removeLine(r); break;
         case "edit-product": focusCell(r, 0); break;
+        case "edit-variation": { var vs = root.querySelector("#fop-cf-variationSku"); if (vs) { vs.focus(); vs.select(); } break; }
         case "open-comment": {
           var cs = el.closest('[data-cell="comment"]');
           if (cs) cs.classList.remove("fop-stockstrip--cmt-closed");
@@ -4164,8 +4242,8 @@
         case "keep-order": closeCancel(); break;
         case "confirm-cancel": cancelOrder(); break;
         case "reload-order": loadExistingOrder(state.orderId); break;
-        case "qty-dec": setQty(r, (Number(state.lines[r].qty) || 1) - 1); cellInput(r, 1).value = state.lines[r].qty; break;
-        case "qty-inc": setQty(r, (Number(state.lines[r].qty) || 0) + 1); cellInput(r, 1).value = state.lines[r].qty; break;
+        case "qty-dec": setQty(r, (Number(state.lines[r].qty) || 1) - 1); break;
+        case "qty-inc": setQty(r, (Number(state.lines[r].qty) || 0) + 1); break;
         case "place-bid": requestPlace("bid"); break;
         case "place-order": requestPlace("order"); break;
         case "cancel-place": state.confirm = null; state.placeError = null; render(); break;
@@ -4196,7 +4274,7 @@
         d.variation = t.checked;
         var box = root.querySelector('[data-cell="custom-var"]');
         if (box) box.hidden = !t.checked;
-        if (t.checked) { var sku = root.querySelector("#fop-cf-variationSku"); if (sku) sku.focus(); }
+        if (t.checked && !d.variationDesc) { var sku = root.querySelector("#fop-cf-variationSku"); if (sku) sku.focus(); }
         refreshCustomOrig();
         return;
       }
@@ -4205,8 +4283,6 @@
         // Typing over a picked product clears it until a new one is picked.
         if (d.variationDesc && t.value.trim() !== d.pickedSku) {
           d.variationDesc = "";
-          var vd = root.querySelector('[data-cell="variation-desc"]');
-          if (vd) vd.textContent = "";
           refreshCustomOrig();
         }
         acSearch(t, "variation", null);
@@ -4242,8 +4318,6 @@
       if (state.detailsModal && t.getAttribute("data-dm") === "qty") {
         if (t.value.trim() !== "") {
           setQty(state.detailsModal.r, t.value);
-          var gq = cellInput(state.detailsModal.r, 1);
-          if (gq) gq.value = state.lines[state.detailsModal.r].qty;
         }
         return;
       }
@@ -4314,7 +4388,7 @@
       if (t.classList.contains("fop-grid-in")) {
         var r = Number(t.getAttribute("data-r"));
         var c = Number(t.getAttribute("data-c"));
-        if (c === 1) { setQty(r, t.value); t.value = state.lines[r].qty; }
+        if (c === 1) { setQty(r, t.value); showQty(r); }
         if (c === 2) { setPrice(r, t.value); t.value = priceText(state.lines[r]); }
       }
     });
@@ -4363,11 +4437,28 @@
       if (line && line.productId && t.value.trim() === line.productId) tileProduct(r, true);
     });
 
+    // Leaving a qty box shows the unit again ("50" → "50 ft").
+    root.addEventListener("focusout", function (e) {
+      var t = e.target;
+      if (!t.classList || !t.classList.contains("fop-grid-in") || t.getAttribute("data-c") !== "1") return;
+      var r = Number(t.getAttribute("data-r"));
+      setTimeout(function () { showQty(r); }, 0);
+    });
+
+    // Custom line dialog: focus reaching the existing product's search box
+    // shows the box; leaving it with the picked product still there tiles it.
+    root.addEventListener("focusin", function (e) { if (e.target.id === "fop-cf-variationSku") tileVariation(false); });
+    root.addEventListener("focusout", function (e) {
+      var m = state.customModal;
+      if (e.target.id === "fop-cf-variationSku" && m && e.target.value.trim() === m.draft.pickedSku) tileVariation(true);
+    });
+
     root.addEventListener("focusin", function (e) {
       var t = e.target;
       if (t.classList && t.classList.contains("fop-grid-in")) {
         state.focus = { r: Number(t.getAttribute("data-r")), c: Number(t.getAttribute("data-c")) };
         if (state.focus.c === 0) tileProduct(state.focus.r, false);
+        if (state.focus.c === 1) showQty(state.focus.r);
         if (sideLayout && state.focus.r !== sideRow) refreshSide();
         moveStrips();
       }

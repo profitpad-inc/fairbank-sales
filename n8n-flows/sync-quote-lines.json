@@ -1,0 +1,891 @@
+{
+  "name": "Deal Updated → Update Quote",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -5024,
+        -112
+      ],
+      "id": "b7c57848-ec84-4db7-a921-0df6152e6d08",
+      "name": "trigger"
+    },
+    {
+      "parameters": {
+        "dataToSave": {
+          "values": [
+            {
+              "key": "eventId",
+              "value": "={{ $json.eventId }}"
+            },
+            {
+              "key": "objectId",
+              "value": "={{ $json.objectId }}"
+            },
+            {
+              "key": "propertyName",
+              "value": "={{ $json.propertyName }}"
+            },
+            {
+              "key": "propertyValue",
+              "value": "={{ $json.propertyValue }}"
+            },
+            {
+              "key": "changeSource",
+              "value": "={{ $json.changeSource }}"
+            },
+            {
+              "key": "sourceId",
+              "value": "={{ $json.sourceId }}"
+            },
+            {
+              "key": "subscriptionType",
+              "value": "={{ $json.subscriptionType }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executionData",
+      "typeVersion": 1.1,
+      "position": [
+        -4800,
+        -112
+      ],
+      "id": "e07cf944-0b65-4690-9e13-80a1e9327786",
+      "name": "execution_data"
+    },
+    {
+      "parameters": {
+        "objectType": "0-3",
+        "operation": "get",
+        "objectId": "={{ $json.objectId }}",
+        "properties": [
+          "e_sorder_id",
+          "e_order_date"
+        ],
+        "additionalOptions": {
+          "associations": [
+            "0-14",
+            "0-8"
+          ]
+        }
+      },
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        -4576,
+        -112
+      ],
+      "id": "1de2a4d2-179b-47d2-be6b-3566b5386428",
+      "name": "get deal quote and lines",
+      "credentials": {
+        "hubspotApi": {
+          "id": "4HKK5aFFmTGesa3H",
+          "name": "fairbank"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "678565fc-5af5-4110-8523-351fd27f7d45",
+              "leftValue": "={{ $json.associations.keys() }}",
+              "rightValue": "quotes",
+              "operator": {
+                "type": "array",
+                "operation": "contains",
+                "rightType": "any"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        -4352,
+        -112
+      ],
+      "id": "2519dce1-841f-481b-a85a-2fbc1c0bf62b",
+      "name": "stop if no quote"
+    },
+    {
+      "parameters": {
+        "objectType": "0-8",
+        "operation": "batchRead",
+        "batchReadInputMode": "ui",
+        "batchReadObjectIds": "={{ $json.associations[\"line items\"].results.map(r => r.id) }}",
+        "batchReadReturnAllMode": "allInOne",
+        "batchReadOptions": {
+          "properties": [
+            "name",
+            "description",
+            "hs_sku",
+            "quantity",
+            "price",
+            "hs_cost_of_goods_sold",
+            "hs_product_id",
+            "e_uom",
+            "e_uom_qty",
+            "e_product_id_",
+            "e_sorder_line_id"
+          ]
+        }
+      },
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        -4128,
+        -112
+      ],
+      "id": "45fc1b66-bd72-4094-8920-4926bbf581c7",
+      "name": "get deal lines",
+      "credentials": {
+        "hubspotApi": {
+          "id": "4HKK5aFFmTGesa3H",
+          "name": "fairbank"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// One item per updated deal that has a quote: the deal's line items as the\n// quote should have them (same copy rules as create-quote), plus the deal's\n// quote ids. A line item can belong to only one record, so quote lines carry\n// the deal line's e_sorder_line_id with a \"Q.\" prefix; that is the key the\n// sync matches on. Plan picks which quote to sync once the quotes are read.\nconst COPY = ['name', 'description', 'hs_sku', 'quantity', 'price', 'hs_cost_of_goods_sold', 'hs_product_id', 'e_uom', 'e_uom_qty', 'e_product_id_'];\nconst num = (x) => (x == null || x === '' || isNaN(Number(x)) ? Infinity : Number(x));\nconst lineNo = (p) => {\n  if (p.e_sorder_line_number != null && p.e_sorder_line_number !== '') return num(p.e_sorder_line_number);\n  const m = String(p.e_sorder_line_id || '').match(/\\.(\\d+)$/);\n  return m ? Number(m[1]) : Infinity;\n};\nconst qKey = (p) => (p.e_sorder_line_id ? 'Q.' + p.e_sorder_line_id : 'Q.H' + p.hs_object_id);\nconst out = [];\nconst items = $input.all();\nfor (let i = 0; i < items.length; i++) {\n  const r = items[i].json || {};\n  const d = $('stop if no quote').itemMatching(i).json || {};\n  const quoteIds = [...new Set((((d.associations || {}).quotes || {}).results || []).map((q) => String(q.id)).filter(Boolean))];\n  if (!quoteIds.length) continue;\n  const lines = (Array.isArray(r.results) ? r.results : [])\n    .filter((l) => !l.archived)\n    .map((l) => Object.assign({ hs_object_id: String(l.id) }, l.properties || {}))\n    .filter((l) => Number(l.quantity) > 0)\n    .sort((x, y) => lineNo(x) - lineNo(y));\n  // A deal with no lines is more likely mid-sync than empty: leave the quote alone.\n  if (!lines.length) continue;\n  const desired = lines.map((l, idx) => {\n    const props = { e_sorder_line_id: qKey(l), hs_position_on_quote: String(idx) };\n    for (const k of COPY) props[k] = l[k] == null ? '' : String(l[k]);\n    return props;\n  });\n  out.push({ json: { dealId: String(d.id), e_sorder_id: (d.properties || {}).e_sorder_id || '', quoteIds, desired } });\n}\nreturn out;\n"
+      },
+      "id": "0da00fee-68a4-48ad-aa4a-98452aeff3a0",
+      "name": "Pick quote",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3904,
+        -112
+      ]
+    },
+    {
+      "parameters": {
+        "objectType": "0-14",
+        "operation": "batchReadWithAssociations",
+        "batchReadObjectIds": "={{ $input.all().flatMap(i => i.json.quoteIds).join(\",\") }}",
+        "properties": [
+          "hs_object_id",
+          "hs_createdate",
+          "hs_status",
+          "hs_title"
+        ],
+        "batchReadAssociations": {
+          "associationValues": [
+            {
+              "toObjectType": "0-8",
+              "properties": [
+                "hs_object_id",
+                "e_sorder_line_id",
+                "hs_position_on_quote",
+                "name",
+                "description",
+                "hs_sku",
+                "quantity",
+                "price",
+                "hs_cost_of_goods_sold",
+                "hs_product_id",
+                "e_uom",
+                "e_uom_qty",
+                "e_product_id_"
+              ]
+            }
+          ]
+        },
+        "batchReadOptions": {}
+      },
+      "id": "5f009f99-b419-49a0-9b9b-ce9543fa5b61",
+      "name": "HubSpot: quote lines",
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        -3680,
+        -112
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "executeOnce": true,
+      "credentials": {
+        "hubspotApi": {
+          "id": "4HKK5aFFmTGesa3H",
+          "name": "fairbank"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Diff the deal's newest quote (the one View Quote shows; two quotes on one\n// deal cannot both hold the same Q. id) against the deal: upsert lines that\n// are new or changed (matched on the Q. id), archive quote lines the deal no\n// longer has (and duplicates, and lines from before the Q. ids). Unchanged\n// lines are left alone, so a deal update that touched no line writes nothing.\n// A published quote's lines can't change, so a quote with changes is set to\n// DRAFT first and back to its own status afterwards (unpublishBody /\n// republishBody); quotes with no changes are not touched.\nconst COMPARE = ['name', 'description', 'hs_sku', 'quantity', 'price', 'hs_cost_of_goods_sold', 'hs_product_id', 'e_uom', 'e_uom_qty', 'e_product_id_', 'hs_position_on_quote'];\nconst blank = (x) => x == null || x === '';\nconst same = (x, y) => {\n  if (blank(x) && blank(y)) return true;\n  if (blank(x) || blank(y)) return false;\n  const nx = Number(x), ny = Number(y);\n  if (!isNaN(nx) && !isNaN(ny)) return Math.abs(nx - ny) < 1e-9;\n  return String(x) === String(y);\n};\nconst current = {};\nfor (const item of $('HubSpot: quote lines').all()) {\n  const q = item.json || {};\n  const id = String(q.id || (q.properties || {}).hs_object_id || '');\n  if (id && !q.archived) current[id] = {\n    created: String((q.properties || {}).hs_createdate || ''),\n    status: String((q.properties || {}).hs_status || ''),\n    lines: ((q.associations || {})['0-8'] || []).map((l) => l.properties || {}).filter((l) => l.hs_object_id),\n  };\n}\nconst inputs = [], deleteIds = [], quoteByKey = {}, linkedIds = [], summary = [], unpublish = [], republish = [];\nfor (const item of $('Pick quote').all()) {\n  const { dealId, e_sorder_id, quoteIds, desired } = item.json;\n  const quoteId = quoteIds.filter((id) => current[id]).sort((x, y) => current[y].created.localeCompare(current[x].created))[0];\n  if (!quoteId) continue;\n  const have = current[quoteId].lines;\n  const byKey = {};\n  for (const l of have) {\n    linkedIds.push(String(l.hs_object_id));\n    const k = l.e_sorder_line_id;\n    if (k && !byKey[k]) byKey[k] = l; else deleteIds.push(String(l.hs_object_id));\n  }\n  const want = new Set(desired.map((x) => x.e_sorder_line_id));\n  let removed = 0;\n  for (const [k, l] of Object.entries(byKey)) if (!want.has(k)) { deleteIds.push(String(l.hs_object_id)); removed++; }\n  removed += have.length - Object.keys(byKey).length;\n  let changed = 0;\n  for (const props of desired) {\n    const key = props.e_sorder_line_id;\n    quoteByKey[key] = quoteId;\n    const cur = byKey[key];\n    const diff = COMPARE.filter((k) => !same(props[k], cur ? cur[k] : null));\n    if (cur && !diff.length) continue;\n    const send = { e_sorder_line_id: key };\n    for (const k of COMPARE) if (!cur ? !blank(props[k]) : diff.includes(k)) send[k] = props[k];\n    inputs.push({ idProperty: 'e_sorder_line_id', id: key, properties: send });\n    changed++;\n  }\n  const status = current[quoteId].status;\n  if (changed || removed) {\n    unpublish.push({ id: quoteId, properties: { hs_status: 'DRAFT' } });\n    // A status the read didn't return would leave the quote a draft: republish as published.\n    republish.push({ id: quoteId, properties: { hs_status: status || 'APPROVAL_NOT_NEEDED' } });\n  }\n  summary.push({ dealId, e_sorder_id, quoteId, status, upserted: changed, archived: removed });\n}\nreturn [{ json: { changes: unpublish.length > 0, unpublishBody: { inputs: unpublish }, republishBody: { inputs: republish }, upsert: inputs.length > 0, upsertBody: { inputs }, archive: deleteIds.length > 0, deleteIds: [...new Set(deleteIds)].join(','), quoteByKey, linkedIds, summary } }];\n"
+      },
+      "id": "15a2c7d1-f833-4e8b-ab7a-9d582afc1550",
+      "name": "Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3456,
+        -112
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $('Plan').first().json.changes }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5c50c94f-aa65-4842-8c6a-91344f4bdcf4",
+      "name": "Changes?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -3232,
+        -112
+      ]
+    },
+    {
+      "parameters": {
+        "objectType": "0-14",
+        "operation": "batchUpdate",
+        "batchUpdateBody": "={{ $('Plan').first().json.unpublishBody }}"
+      },
+      "id": "9c9c371d-befb-49ca-8e77-37eaeecd1b99",
+      "name": "HubSpot: unpublish quote",
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        -3008,
+        -112
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "hubspotApi": {
+          "id": "4HKK5aFFmTGesa3H",
+          "name": "fairbank"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $('Plan').first().json.archive }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c888b8c1-7ebf-4dfd-b56d-6b0323a703da",
+      "name": "Archive?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -2784,
+        -112
+      ]
+    },
+    {
+      "parameters": {
+        "objectType": "0-8",
+        "operation": "batchDelete",
+        "batchDeleteInputMode": "ui",
+        "batchDeleteObjectIds": "={{ $('Plan').first().json.deleteIds }}",
+        "batchDeleteOutputMode": "allInOne",
+        "batchDeleteOptions": {}
+      },
+      "id": "cb4e3fbf-76d5-4d3a-b068-da8eca4c7db6",
+      "name": "HubSpot: archive lines",
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        -2560,
+        -208
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "hubspotApi": {
+          "id": "4HKK5aFFmTGesa3H",
+          "name": "fairbank"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $('Plan').first().json.upsert }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "168cea5b-cff9-4674-b2fd-84cb3b4231d9",
+      "name": "Upsert?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -2336,
+        -112
+      ]
+    },
+    {
+      "parameters": {
+        "objectType": "0-8",
+        "operation": "batchUpsert",
+        "batchUpsertBody": "={{ $('Plan').first().json.upsertBody }}"
+      },
+      "id": "50174cd8-0286-44f7-941b-bf72e24d2b00",
+      "name": "HubSpot: upsert lines",
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        -2112,
+        -208
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "hubspotApi": {
+          "id": "4HKK5aFFmTGesa3H",
+          "name": "fairbank"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Upserted lines not already on their quote (new ones, or a Q. line left\n// over from an earlier failed run) get linked to it: quote → line item, 67.\nconst plan = $('Plan').first().json;\nconst linked = new Set(plan.linkedIds);\nconst rows = $input.all().flatMap((i) => (Array.isArray(i.json.results) ? i.json.results : [i.json]));\nconst inputs = [];\nfor (const r of rows) {\n  const id = r && r.id ? String(r.id) : '';\n  const quoteId = plan.quoteByKey[((r && r.properties) || {}).e_sorder_line_id];\n  if (!id || !quoteId || linked.has(id)) continue;\n  inputs.push({ from: { id: quoteId }, to: { id }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 67 }] });\n}\n// No throw here: the quote is still republished, and Check fails the run after.\n// (Check reports a failed upsert itself; this only adds a short answer.)\nconst failed = rows.some((r) => r && r.error);\nconst errors = !failed && rows.length < plan.upsertBody.inputs.length ? ['HubSpot upserted ' + rows.length + ' of ' + plan.upsertBody.inputs.length + ' quote lines.'] : [];\nreturn [{ json: { link: !failed && !errors.length && inputs.length > 0, body: { inputs }, errors } }];\n"
+      },
+      "id": "caf74a9e-ada5-47c0-ad5f-97413d7a6190",
+      "name": "Link",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1888,
+        -208
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.link }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "id": "7ff72a0f-3429-487c-b870-d2396c490c35"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5b717a25-d1a6-41e9-9ebd-954b70a69f28",
+      "name": "Link?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1664,
+        -208
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "associations",
+        "operation": "assocBatchCreateLabeled",
+        "fromObjectType": "0-14",
+        "toObjectType": "0-8",
+        "assocBatchCreateLabeledBody": "={{ $json.body }}"
+      },
+      "id": "9fb9ff2c-6f8b-40c2-8080-137244134638",
+      "name": "HubSpot: link lines",
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        -1440,
+        -304
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "hubspotApi": {
+          "id": "4HKK5aFFmTGesa3H",
+          "name": "fairbank"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "objectType": "0-14",
+        "operation": "batchUpdate",
+        "batchUpdateBody": "={{ $('Plan').first().json.republishBody }}"
+      },
+      "id": "e92e4d8b-2968-44e9-8d08-a3eeb42969e5",
+      "name": "HubSpot: republish quote",
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        -1216,
+        -112
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "hubspotApi": {
+          "id": "4HKK5aFFmTGesa3H",
+          "name": "fairbank"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// The quote is republished whatever happened to its lines, so a customer's\n// link never stays down. Any line step that failed fails the run here, after\n// that, so the execution shows as failed with what went wrong.\nconst errs = [];\nconst from = (name) => {\n  let items = [];\n  try { items = $(name).all(); } catch (e) { return; } // node didn't run\n  for (const i of items) if (i.json && i.json.error) errs.push(name + ': ' + (typeof i.json.error === 'string' ? i.json.error : JSON.stringify(i.json.error)).substring(0, 300));\n};\nfrom('HubSpot: archive lines');\nfrom('HubSpot: upsert lines');\nfrom('HubSpot: link lines');\ntry { for (const e of $('Link').first().json.errors || []) errs.push('Link: ' + e); } catch (e) {}\nif (errs.length) throw new Error('Quote lines not fully synced (quote republished): ' + errs.join(' | '));\nreturn [{ json: { success: true, summary: $('Plan').first().json.summary } }];\n"
+      },
+      "id": "43493392-ae2f-42a4-ad68-dc81bace7249",
+      "name": "Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -768,
+        -112
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 10
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -992,
+        -112
+      ],
+      "id": "59b0cfc4-3d50-41da-b175-9eadbc36fe44",
+      "name": "10 s",
+      "webhookId": "b4bb6dff-1732-4df5-b887-0051705d573d"
+    }
+  ],
+  "connections": {
+    "trigger": {
+      "main": [
+        [
+          {
+            "node": "execution_data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "execution_data": {
+      "main": [
+        [
+          {
+            "node": "get deal quote and lines",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get deal quote and lines": {
+      "main": [
+        [
+          {
+            "node": "stop if no quote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "stop if no quote": {
+      "main": [
+        [
+          {
+            "node": "get deal lines",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get deal lines": {
+      "main": [
+        [
+          {
+            "node": "Pick quote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick quote": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: quote lines",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: quote lines": {
+      "main": [
+        [
+          {
+            "node": "Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan": {
+      "main": [
+        [
+          {
+            "node": "Changes?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Changes?": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: unpublish quote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: unpublish quote": {
+      "main": [
+        [
+          {
+            "node": "Archive?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Archive?": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: archive lines",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Upsert?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: archive lines": {
+      "main": [
+        [
+          {
+            "node": "Upsert?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert?": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: upsert lines",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HubSpot: republish quote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: upsert lines": {
+      "main": [
+        [
+          {
+            "node": "Link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Link": {
+      "main": [
+        [
+          {
+            "node": "Link?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Link?": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: link lines",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HubSpot: republish quote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: link lines": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: republish quote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: republish quote": {
+      "main": [
+        [
+          {
+            "node": "10 s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "10 s": {
+      "main": [
+        [
+          {
+            "node": "Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {
+    "trigger": [
+      {
+        "eventId": 1534635360,
+        "subscriptionId": 8233288,
+        "portalId": 43793456,
+        "appId": 43138842,
+        "occurredAt": 1792666575070,
+        "subscriptionType": "deal.propertyChange",
+        "attemptNumber": 0,
+        "objectId": 66541964922,
+        "propertyName": "recent_line_last_modified_date",
+        "propertyValue": "1792666572953",
+        "changeSource": "CALCULATED",
+        "sourceId": "RollupProperties"
+      }
+    ],
+    "get deal quote and lines": [
+      {
+        "id": "66541964922",
+        "properties": {
+          "createdate": "2026-10-22T10:45:53.688Z",
+          "e_order_date": "2026-10-22",
+          "e_sorder_id": "S2738843.0001",
+          "hs_lastmodifieddate": "2026-10-22T10:56:13.548Z",
+          "hs_object_id": "66541964922"
+        },
+        "createdAt": "2026-10-22T10:45:53.688Z",
+        "updatedAt": "2026-10-22T10:56:13.548Z",
+        "archived": false,
+        "url": "https://app.hubspot.com/contacts/43793456/record/0-3/66541964922",
+        "associations": {
+          "line items": {
+            "results": [
+              {
+                "id": "60452875016",
+                "type": "deal_to_line_item"
+              },
+              {
+                "id": "60454274651",
+                "type": "deal_to_line_item"
+              }
+            ]
+          },
+          "quotes": {
+            "results": [
+              {
+                "id": "44448943636",
+                "type": "deal_to_quote"
+              }
+            ]
+          }
+        },
+        "objectFound": true
+      }
+    ],
+    "get deal lines": [
+      {
+        "results": [
+          {
+            "id": "60452875016",
+            "properties": {
+              "createdate": "2026-10-22T10:45:56.366Z",
+              "description": "HSS12\n11/16\"-1-1/4\" WORMGEAR CLAMP",
+              "e_product_id_": "105958",
+              "e_sorder_line_id": "S2738843.0001.1",
+              "e_uom": "ea",
+              "e_uom_qty": "1",
+              "hs_cost_of_goods_sold": "1.05",
+              "hs_lastmodifieddate": "2026-10-22T10:53:23.505Z",
+              "hs_object_id": "60452875016",
+              "hs_product_id": null,
+              "hs_sku": "105958",
+              "name": "HSS12\n11/16\"-1-1/4\" WORMGEAR CLAMP",
+              "price": "2.1021",
+              "quantity": "10"
+            },
+            "createdAt": "2026-10-22T10:45:56.366Z",
+            "updatedAt": "2026-10-22T10:53:23.505Z",
+            "archived": false,
+            "url": ""
+          },
+          {
+            "id": "60454274651",
+            "properties": {
+              "createdate": "2026-10-22T10:56:11.403Z",
+              "description": "ITEM:",
+              "e_product_id_": "15680",
+              "e_sorder_line_id": "S2738843.0001.2",
+              "e_uom": "ea",
+              "e_uom_qty": "1",
+              "hs_cost_of_goods_sold": "0",
+              "hs_lastmodifieddate": "2026-10-22T10:56:12.953Z",
+              "hs_object_id": "60454274651",
+              "hs_product_id": null,
+              "hs_sku": "15680",
+              "name": "ITEM:",
+              "price": "80",
+              "quantity": "2"
+            },
+            "createdAt": "2026-10-22T10:56:11.403Z",
+            "updatedAt": "2026-10-22T10:56:12.953Z",
+            "archived": false,
+            "url": ""
+          }
+        ]
+      }
+    ]
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "0fab727e43c2ebd733dea81f8bbe30697fb379fdf798fc2cce1e5adf9c5e2924"
+  }
+}
