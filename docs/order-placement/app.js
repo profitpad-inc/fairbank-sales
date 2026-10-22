@@ -280,12 +280,13 @@
   function isShortcutMod(e) { return isMac ? e.ctrlKey && !e.altKey && !e.metaKey : e.altKey && !e.ctrlKey && !e.metaKey; }
 
   // Rewrite one query param (null removes it). Also normalizes a URL that
-  // used "?" between params into a proper "&"-joined query.
+  // used "?" between params into a proper "&"-joined query. Keeps the
+  // entry's history state (syncHistory in initApp).
   function setUrlParam(key, value) {
     var p = readParams();
     if (value == null) p.delete(key); else p.set(key, value);
     var q = p.toString().replace(/%2C/gi, ",");
-    window.history.replaceState(null, "", window.location.pathname + (q ? "?" + q : "") + window.location.hash);
+    window.history.replaceState(window.history.state, "", window.location.pathname + (q ? "?" + q : "") + window.location.hash);
   }
 
   // ?e_product_ids=106331,110723&quantities=50,1 → [{id, qty}]. Missing or
@@ -364,6 +365,7 @@
     var lineSeq = 0;
     var quoteCache = {};         // productId → { loading, error, data }
     var hsQuotes = {};           // e_sorder_id → "checking" | "creating": View Quote in flight (nothing cached)
+    var newDraft = null;         // { customerId, shipTo }: the new order on the grid, kept for Back / Forward
 
     function newLine() {
       // comment: the line's Eclipse line comment (lineItemProduct.comments).
@@ -530,12 +532,14 @@
           state.header.shipBranch = defaultShipBranch(shipTo);
         }
         state.shipTo = shipTo;
+        if (newDraft) newDraft.shipTo = shipTo;
         state.view = "order";
         render();
         return;
       }
       state.keepOrder = false;
       state.shipTo = shipTo;
+      newDraft = { customerId: state.customerId, shipTo: shipTo };
       state.header = defaultHeader();
       state.lines = [newLine()];
       state.customModal = null;
@@ -645,6 +649,7 @@
     }
 
     function openExisting(order, shipTo, saved) {
+      newDraft = null;
       state.existing = order;
       state.shipTo = shipTo;
       state.keepOrder = false;
@@ -1247,6 +1252,7 @@
       if (newSide) newSide.scrollTop = sideTop;
       scrollActiveTab();
       paintHeader();
+      syncHistory();
       afterRender();
     }
 
@@ -4011,6 +4017,9 @@
     // stays up (Placing… / Updating…) until it has loaded. If the reload
     // fails, the done screen is shown instead (the bid was saved either way).
     function reopenAfterSave(id, data) {
+      // The saved order takes the place of the new order (or the old
+      // generation) in the browser history, so Back skips the stale grid.
+      navReplace = true;
       return getJson(API.order, { e_sorder_id: id })
         .then(function (o) {
           var placed = data.mode === "bid" || data.mode === "order";
@@ -4216,6 +4225,7 @@
     // ?e_sorder_id has no list yet, so it loads its bill-to's.
     function exitToOrders() {
       var lc = state.listCustomer;
+      newDraft = null;
       leaveExisting();
       if (!lc) { loadCustomer(state.customerId); return; }
       if (state.customer !== lc.data) quoteCache = {};
@@ -4229,6 +4239,7 @@
     }
 
     function goToCustomerSearch() {
+      newDraft = null;
       leaveExisting();
       state.view = "customer";
       state.customer = null;
@@ -4236,6 +4247,126 @@
       setUrlParam("e_customer_id", null);
       render();
     }
+
+    // ── Browser Back / Forward (2026-10-22) ─────────────────────────────────
+    // Every screen is one history entry: the customer search, a customer's
+    // orders list, the ship-to pick, a new order, and each generation of an
+    // existing order. render() pushes an entry when the screen changes
+    // (syncHistory); Back and Forward put that screen back (popstate) from
+    // what is already loaded where possible. Loading screens, errors and the
+    // done fallback get no entry of their own. Leaving an order with unsaved
+    // changes asks first, as Exit does; Cancel steps the browser back to the
+    // entry on show (history.go, never a new entry: Chrome skips entries a
+    // page adds without a click when going Back).
+    var popping = false;         // a Back / Forward is being restored: replace, don't push
+    var navReplace = false;      // the next screen replaces the current entry (after a save)
+    var navUndo = false;         // the next popstate is that step back: ignore it
+    var curEntry = null;         // the entry for the screen on show ({ fop, url, i })
+
+    // The screen on show as a history key, or "" for none.
+    function navKey() {
+      switch (state.view) {
+        case "customer": return "customer";
+        case "orders": return "orders:" + state.customerId;
+        case "shipto": return "shipto:" + state.customerId;
+        case "order": return state.existing ? "order:" + state.existing.e_sorder_id : "new:" + state.customerId;
+        default: return "";
+      }
+    }
+
+    function syncHistory() {
+      if (state.view === "loading") return;
+      var key = navKey();
+      if (!key) { popping = navReplace = false; return; }
+      var cur = window.history.state;
+      var at = cur && cur.fop ? cur.i || 0 : 0;
+      var entry = { fop: key, url: window.location.pathname + window.location.search + window.location.hash, i: at };
+      if (cur && cur.fop === key) {
+        if (cur.url !== entry.url) window.history.replaceState(entry, "", entry.url);
+      } else if (popping || navReplace || !cur || !cur.fop) {
+        window.history.replaceState(entry, "", entry.url);
+      } else {
+        entry.i = at + 1;
+        window.history.pushState(entry, "", entry.url);
+      }
+      curEntry = entry;
+      popping = navReplace = false;
+    }
+
+    function navParts(key) {
+      var i = key.indexOf(":");
+      return i < 0 ? { kind: key, id: "" } : { kind: key.slice(0, i), id: key.slice(i + 1) };
+    }
+
+    // The open order's generation with this e_sorder_id, if any.
+    function sameOrderGen(id) {
+      if (state.view !== "order" || !state.existing || !state.order) return null;
+      return (state.order.generations || []).filter(function (g) { return String(g.e_sorder_id) === id; })[0] || null;
+    }
+
+    // May the page leave the screen on show for this one?
+    function navLeaveOk(to) {
+      var t = navParts(to);
+      if (sameOrderGen(t.id)) return true;   // another tab of the same order keeps its edits
+      if (state.view === "order" && !state.existing && t.kind === "shipto") return true;   // Change ship-to keeps the lines
+      if (state.view === "order" || (state.view === "shipto" && state.keepOrder)) return confirmLeave();
+      return true;
+    }
+
+    function navTo(to) {
+      var t = navParts(to);
+      state.confirm = null;
+      state.cancelAsk = false;
+      state.placeError = null;
+      state.logModal = false;
+      state.quoteModal = null;
+      state.customModal = null;
+      state.detailsModal = null;
+      state.branchMenu = null;
+      if (t.kind === "customer") { goToCustomerSearch(); return; }
+      if (t.kind === "order") {
+        var gen = sameOrderGen(t.id);
+        state.notice = null;
+        if (gen) openGen(gen.generation_id);
+        else { newDraft = null; urlProducts = []; loadExistingOrder(t.id); }
+        return;
+      }
+      // orders / shipto / new: on the customer the orders list was opened for.
+      var lc = state.listCustomer;
+      if (!lc || lc.id !== t.id) { newDraft = null; leaveExisting(); loadCustomer(t.id); return; }
+      if (t.kind === "orders") { exitToOrders(); return; }
+      var draft = newDraft && newDraft.customerId === t.id ? newDraft : null;
+      leaveExisting();
+      if (state.customer !== lc.data) quoteCache = {};
+      state.customer = lc.data;
+      state.customerId = lc.id;
+      setUrlParam("e_customer_id", lc.id);
+      if (t.kind === "shipto") {
+        state.keepOrder = !!draft;
+        state.view = "shipto";
+        render();
+      } else if (draft) {
+        state.shipTo = draft.shipTo;
+        state.view = "order";
+        render();
+      } else {
+        newOrderFromList();
+      }
+    }
+
+    window.addEventListener("popstate", function (e) {
+      var to = e.state && e.state.fop;
+      if (navUndo) { navUndo = false; return; }
+      if (!to) return;   // not an entry this page made
+      if (state.placing || !navLeaveOk(to)) {
+        var back = curEntry ? curEntry.i - (e.state.i || 0) : 0;
+        if (back) { navUndo = true; window.history.go(back); }
+        return;
+      }
+      window.history.replaceState(e.state, "", e.state.url);
+      popping = true;
+      navTo(to);
+    });
 
     // Desktop: a click on the dimmed backdrop around any dialog closes it,
     // the same as Esc (change log on request, then every dialog 2026-10-19).
