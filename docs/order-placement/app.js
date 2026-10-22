@@ -160,8 +160,8 @@
 
   function statusLabel(s) { return STATUS_LABELS[s] || s || "Unknown"; }
 
-  // Pick Up Now: offered in Convert to Order only when the ship via is
-  // CPU PICK UP; the rep then picks a printer at the ship branch.
+  // Pick Up Now: offered in Place Order and Convert to Order only when the
+  // ship via is CPU PICK UP; the rep then picks a printer at the ship branch.
   var PICK_UP_NOW = ["Pick Up Now", "PickUpNow"];
   var PICK_UP_SHIP_VIA = "CPU PICK UP";
 
@@ -3424,15 +3424,20 @@
       return state.confirm.mode === "bid";
     }
 
-    // The statuses the dialog offers: Convert to Order with ship via CPU
-    // PICK UP adds "6. Pick Up Now".
+    // Place Order or Convert to Order (not a bid).
+    function confirmIsOrder() {
+      return !!state.confirm && (state.confirm.mode === "order" || state.confirm.mode === "convert");
+    }
+
+    // The statuses the dialog offers: Place Order and Convert to Order with
+    // ship via CPU PICK UP add "6. Pick Up Now".
     function confirmStatuses() {
-      var pickUp = state.confirm && state.confirm.mode === "convert" && state.header.shipVia === PICK_UP_SHIP_VIA;
+      var pickUp = confirmIsOrder() && state.header.shipVia === PICK_UP_SHIP_VIA;
       return pickUp ? ORDER_STATUSES.concat([PICK_UP_NOW]) : ORDER_STATUSES;
     }
 
     function isPickUpNow() {
-      return !!state.confirm && state.confirm.mode === "convert" && state.header.orderStatus === PICK_UP_NOW[1];
+      return confirmIsOrder() && state.header.orderStatus === PICK_UP_NOW[1];
     }
 
     // Printers at the order's ship branch (location is ignored).
@@ -3475,7 +3480,7 @@
       var title = root.querySelector("#fop-confirm-title");
       var btn = root.querySelector("[data-action=confirm-place]");
       if (title && placing) title.textContent = isBid ? "Place as Bid?" : "Place Order?";
-      if (btn && placing && !state.placing) btn.innerHTML = (isBid ? "Place Bid" : "Place Order") + ' <span class="fop-key fop-key--dark">Enter</span>';
+      if (btn && placing && !state.placing) btn.innerHTML = (isBid ? "Place Bid" : isPickUpNow() ? "Print Now" : "Place Order") + ' <span class="fop-key fop-key--dark">Enter</span>';
       if (btn) {
         if (needsStatus()) { btn.setAttribute("aria-disabled", "true"); btn.title = "Pick an order status."; }
         else if (needsPrinter()) { btn.setAttribute("aria-disabled", "true"); btn.title = "Pick a printer."; }
@@ -3555,8 +3560,8 @@
         '<div class="fop-row fop-row--end">' +
         '<button class="fop-btn fop-btn--ghost" data-action="cancel-place"' + (state.placing ? " disabled" : "") + ">Back <span class=\"fop-key\">Esc</span></button>" +
         '<button class="fop-btn" data-action="confirm-place"' + (state.placing ? " disabled" : "") +
-        (needsStatus() ? ' aria-disabled="true" title="Pick an order status."' : "") + ">" +
-        (state.placing ? "Placing…" : (isBid ? "Place Bid" : "Place Order") + ' <span class="fop-key fop-key--dark">Enter</span>') +
+        (needsStatus() ? ' aria-disabled="true" title="Pick an order status."' : needsPrinter() ? ' aria-disabled="true" title="Pick a printer."' : "") + ">" +
+        (state.placing ? (isPickUpNow() ? "Fake printing..." : "Placing…") : (isBid ? "Place Bid" : isPickUpNow() ? "Print Now" : "Place Order") + ' <span class="fop-key fop-key--dark">Enter</span>') +
         "</button></div></div></div>"
       );
     }
@@ -3625,7 +3630,7 @@
         '<button class="fop-btn fop-btn--ghost" data-action="cancel-place"' + (state.placing ? " disabled" : "") + ">Back <span class=\"fop-key\">Esc</span></button>" +
         '<button class="fop-btn" data-action="confirm-place"' + (state.placing ? " disabled" : "") +
         (needsStatus() ? ' aria-disabled="true" title="Pick an order status."' : needsPrinter() ? ' aria-disabled="true" title="Pick a printer."' : "") + ">" +
-        (state.placing ? (convert ? "Converting…" : "Updating…") : (convert ? (isPickUpNow() ? "Print Now" : "Convert to Order") : "Update Bid") + ' <span class="fop-key fop-key--dark">Enter</span>') +
+        (state.placing ? (isPickUpNow() ? "Fake printing..." : convert ? "Converting…" : "Updating…") : (convert ? (isPickUpNow() ? "Print Now" : "Convert to Order") : "Update Bid") + ' <span class="fop-key fop-key--dark">Enter</span>') +
         "</button></div></div></div>"
       );
     }
@@ -4207,6 +4212,20 @@
       render();
     }
 
+    // Pick Up Now: printing is not wired up yet, so Print Now only pretends
+    // (3 seconds of "Fake printing...") and closes the dialog. Nothing is
+    // sent to n8n or Eclipse.
+    function fakePrint() {
+      state.placing = true;
+      state.placeError = null;
+      render();
+      setTimeout(function () {
+        state.placing = false;
+        state.confirm = null;
+        render();
+      }, 3000);
+    }
+
     function place() {
       var mode = state.confirm.mode;
       var h = state.header;
@@ -4225,6 +4244,7 @@
         if (pr) pr.focus();
         return;
       }
+      if (isPickUpNow()) { fakePrint(); return; }
       if (mode === "convert") { updateBid(h.orderStatus); return; }
       var c = state.customer;
       state.placing = true;
@@ -4260,6 +4280,8 @@
         }),
         // Custom lines (bid only), placed in their page order as product 15680.
         custom_lines: customPayload(),
+        // Pick Up Now: the printer the rep picked (create-order does not use it yet).
+        printer_id: isPickUpNow() && state.confirm.printerId ? Number(state.confirm.printerId) : undefined,
       })
         .then(function (data) {
           data.mode = mode;
@@ -4530,9 +4552,9 @@
         }
         if (key === "shipVia") refreshAllRows();
         if (key === "orderStatus") {
-          // Convert to Order redraws: Pick Up Now shows the printer box and
-          // turns the button into Print Now.
-          if (state.confirm && state.confirm.mode === "convert") render();
+          // Place Order and Convert to Order redraw: Pick Up Now shows the
+          // printer box and turns the button into Print Now.
+          if (confirmIsOrder()) render();
           else refreshConfirmText();
         }
         refreshTotals();
