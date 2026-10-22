@@ -14,6 +14,7 @@
     users_to_sync:      'users',
     emails_to_exclude:  'emails',
     domains_to_exclude: 'domains',
+    domains_to_include: 'domains',
   };
 
   var EMAIL_RE  = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -65,6 +66,69 @@
     el.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { el.classList.remove('show'); }, 2600);
+  }
+
+
+  // ── Page header ──────────────────────────────────────────────
+  // Same #333 bar as order placement (initHeader() in its app.js): the
+  // Fairbank mark left, a user menu right (the rep's name with a caret;
+  // it opens their email, Eclipse user id and Sign out). It replaces
+  // auth.js's sign-in chip (hidden in styles.css). Sticky; on phones it
+  // slides away while scrolling down and comes back on any scroll up.
+  function initHeader(user) {
+    var name = user.name || user.e_user_id || '';
+    var header = document.createElement('header');
+    header.className = 'fom-header';
+    header.innerHTML =
+      '<div class="fom-header__logo">' +
+        '<img src="fairbank-mark.png" alt="Fairbank" width="32" height="24">' +
+      '</div>' +
+      '<div class="fom-umenu">' +
+        '<button type="button" class="fom-umenu__btn" aria-haspopup="true" aria-expanded="false">' +
+          // Phones show the first name only (CSS swaps the two spans).
+          '<span class="fom-umenu__name fom-umenu__name--full">' + escHtml(name) + '</span>' +
+          '<span class="fom-umenu__name fom-umenu__name--first">' + escHtml(name.split(/\s+/)[0]) + '</span>' +
+          '<svg class="fom-umenu__caret" viewBox="0 0 10 6" aria-hidden="true"><path d="M0 0h10L5 6z" fill="currentColor"/></svg>' +
+        '</button>' +
+        '<div class="fom-umenu__panel" hidden>' +
+          (user.email ? '<div class="fom-umenu__row"><span class="fom-umenu__lbl">Email</span>' + escHtml(user.email) + '</div>' : '') +
+          '<div class="fom-umenu__row"><span class="fom-umenu__lbl">Eclipse ID</span>' + escHtml(user.e_user_id || '') + '</div>' +
+          '<button type="button" class="fom-umenu__out">Sign out</button>' +
+        '</div>' +
+      '</div>';
+    document.body.insertBefore(header, document.body.firstChild);
+    header.querySelector('.fom-umenu__out').addEventListener('click', function () {
+      if (window.fbSignOut) window.fbSignOut();
+    });
+
+    // User menu: the name button toggles it; a click outside or Escape
+    // closes it (Escape puts focus back on the button).
+    var menuBtn = header.querySelector('.fom-umenu__btn');
+    var menu = header.querySelector('.fom-umenu__panel');
+    function setMenu(open) {
+      menu.hidden = !open;
+      menuBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+    menuBtn.addEventListener('click', function () { setMenu(menu.hidden); });
+    document.addEventListener('click', function (e) {
+      if (!menu.hidden && !header.querySelector('.fom-umenu').contains(e.target)) setMenu(false);
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && !menu.hidden) { setMenu(false); menuBtn.focus(); }
+    });
+
+    // Phones only (the class does nothing on desktop, see styles.css):
+    // hide on a scroll down past the header, show again on a scroll up.
+    // Moves under 4px are ignored so a resting finger does not flicker it.
+    var lastY = window.scrollY;
+    window.addEventListener('scroll', function () {
+      var y = window.scrollY;
+      if (y <= header.offsetHeight) header.classList.remove('fom-header--hidden');
+      else if (y - lastY > 4) header.classList.add('fom-header--hidden');
+      else if (lastY - y > 4) header.classList.remove('fom-header--hidden');
+      else return;
+      lastY = y;
+    }, { passive: true });
   }
 
 
@@ -516,11 +580,13 @@
 
   function renderEmails()  { renderChips('emails_to_exclude',  'fom-emails-chips',  'fom-emails-count',  'No emails are excluded.'); }
   function renderDomains() { renderChips('domains_to_exclude', 'fom-domains-chips', 'fom-domains-count', 'No domains are excluded.'); }
+  function renderIncludeDomains() { renderChips('domains_to_include', 'fom-include-domains-chips', 'fom-include-domains-count', 'No domains are included.'); }
 
   function renderSettings() {
     renderUsers();
     renderEmails();
     renderDomains();
+    renderIncludeDomains();
     syncDirtyUi();
   }
 
@@ -646,14 +712,27 @@
     renderEmails
   );
 
+  function normaliseDomain(v) {
+    v = v.toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+    if (v.indexOf('@') > 0) v = v.slice(v.indexOf('@'));   // pasted a full address
+    return v && v.charAt(0) !== '@' ? '@' + v : v;
+  }
+
+  // A domain can't be both included and excluded
+  function validateDomain(otherId, otherLabel) {
+    return function (v) {
+      if (!DOMAIN_RE.test(v)) return 'Enter a valid domain, e.g. example.com';
+      if (draft[otherId].domains.indexOf(v) !== -1) return v + ' is already in ' + otherLabel + '.';
+      return '';
+    };
+  }
+
   bindListForm('fom-domains-form', 'fom-domains-form-error', 'domains_to_exclude',
-    function (v) {
-      v = v.toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-      if (v.indexOf('@') > 0) v = v.slice(v.indexOf('@'));   // pasted a full address
-      return v && v.charAt(0) !== '@' ? '@' + v : v;
-    },
-    function (v) { return DOMAIN_RE.test(v) ? '' : 'Enter a valid domain, e.g. example.com'; },
-    renderDomains
+    normaliseDomain, validateDomain('domains_to_include', 'Domains to Include'), renderDomains
+  );
+
+  bindListForm('fom-include-domains-form', 'fom-include-domains-form-error', 'domains_to_include',
+    normaliseDomain, validateDomain('domains_to_exclude', 'Domains to Exclude'), renderIncludeDomains
   );
 
 
@@ -718,7 +797,7 @@
 
   $('fom-cancel-btn').addEventListener('click', function () {
     draft = clone(saved);
-    ['fom-users-form', 'fom-emails-form', 'fom-domains-form'].forEach(function (id) {
+    ['fom-users-form', 'fom-emails-form', 'fom-domains-form', 'fom-include-domains-form'].forEach(function (id) {
       $(id).reset();
       clearFormError($(id), id + '-error');
     });
@@ -733,6 +812,9 @@
 
 
   // ── Boot ─────────────────────────────────────────────────────
+  // auth.js sets FB_USER once the rep is signed in (the page stays
+  // hidden behind its sign-in gate until then).
+  if (window.FB_USER) initHeader(window.FB_USER);
   setTab(location.hash === '#dashboard' ? 'dashboard' : 'settings');
   loadInfo();
   loadSettings();

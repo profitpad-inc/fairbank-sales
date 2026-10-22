@@ -7,7 +7,7 @@
   <title>Fairbank | Outlook Sync</title>
   <link rel="icon" href="../favicon.png" type="image/png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700&family=Barlow:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lexend+Deca:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="styles.css">
   <script src="index.js" defer></script>
 </head>
@@ -216,6 +216,26 @@
               </button>
             </form>
             <div class="fom-field-error" id="fom-users-form-error"></div>
+          </div>
+
+          <!-- Domains to include -->
+          <div class="fom-card">
+            <div class="fom-card-head">
+              <span>Domains to Include</span>
+              <span class="fom-count" id="fom-include-domains-count">0</span>
+            </div>
+            <div class="fom-card-desc">Messages to or from any address at these domains are included in the sync.</div>
+
+            <div class="fom-chips" id="fom-include-domains-chips"></div>
+
+            <form class="fom-add-inline" id="fom-include-domains-form" autocomplete="off" novalidate>
+              <input type="text" name="value" placeholder="example.com, example.org" />
+              <button type="submit" class="fom-add-btn" title="Add domain">
+                <svg viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2v10M2 7h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                <span>Add</span>
+              </button>
+            </form>
+            <div class="fom-field-error" id="fom-include-domains-form-error"></div>
           </div>
 
           <!-- Domains to exclude -->
