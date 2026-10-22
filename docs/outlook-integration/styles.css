@@ -346,6 +346,42 @@ body {
   padding: 14px 20px 6px;
 }
 
+/* ── Always Excluded note (settings, read-only) ── */
+.fairbank-outlook-module .fom-note {
+  padding: 6px 20px 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--off-white);
+}
+
+.fairbank-outlook-module .fom-note h3 {
+  font-family: 'Lexend Deca', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--gold-lt);
+  margin: 10px 0 6px;
+}
+
+.fairbank-outlook-module .fom-note ul {
+  list-style: disc;
+  padding-left: 20px;
+}
+
+.fairbank-outlook-module .fom-note li + li {
+  margin-top: 6px;
+}
+
+.fairbank-outlook-module .fom-note strong {
+  font-weight: 600;
+  color: var(--white);
+}
+
+.fairbank-outlook-module .fom-note code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  color: var(--muted);
+}
+
 /* ── Code view (dashboard) ── */
 .fairbank-outlook-module .fom-code-card {
   padding-bottom: 0;

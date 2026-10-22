@@ -191,6 +191,8 @@
         owner:    u.hs_owner_id ? String(u.hs_owner_id) : '',
         sent:     Number(u.emails_sent) || 0,
         received: Number(u.emails_received) || 0,
+        // Hover card only, not charted. null until n8n sends the field.
+        contacts: u.unique_contacts == null ? null : Number(u.unique_contacts) || 0,
       };
     });
   }
@@ -315,6 +317,8 @@
         '<div class="fom-tip-row"><span><span class="fom-swatch fom-swatch-sent"></span>Sent</span><strong>' + fmtNum(u.sent) + '</strong></div>' +
         '<div class="fom-tip-row"><span><span class="fom-swatch fom-swatch-recv"></span>Received</span><strong>' + fmtNum(u.received) + '</strong></div>' +
         '<div class="fom-tip-row fom-tip-total"><span>Total</span><strong>' + fmtNum(u.sent + u.received) + '</strong></div>' +
+        (u.contacts == null ? '' :
+          '<div class="fom-tip-row fom-tip-total"><span>Unique contacts</span><strong>' + fmtNum(u.contacts) + '</strong></div>') +
       '</div>' +
       '<div class="fom-tip-foot"><span>HubSpot Owner ID</span>' +
         (u.owner ? '<span class="fom-tip-owner">' + escHtml(u.owner) + '</span>' : '<span class="fom-muted">Not set</span>') +
@@ -550,7 +554,26 @@
   $('fom-users-search').addEventListener('input', renderUsers);
   setUsersExpanded(false);
 
-  function renderChips(settingId, chipsId, countId, emptyMsg) {
+  // Domain chips show in this order, then every other domain A to Z.
+  // Display only: the saved list keeps its own order.
+  var DOMAIN_ORDER = [
+    '@fairbankequipment.com',
+    '@fairbankequipment.onmicrosoft.com',
+    '@bigwsales.com',
+    '@bigwsales.onmicrosoft.com',
+    '@pfingsten.com',
+    '@profitpad.com',
+  ];
+
+  function compareDomains(a, b) {
+    var ia = DOMAIN_ORDER.indexOf(a), ib = DOMAIN_ORDER.indexOf(b);
+    if (ia === -1) ia = DOMAIN_ORDER.length;
+    if (ib === -1) ib = DOMAIN_ORDER.length;
+    if (ia !== ib) return ia - ib;
+    return a < b ? -1 : a > b ? 1 : 0;
+  }
+
+  function renderChips(settingId, chipsId, countId, emptyMsg, compare) {
     var listKey = SETTING_KEYS[settingId];
     var list    = draft[settingId][listKey];
     var wrap    = $(chipsId);
@@ -562,7 +585,12 @@
       return;
     }
 
-    list.forEach(function (val, i) {
+    // Sort a copy of the indexes so Remove still splices the right entry
+    var order = list.map(function (val, i) { return i; });
+    if (compare) order.sort(function (a, b) { return compare(list[a], list[b]); });
+
+    order.forEach(function (i) {
+      var val = list[i];
       var isNew = !savedHas(settingId, function (s) { return s === val; });
       var chip = document.createElement('span');
       chip.className = 'fom-chip' + (isNew ? ' is-new' : '');
@@ -571,7 +599,7 @@
         '<button class="fom-remove-btn" title="Remove" aria-label="Remove ' + escHtml(val) + '">' + ICON_X + '</button>';
       chip.querySelector('.fom-remove-btn').addEventListener('click', function () {
         draft[settingId][listKey].splice(i, 1);
-        renderChips(settingId, chipsId, countId, emptyMsg);
+        renderChips(settingId, chipsId, countId, emptyMsg, compare);
         syncDirtyUi();
       });
       wrap.appendChild(chip);
@@ -579,8 +607,8 @@
   }
 
   function renderEmails()  { renderChips('emails_to_exclude',  'fom-emails-chips',  'fom-emails-count',  'No emails are excluded.'); }
-  function renderDomains() { renderChips('domains_to_exclude', 'fom-domains-chips', 'fom-domains-count', 'No domains are excluded.'); }
-  function renderIncludeDomains() { renderChips('domains_to_include', 'fom-include-domains-chips', 'fom-include-domains-count', 'No domains are included.'); }
+  function renderDomains() { renderChips('domains_to_exclude', 'fom-domains-chips', 'fom-domains-count', 'No domains are excluded.', compareDomains); }
+  function renderIncludeDomains() { renderChips('domains_to_include', 'fom-include-domains-chips', 'fom-include-domains-count', 'No domains are included.', compareDomains); }
 
   function renderSettings() {
     renderUsers();
