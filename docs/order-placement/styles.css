@@ -914,12 +914,12 @@ html[data-theme="light"] .fop-status--partial { color: #a14d00; border-color: rg
 .fop-cpick { display: flex; align-items: stretch; gap: 8px; }
 .fop-cpick .fop-ac { flex: 1; min-width: 0; }
 .fop-cpick__id, .fop-cpick__name { display: none; }
-.fop-cpick--tiled .fop-cpick__id { display: inline-flex; align-items: center; flex: none; padding: 0 10px; font-size: 14px; cursor: pointer; }
-.fop-cpick--tiled .fop-cpick__id:hover { border-color: var(--gold); }
+/* The id tile sits inside the name box, before the name (2026-10-22). */
 .fop-cpick--tiled .fop-cpick__name {
-  display: block; flex: 1; min-width: 0; cursor: pointer;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; cursor: pointer;
 }
+.fop-cpick--tiled .fop-cpick__id { display: inline-flex; align-items: center; flex: none; padding: 1px 7px; font-size: 13px; line-height: 1.4; }
+.fop-cpick__txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fop-cpick--tiled .fop-cpick__name:hover { border-color: var(--gold); }
 .fop-cpick--tiled .fop-ac {
   position: absolute; width: 1px; height: 1px; overflow: hidden;

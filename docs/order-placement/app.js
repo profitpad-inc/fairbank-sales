@@ -36,7 +36,7 @@
 // Ship via is required and chosen by the rep; terms and blank PO/release
 // are filled in server-side by create-order from the Eclipse customer.
 //
-// The rep (writer, email, territory, default branch) comes from
+// The rep (writer, email, territories, default territory, default branch) comes from
 // window.FB_USER, set by ../auth.js.
 //
 // Rendering: full re-render on structural changes (view change, add/remove
@@ -373,10 +373,11 @@
     }
 
     // Existing order: the customers are always locked. A Bid unlocks its
-    // lines and the shipping fields of its header (BID_HEAD, sent by Update
-    // Bid); PO, release and every field of any other order stay locked.
+    // lines, the shipping fields of its header and outside sales (BID_HEAD,
+    // sent by Update Bid); PO, release and every field of any other order
+    // stay locked.
     // headLocked(key): that header field; headLocked(): the whole header.
-    var BID_HEAD = ["shipVia", "shipBranch", "shipDate", "requiredDate", "shippingInstructions", "internalNotes"];
+    var BID_HEAD = ["shipVia", "shipBranch", "shipDate", "requiredDate", "shippingInstructions", "internalNotes", "outsideSales"];
     function headLocked(key) {
       var ex = state.existing;
       if (!ex) return false;
@@ -409,7 +410,18 @@
         internalNotes: "",
         shippingInstructions: "",
         freightIn: "",           // totals box; sent to create-order as freight_in
+        outsideSales: String(user.default_territory || "").trim(),  // outsideSalesOptions()
       };
+    }
+
+    // Outside sales choices: the rep's territories (HubSpot
+    // e_user_all_territories) plus their default territory
+    // (e_user_default_territory), once each, as [text, value] pairs.
+    function outsideSalesOptions() {
+      var list = (user.territories || []).concat([user.default_territory || ""]);
+      return list.map(function (v) { return String(v).trim(); })
+        .filter(function (v, i, a) { return v && a.indexOf(v) === i; })
+        .map(function (v) { return [v, v]; });
     }
 
     // The rep's freight in on a new order, in dollars (0 when blank or invalid).
@@ -646,6 +658,7 @@
         release: order.release || "",
         internalNotes: order.internal_notes || "",
         shippingInstructions: order.shipping_instructions || "",
+        outsideSales: order.outside_sales || "",
       };
       // A bid's unsaved header edits on this tab.
       if (saved && saved.header) state.header = saved.header;
@@ -949,6 +962,15 @@
     // Custom lines sit in state.lines like any other line (line.custom holds
     // the dialog's values), so they keep the position the rep added them at.
 
+    // A saved custom line comes back from Eclipse as a regular line on
+    // product 15680 ("ITEM:"). Its id shows as "Custom", and it has no
+    // inventory or quantity breaks to show.
+    var ITEM_PRODUCT_ID = "15680";
+    function isItemLine(line) { return !!line && String(line.productId) === ITEM_PRODUCT_ID; }
+    function pidText(line) { return isItemLine(line) ? "Custom" : line.productId; }
+    // Product id cell of the confirm dialogs: 15680 as a Custom tag.
+    function pidCellHtml(id) { return String(id) === ITEM_PRODUCT_ID ? '<span class="fop-badge">Custom</span>' : esc(id); }
+
     function customLines() {
       return state.lines.filter(function (l) { return l.custom; });
     }
@@ -1072,6 +1094,7 @@
       return {
         ship_via: h.shipVia, ship_branch: h.shipBranch, ship_date: h.shipDate, required_date: h.requiredDate,
         shipping_instructions: h.shippingInstructions, internal_notes: h.internalNotes,
+        outside_sales: h.outsideSales,
       };
     }
 
@@ -1089,6 +1112,7 @@
       add("Required date", ex.required_date, h.requiredDate, dateText);
       add("Shipping instructions", ex.shipping_instructions, h.shippingInstructions);
       add("Internal notes", ex.internal_notes, h.internalNotes);
+      add("Outside sales", ex.outside_sales, h.outsideSales);
       return out;
     }
 
@@ -1680,17 +1704,31 @@
       return '<div class="fop-field ' + (cls || "") + '"><label class="fop-label">' + esc(label) + "</label>" + inner + "</div>";
     }
 
+    // Miles from the ship-to to branch id, or null (no ship-to coordinates,
+    // or a branch with none).
+    function shipToMiles(id) {
+      var st = state.shipTo || {};
+      var c = BRANCH_COORDS[id];
+      if (st.latitude == null || st.longitude == null || !c) return null;
+      return milesBetween(st.latitude, st.longitude, c[0], c[1]);
+    }
+
+    // Sort {id} rows closest to the ship-to first; branches with no distance
+    // (and every branch, without ship-to coordinates) follow in
+    // branch-number order.
+    function byShipToDistance(a, b) {
+      var ma = shipToMiles(a.id), mb = shipToMiles(b.id);
+      if (ma != null || mb != null) return (ma == null ? 1e9 : ma) - (mb == null ? 1e9 : mb);
+      return (Number(a.id) || 999) - (Number(b.id) || 999);
+    }
+
     // Ship branch options with distance from the ship-to, closest first.
     // Without ship-to coordinates the list keeps branch-number order.
     function branchOptions() {
-      var st = state.shipTo || {};
-      var has = st.latitude != null && st.longitude != null;
       var list = BRANCHES.map(function (b) {
-        var c = BRANCH_COORDS[b[0]];
-        var mi = has && c ? milesBetween(st.latitude, st.longitude, c[0], c[1]) : null;
-        return { id: b[0], name: b[1], mi: mi };
+        return { id: b[0], name: b[1], mi: shipToMiles(b[0]) };
       });
-      if (has) list.sort(function (a, b) { return (a.mi == null ? 1e9 : a.mi) - (b.mi == null ? 1e9 : b.mi); });
+      list.sort(byShipToDistance);
       return list.map(function (b) {
         return [b.id + " - " + b.name + (b.mi != null ? " · " + Math.round(b.mi).toLocaleString("en-US") + " mi" : ""), b.id];
       });
@@ -1746,6 +1784,25 @@
         printStatus: ["Print status", ex.print_status],
       }[key];
       return field(info[0], '<input class="fop-input" value="' + esc(info[1] || "") + '" disabled>', cls);
+    }
+
+    // Writer, read-only on every order: the signed-in rep on a new order,
+    // the order's own writer on an existing one.
+    function writerField() {
+      var v = state.existing ? state.existing.writer : user.e_user_id;
+      return field("Writer", '<input class="fop-input" value="' + esc(v || "") + '" disabled>', "fop-field--row");
+    }
+
+    // Outside sales: a dropdown on a new order or a bid (outsideSalesOptions(),
+    // defaulting to the rep's default territory); read-only on other orders.
+    function outsideSalesField() {
+      if (linesLocked()) return orderInfoField("outsideSales");
+      return field("Outside sales", selectHtml("outsideSales", outsideSalesOptions(), state.header.outsideSales, "Select…"));
+    }
+
+    function poField(cls) {
+      var h = state.header;
+      return field("Customer P/O #", '<input class="fop-input" data-head="po" maxlength="30" value="' + esc(h.po) + '"' + lockAttr("po") + ">", cls);
     }
 
     // Page header links (paintHeader()). The bill-to's HubSpot company
@@ -1877,8 +1934,8 @@
         '<section class="fop-head' + (headLocked() ? " fop-head--locked" : "") + '" id="fop-head" aria-labelledby="fop-head-title">' +
         '<div class="fop-head__sum" id="fop-head-title">Header</div>' +
         // Rows of up to three (user's order); fop-field--row starts a new row.
-        // Writer / outside / inside sales and print status only show on an
-        // existing order that is not a bid.
+        // Writer and outside sales show on every order; inside sales and
+        // print status only on an existing order that is not a bid.
         '<div class="fop-head__grid">' +
         // Phones: ship via and ship branch each take a full row (--mfull).
         field("Ship via", selectHtml("shipVia", SHIP_VIAS, h.shipVia, "Select…", COMMON_SHIP_VIAS), "fop-field--row fop-field--mfull") +
@@ -1893,9 +1950,12 @@
         // Order date is never editable: the order's own, or today on a new
         // order (Eclipse dates it when it is created).
         field("Order date", '<input class="fop-input" value="' + esc(dateText(state.existing ? state.existing.order_date : isoDate(0))) + '" disabled>') +
-        orderInfoField("writer", "fop-field--row") + orderInfoField("outsideSales") + orderInfoField("insideSales") +
-        field("Customer P/O #", '<input class="fop-input" data-head="po" maxlength="30" value="' + esc(h.po) + '"' + lockAttr("po") + ">", "fop-field--row") +
-        field("Customer release #", '<input class="fop-input" data-head="release" maxlength="30" value="' + esc(h.release) + '"' + lockAttr("release") + ">") +
+        writerField() + outsideSalesField() + orderInfoField("insideSales") +
+        // A new order or a bid: P/O ends the writer row and release is hidden
+        // (a new order still sends the bill-to's default release). Other
+        // orders: P/O, release and print status on their own row.
+        poField(linesLocked() ? "fop-field--row" : "") +
+        (linesLocked() ? field("Customer release #", '<input class="fop-input" data-head="release" maxlength="30" value="' + esc(h.release) + '"' + lockAttr("release") + ">") : "") +
         orderInfoField("printStatus") +
         // Bottom row: shipping instructions left, internal notes right.
         // Multi-line notes; textareas grow with their content (autosize()).
@@ -1919,14 +1979,14 @@
         // customer id tiles); a click, or focus reaching the box (arrows,
         // Tab), turns it back into the product box (tileProduct).
         (ro ? "" : '<button type="button" class="fop-badge fop-pid" tabindex="-1" data-action="edit-product" data-r="' + r + '" ' +
-          'title="Change product" aria-label="Change product, line ' + (r + 1) + '">' + esc(line.productId) + "</button>") +
+          'title="Change product" aria-label="Change product, line ' + (r + 1) + '">' + esc(pidText(line)) + "</button>") +
         '<div class="fop-ac">' +
         '<input class="fop-input fop-grid-in" data-r="' + r + '" data-c="0" autocomplete="off" spellcheck="false" ' +
-        'placeholder="' + (ro ? "" : "Search…") + '" value="' + esc(line.productId) + '" aria-label="Product, line ' + (r + 1) + '"' + ro + ">" +
+        'placeholder="' + (ro ? "" : "Search…") + '" value="' + esc(ro ? pidText(line) : line.productId) + '" aria-label="Product, line ' + (r + 1) + '"' + ro + ">" +
         '<div class="fop-ac__list" role="listbox"></div></div>' +
         // Phones: a read-only line shows its product id in a tile top right
         // instead of the (read-only) product box.
-        (ro && line.productId ? '<span class="fop-badge fop-line__id">' + esc(line.productId) + "</span>" : "") +
+        (ro && line.productId ? '<span class="fop-badge fop-line__id">' + esc(pidText(line)) + "</span>" : "") +
         "</div>" +
         '<div class="fop-cell fop-cell--desc" role="cell" data-cell="desc">' + descHtml(line) + "</div>" +
         '<div class="fop-cell fop-cell--qty" role="cell">' +
@@ -1974,9 +2034,10 @@
     function inlineStripsHtml(line, r) {
       var on = stripShown(r);
       var hid = on ? "" : " hidden";
+      var shid = on && !isItemLine(line) ? "" : " hidden";
       var withStock = !noStock();
-      return (withStock ? '<div class="fop-stockstrip" data-cell="strip"' + hid + ">" + (on ? stockStripHtml(line, false, r) : "") + "</div>" : "") +
-        (withStock ? '<div class="fop-stockstrip" data-cell="breaks"' + hid + ">" + (on ? breaksStripHtml(line) : "") + "</div>" : "") +
+      return (withStock ? '<div class="fop-stockstrip" data-cell="strip"' + shid + ">" + (on ? stockStripHtml(line, false, r) : "") + "</div>" : "") +
+        (withStock ? '<div class="fop-stockstrip" data-cell="breaks"' + shid + ">" + (on ? breaksStripHtml(line) : "") + "</div>" : "") +
         '<div class="fop-stockstrip fop-stockstrip--comment' + (withStock ? "" : " fop-stockstrip--solo") +
         (commentClosed(line) ? " fop-stockstrip--cmt-closed" : "") + '" data-cell="comment"' + hid + ">" +
         commentFieldHtml(line, r, "fop-ic-" + line.key) + "</div>";
@@ -2083,22 +2144,24 @@
     }
 
     // Existing SKU: the same product search as the grid's Product cell
-    // (acSearch kind "variation"). A picked product shows as its id tile with
-    // its name in a box to the right; a click on either, or focus reaching
-    // the search box, turns it back into the search box (tileVariation).
+    // (acSearch kind "variation"). A picked product shows as one box with a
+    // small id tile inside it, before the name (2026-10-22, was the tile
+    // beside the box); a click on it, or focus reaching the search box,
+    // turns it back into the search box (tileVariation).
     function variationFieldHtml(d, er) {
       var picked = !!(d.variationSku && d.variationDesc);
       return '<div class="fop-field"><label class="fop-label" for="fop-cf-variationSku">Existing product</label>' +
         '<div class="fop-cpick' + (picked ? " fop-cpick--tiled" : "") + '" data-cell="variation-pick">' +
-        '<button type="button" class="fop-badge fop-cpick__id" tabindex="-1" data-action="edit-variation" title="Change product" aria-label="Change existing product">' + esc(d.variationSku) + "</button>" +
-        '<div class="fop-input fop-cpick__name" data-action="edit-variation" data-cell="variation-desc" title="' + esc(d.variationDesc) + '">' + esc(d.variationDesc) + "</div>" +
+        '<div class="fop-input fop-cpick__name" data-action="edit-variation" data-cell="variation-desc" title="Change product: ' + esc(d.variationDesc) + '">' +
+        '<span class="fop-badge fop-cpick__id">' + esc(d.variationSku) + "</span>" +
+        '<span class="fop-cpick__txt">' + esc(d.variationDesc) + "</span></div>" +
         '<div class="fop-ac"><input class="fop-input' + (er.variationSku ? " fop-input--err" : "") + '" id="fop-cf-variationSku" data-cf="variationSku" ' +
         'autocomplete="off" spellcheck="false" placeholder="Search…" aria-expanded="false" value="' + esc(d.variationSku) + '">' +
         '<div class="fop-ac__list" role="listbox"></div></div></div>' +
         (er.variationSku ? '<span class="fop-warn-text fop-block">' + esc(er.variationSku) + "</span>" : "") + "</div>";
     }
 
-    // Custom line dialog: on shows the picked product's id tile and name box
+    // Custom line dialog: on shows the picked product's box (id tile + name)
     // (only while a product is picked), off shows the search box.
     function tileVariation(on) {
       var m = state.customModal;
@@ -2106,9 +2169,8 @@
       if (!m || !box) return;
       var d = m.draft;
       box.querySelector(".fop-cpick__id").textContent = d.variationSku;
-      var nm = box.querySelector(".fop-cpick__name");
-      nm.textContent = d.variationDesc;
-      nm.title = d.variationDesc;
+      box.querySelector(".fop-cpick__txt").textContent = d.variationDesc;
+      box.querySelector(".fop-cpick__name").title = "Change product: " + d.variationDesc;
       box.classList.toggle("fop-cpick--tiled", !!(on && d.variationSku && d.variationDesc));
     }
 
@@ -2229,7 +2291,8 @@
 
 
     // Per-branch stock for one line (side box, inline strip, details dialog).
-    // Branches with stock in branch-number order; the line's ship branch is
+    // Branches with stock, closest to the ship-to first (branch-number order
+    // without ship-to coordinates); the line's ship branch is
     // always shown and highlighted. On a new order or a bid each tile is a
     // button: a click ships line r from that branch (pickBranch).
     // withTotal: label reads "Inventory (1,136)" (side and details layouts, which
@@ -2253,8 +2316,8 @@
         var sk = BRANCHES.filter(function (b) { return b[0] === ship; })[0];
         rows.push({ id: ship, name: sk ? sk[1] : "", qty: 0 });
       }
-      // Branch-number order (1 → 17), not by quantity.
-      rows.sort(function (a, b) { return (Number(a.id) || 999) - (Number(b.id) || 999); });
+      // Closest to the ship-to first (2026-10-22), not by quantity.
+      rows.sort(byShipToDistance);
       var lbl = '<span class="fop-strip__lbl">Inventory' + (withTotal ? " (" + s.total.toLocaleString("en-US") + ")" : "") + "</span>";
       if (!rows.length) return lbl + '<span class="fop-muted">No stock at any branch.</span>' + (pick ? branchMoreHtml(rows, r) : "");
       return lbl + rows.map(function (x) {
@@ -2273,7 +2336,7 @@
     function branchMoreHtml(shown, r) {
       var rest = BRANCHES.filter(function (b) {
         return !shown.some(function (x) { return x.id === b[0]; });
-      });
+      }).sort(function (a, b) { return byShipToDistance({ id: a[0] }, { id: b[0] }); });
       if (!rest.length) return "";
       var open = state.branchMenu === r;
       return '<button type="button" class="fop-chip fop-chip--pick fop-chip--more" tabindex="-1" data-action="branch-menu" data-r="' + r +
@@ -2356,7 +2419,7 @@
     }
 
     function availHtml(line) {
-      if (!line.productId || noStock()) return "";
+      if (!line.productId || noStock() || isItemLine(line)) return "";
       var s = lineStock(line);
       if (!s) return '<span class="fop-dots">···</span>';
       // No ship branch picked yet: no branch count to show.
@@ -2370,7 +2433,7 @@
     }
 
     function totalStockHtml(line) {
-      if (!line.productId || noStock()) return "";
+      if (!line.productId || noStock() || isItemLine(line)) return "";
       var s = lineStock(line);
       if (!s) return "";
       return '<span class="fop-mlabel">All branches </span>' + s.total;
@@ -2460,7 +2523,7 @@
       var head = '<div class="fop-side__head"><span class="fop-party__lbl">Stock &amp; qty breaks</span>' +
         '<button class="fop-icon-btn" data-action="close-side" aria-label="Close stock and qty breaks" title="Close (' + altKey("S") + ')">×</button></div>';
       var items = state.lines.map(function (line, r) {
-        if (!line.productId) return "";
+        if (!line.productId || isItemLine(line)) return "";
         // Name capped at 35 characters plus "..."; the full name is the tooltip.
         var name = (line.description || ("Product " + line.productId)).trim();
         var short = name.length > 35 ? name.slice(0, 35).replace(/\s+$/, "") + "..." : name;
@@ -2539,7 +2602,7 @@
     }
 
     function detailsStockHtml(line) {
-      if (noStock()) return "";
+      if (noStock() || isItemLine(line)) return "";
       return '<div class="fop-details__cols">' +
         '<div class="fop-side__sec" data-cell="details-stock">' + stockStripHtml(line, true, state.detailsModal.r) + "</div>" +
         '<div class="fop-side__sec" data-cell="details-breaks">' + breaksStripHtml(line) + "</div></div>";
@@ -2571,7 +2634,7 @@
       return (
         '<div class="fop-modal" role="dialog" aria-modal="true" aria-labelledby="fop-details-title">' +
         '<div class="fop-modal__box fop-details">' +
-        '<h2 class="fop-h2" id="fop-details-title">Line ' + (m.r + 1) + " · " + esc(line.productId) + "</h2>" +
+        '<h2 class="fop-h2" id="fop-details-title">Line ' + (m.r + 1) + " · " + esc(pidText(line)) + "</h2>" +
         '<div class="fop-details__desc" data-cell="details-desc">' + descHtml(line) + "</div>" +
         detailsNumsHtml(line, m.r) +
         detailsStockHtml(line) +
@@ -2826,7 +2889,8 @@
     // makes one (create-quote flow) and opens that. Grayed out (disabled)
     // while checking or making one. On a bid with unsaved changes a click
     // opens the Update Bid confirm dialog instead (2026-10-22, was grayed out
-    // and flashed Update Bid): the quote shows what is saved, so save first.
+    // and flashed Update Bid): the quote shows what is saved, so save first;
+    // once the bid saves, the quote opens on its own.
     // Not shown on invoiced or cancelled orders (quoteBtnHtml).
 
     // Why View Quote can't open now, or null when it can.
@@ -2847,7 +2911,7 @@
       var ex = state.existing;
       if (!ex || ex.status === "Invoice" || ex.status === "Cancel") return "";
       var busy = hsQuotes[ex.e_sorder_id];
-      var why = quoteBlockedReason() || (quoteNeedsUpdate() ? "Your changes are saved with Update Bid first, so the quote matches the bid." : null);
+      var why = quoteBlockedReason() || (quoteNeedsUpdate() ? "Your changes are saved with Update Bid first, then the quote opens." : null);
       return '<button class="fop-btn fop-btn--ghost" data-action="view-quote"' +
         (busy ? " disabled" : "") +
         (why ? ' title="' + esc(why) + '"' : "") + ">" + (busy === "creating" ? "Creating quote…" : "View Quote") + "</button>";
@@ -2870,8 +2934,11 @@
     function openQuote() {
       var ex = state.existing;
       if (!ex || hsQuotes[ex.e_sorder_id]) return;
+      // Unsaved bid changes: Update Bid first; once it saves, updateBid
+      // opens the quote (thenQuote).
       if (quoteNeedsUpdate()) {
         requestPlace("update");
+        if (state.confirm) state.confirm.thenQuote = true;
         return;
       }
       var id = ex.e_sorder_id, fail = "Could not check HubSpot for a quote: ";
@@ -3396,7 +3463,7 @@
             "</td>" + brCellHtml(l, multi) + '<td class="fop-num">' + cl.qty + '</td><td class="fop-num">' + money(cl.price * cl.qty) + "</td></tr>";
         }
         var p = linePrice(l);
-        return "<tr><td>" + esc(l.productId) + "</td><td>" + esc(l.description) + commentNoteHtml(l) + "</td>" + brCellHtml(l, multi) + '<td class="fop-num">' + esc(l.qty) +
+        return "<tr><td>" + pidCellHtml(l.productId) + "</td><td>" + esc(l.description) + commentNoteHtml(l) + "</td>" + brCellHtml(l, multi) + '<td class="fop-num">' + esc(l.qty) +
           '</td><td class="fop-num">' + (p == null ? "Eclipse price" : money(p * Number(l.qty))) + "</td></tr>";
       }).join("");
       return (
@@ -3448,7 +3515,7 @@
         else if (Number(l.qty) !== l.orig.qty || (p != null && (l.orig.price == null || Math.abs(p - l.orig.price) >= 0.0005))) tags.push("Changed");
         if (l.orig && lineComment(l)) tags.push("Comment added");
         if (lineBranch(l) !== home) tags.push("To branch " + lineBranch(l));
-        return "<tr><td>" + esc(l.productId) + "</td><td>" + esc(l.description) + commentNoteHtml(l) + "</td>" + brCellHtml(l, multi) + '<td class="fop-num">' + esc(l.qty) +
+        return "<tr><td>" + pidCellHtml(l.productId) + "</td><td>" + esc(l.description) + commentNoteHtml(l) + "</td>" + brCellHtml(l, multi) + '<td class="fop-num">' + esc(l.qty) +
           '</td><td class="fop-num">' + (p == null ? "Eclipse price" : money(p * Number(l.qty))) + '</td><td class="fop-muted">' + esc(tags.join(" · ")) + "</td></tr>";
       }).join("");
       rows += customLines().map(function (l) {
@@ -3459,7 +3526,7 @@
       var kept = {};
       filledLines().forEach(function (l) { if (l.orig) kept[l.orig.lineId] = true; });
       rows += (ex.lines || []).filter(function (l) { return !kept[l.line_id]; }).map(function (l) {
-        return '<tr class="fop-row--removed"><td>' + esc(l.product_id) + "</td><td>" + esc(l.description) + "</td>" + (multi ? "<td></td>" : "") + '<td class="fop-num">' + esc(l.qty) +
+        return '<tr class="fop-row--removed"><td>' + pidCellHtml(l.product_id) + "</td><td>" + esc(l.description) + "</td>" + (multi ? "<td></td>" : "") + '<td class="fop-num">' + esc(l.qty) +
           '</td><td class="fop-num">-</td><td class="fop-warn-text">Removed</td></tr>';
       }).join("");
       var summary = [ch.added && ch.added + " added", ch.changed && ch.changed + " changed", ch.commented && ch.commented + " commented",
@@ -3585,8 +3652,9 @@
       var strip = el.querySelector('[data-cell="strip"]');
       var brk = el.querySelector('[data-cell="breaks"]');
       var cm = el.querySelector('[data-cell="comment"]');
-      if (strip) { strip.hidden = !on; if (on) strip.innerHTML = stockStripHtml(line, false, r); }
-      if (brk) { brk.hidden = !on; if (on) brk.innerHTML = breaksStripHtml(line); }
+      var stockOn = on && !isItemLine(line);
+      if (strip) { strip.hidden = !stockOn; if (stockOn) strip.innerHTML = stockStripHtml(line, false, r); }
+      if (brk) { brk.hidden = !stockOn; if (stockOn) brk.innerHTML = breaksStripHtml(line); }
       if (cm) {
         var wasHidden = cm.hidden;
         cm.hidden = !on;
@@ -3676,7 +3744,7 @@
       var line = state.lines[r];
       var tile = cell && cell.querySelector(".fop-pid");
       if (!tile || !line) return;
-      tile.textContent = line.productId;
+      tile.textContent = pidText(line);
       cell.classList.toggle("fop-cell--tiled", !!(on && line.productId));
     }
 
@@ -3999,6 +4067,9 @@
     function updateBid(orderStatus) {
       var ex = state.existing;
       var ch = bidChanges();
+      // Started from View Quote: open the quote once the bid is saved.
+      var thenQuote = !orderStatus && !!(state.confirm && state.confirm.thenQuote);
+      var saved = false;
       state.placing = true;
       state.placeError = null;
       render();
@@ -4017,6 +4088,7 @@
           state.result = data;
           state.ordersList = null;  // the list shows the old totals
           // Back on the bid itself, reloaded from Eclipse.
+          saved = true;
           return reopenAfterSave(data.e_sorder_id || ex.e_sorder_id, data);
         })
         .catch(function (err) {
@@ -4025,6 +4097,8 @@
         .then(function () {
           state.placing = false;
           render();
+          // Only when the bid reloaded (not the done-screen fallback).
+          if (thenQuote && saved && state.view === "order" && state.existing && !quoteNeedsUpdate()) openQuote();
         });
     }
 
@@ -4100,7 +4174,7 @@
         // Eclipse books that as freight in).
         freight_in: freightInValue(),
         writer: user.e_user_id,
-        outside_sales: user.territory || "",
+        outside_sales: h.outsideSales || "",
         email: user.email || "",
         // ship_branch per line: lines on another branch than the header's
         // become their own generation (one per branch) in create-order.

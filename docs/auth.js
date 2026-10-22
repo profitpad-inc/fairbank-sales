@@ -11,7 +11,7 @@
       n8n trades it for a token (with the app's client secret), asks
       HubSpot which account and user the token is for, refuses any
       account but Fairbank's, looks up the rep's HubSpot user record
-      (e_user_id, branch, territory) and signs a session token (JWT).
+      (e_user_id, branch, territories) and signs a session token (JWT).
    3. n8n sends the browser back here with the session token in the URL
       fragment (#fb_session=...). This file stores it and strips it from
       the address bar.
@@ -105,7 +105,10 @@
       name: c.name || '',
       email: c.email || '',
       default_branch: c.default_branch || '',
-      territory: c.territory || '',
+      // HubSpot e_user_all_territories, split on ";" by n8n. A token from
+      // before 2026-10-22 has none until its next refresh.
+      territories: Array.isArray(c.territories) ? c.territories.map(String) : [],
+      default_territory: c.default_territory || '',  // HubSpot e_user_default_territory
       hs_user_id: c.hs_user_id || '',
       hs_owner_id: c.hs_owner_id || '',
     };
