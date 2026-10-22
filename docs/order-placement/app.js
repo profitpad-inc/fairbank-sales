@@ -160,6 +160,30 @@
 
   function statusLabel(s) { return STATUS_LABELS[s] || s || "Unknown"; }
 
+  // Pick Up Now: offered in Convert to Order only when the ship via is
+  // CPU PICK UP; the rep then picks a printer at the ship branch.
+  var PICK_UP_NOW = ["Pick Up Now", "PickUpNow"];
+  var PICK_UP_SHIP_VIA = "CPU PICK UP";
+
+  // Printers by ship branch id: [printerId, printerName]. Static for now
+  // (the list the user gave on 2026-10-22).
+  var PRINTERS = {
+    "1": [[17, "01-CanonOFC-LP1"], [23, "01-CFO-LP8"], [29, "01-Sales1-LP15"], [33, "01-Purchasing-LP44"], [38, "01-ReceivingLaser-LP46"], [48, "01-WHSEOffice1-LP45"], [55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [86, "01-Starship"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "2": [[55, "09-Laser1-LP36"], [57, "02-GI Laser-LP6"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [84, "02-Office-HP"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "3": [[49, "03-Laser1-LP12"], [55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [81, "03-Counter"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "4": [[3, "04-Laser1-LP19"], [50, "04-CTR"], [55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "5": [[51, "05-Laser1-LP21"], [55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "6": [[52, "06-Laser1-LP27"], [55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "7": [[53, "07-Office1-LP24"], [55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [92, "07-Counter"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "8": [[55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [89, "08-Shipping"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "9": [[55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "12": [[55, "09-Laser1-LP36"], [58, "12-Reports1-Lp34"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "14": [[55, "09-Laser1-LP36"], [59, "06-Shipping"], [61, "14-Counter"], [65, "12-Shipping"], [67, "14-Shipping"], [68, "14-BudOffice"], [69, "14-Accounting2"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [82, "14-EdOffice"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [95, "Brothers Model HL-L6200DW"], [97, "17-Shipping"]],
+    "15": [[55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [71, "15-ManagerOffice"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [83, "Fresno Counter"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "16": [[55, "09-Laser1-LP36"], [59, "06-Shipping"], [62, "16-Warehouse"], [63, "16-Marlon"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [76, "16-Counter"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "17": [[55, "09-Laser1-LP36"], [59, "06-Shipping"], [62, "16-Warehouse"], [65, "12-Shipping"], [66, "17-Counter"], [67, "14-Shipping"], [72, "15-Shipping"], [73, "17-IP50-HPColorLaserJetProMFPM479"], [74, "17-IP42-HPPageWidePro"], [75, "17-IP114"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+  };
+
   // Bill-to terms that pay up front, so a credit limit never blocks them.
   var COD_TERMS = ["COD.CO.CHECK", "COD.CC"];
 
@@ -3400,15 +3424,47 @@
       return state.confirm.mode === "bid";
     }
 
+    // The statuses the dialog offers: Convert to Order with ship via CPU
+    // PICK UP adds "6. Pick Up Now".
+    function confirmStatuses() {
+      var pickUp = state.confirm && state.confirm.mode === "convert" && state.header.shipVia === PICK_UP_SHIP_VIA;
+      return pickUp ? ORDER_STATUSES.concat([PICK_UP_NOW]) : ORDER_STATUSES;
+    }
+
+    function isPickUpNow() {
+      return !!state.confirm && state.confirm.mode === "convert" && state.header.orderStatus === PICK_UP_NOW[1];
+    }
+
+    // Printers at the order's ship branch (location is ignored).
+    function branchPrinters() {
+      return PRINTERS[branchIdOf(state.header.shipBranch)] || [];
+    }
+
     function statusPickerHtml() {
       var h = state.header;
+      var list = confirmStatuses();
       return '<div class="fop-field fop-confirm-status"><label class="fop-label" for="fop-confirm-status">Order status ' +
-        '<span class="fop-muted">(↑↓ or 1–' + ORDER_STATUSES.length + ")</span></label>" +
+        '<span class="fop-muted">(↑↓ or 1–' + list.length + ")</span></label>" +
         '<select class="fop-input" id="fop-confirm-status" data-head="orderStatus">' +
         // Starts on "Select…"; placing with it blank flashes the box.
         '<option value="" disabled' + (h.orderStatus ? "" : " selected") + ">Select…</option>" +
-        ORDER_STATUSES.map(function (o, i) {
+        list.map(function (o, i) {
           return '<option value="' + esc(o[1]) + '"' + (o[1] === h.orderStatus ? " selected" : "") + ">" + (i + 1) + ". " + esc(o[0]) + "</option>";
+        }).join("") + "</select></div>" +
+        (isPickUpNow() ? printerPickerHtml() : "");
+    }
+
+    // Pick Up Now: the printer at the ship branch that prints the order.
+    function printerPickerHtml() {
+      var pid = state.confirm.printerId || "";
+      var list = branchPrinters();
+      var br = branchIdOf(state.header.shipBranch);
+      return '<div class="fop-field fop-confirm-status"><label class="fop-label" for="fop-confirm-printer">Printer ' +
+        '<span class="fop-muted">(branch ' + esc(br || "--") + ")</span></label>" +
+        '<select class="fop-input" id="fop-confirm-printer">' +
+        '<option value="" disabled' + (pid ? "" : " selected") + ">" + (list.length ? "Select…" : "No printers for this branch") + "</option>" +
+        list.map(function (p) {
+          return '<option value="' + p[0] + '"' + (String(p[0]) === pid ? " selected" : "") + ">" + esc(p[1]) + " (" + p[0] + ")</option>";
         }).join("") + "</select></div>";
     }
 
@@ -3422,6 +3478,7 @@
       if (btn && placing && !state.placing) btn.innerHTML = (isBid ? "Place Bid" : "Place Order") + ' <span class="fop-key fop-key--dark">Enter</span>';
       if (btn) {
         if (needsStatus()) { btn.setAttribute("aria-disabled", "true"); btn.title = "Pick an order status."; }
+        else if (needsPrinter()) { btn.setAttribute("aria-disabled", "true"); btn.title = "Pick a printer."; }
         else { btn.removeAttribute("aria-disabled"); btn.removeAttribute("title"); }
       }
     }
@@ -3430,6 +3487,11 @@
     // out (aria-disabled, so a click still reaches place() and flashes the box).
     function needsStatus() {
       return state.confirm && (state.confirm.mode === "order" || state.confirm.mode === "convert") && !state.header.orderStatus;
+    }
+
+    // Pick Up Now with no printer picked yet: Print Now is grayed out the same way.
+    function needsPrinter() {
+      return isPickUpNow() && !state.confirm.printerId;
     }
 
     // A line's comment under its description in the confirm dialogs.
@@ -3562,8 +3624,8 @@
         '<div class="fop-row fop-row--end">' +
         '<button class="fop-btn fop-btn--ghost" data-action="cancel-place"' + (state.placing ? " disabled" : "") + ">Back <span class=\"fop-key\">Esc</span></button>" +
         '<button class="fop-btn" data-action="confirm-place"' + (state.placing ? " disabled" : "") +
-        (needsStatus() ? ' aria-disabled="true" title="Pick an order status."' : "") + ">" +
-        (state.placing ? (convert ? "Converting…" : "Updating…") : (convert ? "Convert to Order" : "Update Bid") + ' <span class="fop-key fop-key--dark">Enter</span>') +
+        (needsStatus() ? ' aria-disabled="true" title="Pick an order status."' : needsPrinter() ? ' aria-disabled="true" title="Pick a printer."' : "") + ">" +
+        (state.placing ? (convert ? "Converting…" : "Updating…") : (convert ? (isPickUpNow() ? "Print Now" : "Convert to Order") : "Update Bid") + ' <span class="fop-key fop-key--dark">Enter</span>') +
         "</button></div></div></div>"
       );
     }
@@ -4084,6 +4146,8 @@
         custom_lines: ch.custom_lines,
       };
       if (orderStatus) body.order_status = orderStatus;
+      // Pick Up Now: the printer the rep picked (update-bid does not use it yet).
+      if (orderStatus === PICK_UP_NOW[1] && state.confirm && state.confirm.printerId) body.printer_id = Number(state.confirm.printerId);
       postJson(API.updateBid, body)
         .then(function (data) {
           data.mode = orderStatus ? "convert" : "update";
@@ -4152,6 +4216,13 @@
         var st = root.querySelector("#fop-confirm-status");
         flashField(st);
         if (st) st.focus();
+        return;
+      }
+      // Pick Up Now needs a printer; blank flashes the printer box.
+      if (needsPrinter()) {
+        var pr = root.querySelector("#fop-confirm-printer");
+        flashField(pr);
+        if (pr) pr.focus();
         return;
       }
       if (mode === "convert") { updateBid(h.orderStatus); return; }
@@ -4458,8 +4529,18 @@
           refreshAllRows();
         }
         if (key === "shipVia") refreshAllRows();
-        if (key === "orderStatus") refreshConfirmText();
+        if (key === "orderStatus") {
+          // Convert to Order redraws: Pick Up Now shows the printer box and
+          // turns the button into Print Now.
+          if (state.confirm && state.confirm.mode === "convert") render();
+          else refreshConfirmText();
+        }
         refreshTotals();
+        return;
+      }
+      if (t.id === "fop-confirm-printer") {
+        state.confirm.printerId = t.value;
+        refreshConfirmText();
         return;
       }
       if (t.classList.contains("fop-grid-in")) {
@@ -4711,11 +4792,19 @@
         } else if (t.id === "fop-confirm-status" && (e.key === "ArrowDown" || e.key === "ArrowUp" || /^[1-9]$/.test(e.key))) {
           // Pick the status without opening the native list. Option 0 is the
           // blank "Select…", so status k is option k and ↑ stops at status 1.
-          var n = ORDER_STATUSES.length;
+          var n = confirmStatuses().length;
           var next = /^[1-9]$/.test(e.key) ? Number(e.key) : t.selectedIndex + (e.key === "ArrowDown" ? 1 : -1);
           if (next >= 1 && next <= n) {
             e.preventDefault();
             t.selectedIndex = next;
+            t.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+        } else if (t.id === "fop-confirm-printer" && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+          // Same for the printer: option 0 is the blank "Select…".
+          var pnext = t.selectedIndex + (e.key === "ArrowDown" ? 1 : -1);
+          e.preventDefault();
+          if (pnext >= 1 && pnext < t.options.length) {
+            t.selectedIndex = pnext;
             t.dispatchEvent(new Event("change", { bubbles: true }));
           }
         } else if (e.key === "Tab") {
