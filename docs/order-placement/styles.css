@@ -785,12 +785,8 @@ html[data-theme="light"] .fop-status--partial { color: #a14d00; border-color: rg
 .fop-tab__short { display: none; }
 
 /* ── Orders list ── */
-/* Thin steel scrollbar in its own gutter, 8px clear of the order cards'
-   right edge, so it never sits on their borders. */
-.fop-orders {
-  display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow-y: auto;
-  padding-right: 8px; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: var(--steel) transparent;
-}
+/* No scroll box inside the card: the list grows and the page scrolls. */
+.fop-orders { display: flex; flex-direction: column; gap: 6px; }
 .fop-order {
   display: flex; flex-direction: column; gap: 4px; width: 100%; padding: 10px 12px;
   font: inherit; text-align: left; color: var(--text);
@@ -1184,8 +1180,6 @@ html[data-theme="light"] .fop-status--partial { color: #a14d00; border-color: rg
   .fop-hint--keys { display: none; }
   /* Its row holds nothing else when there is no ship-to checkbox: no gap. */
   .fop-row:has(> .fop-fab:only-child) { display: contents; }
-  /* Orders list: no scroll box inside the card, the page scrolls instead. */
-  .fop-orders { max-height: none; overflow: visible; padding-right: 0; scrollbar-gutter: auto; }
   .fop-order { padding: 9px 10px; }
 
   /* Stock & qty breaks box (side layout) under the header. */

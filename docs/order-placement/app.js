@@ -688,15 +688,18 @@
       state.quoteModal = null;
       state.quoteError = null;
       state.lines.forEach(function (l) { if (l.productId) fetchQuote(l.productId); });
-      // Not a bid: nothing is focused or highlighted on load (r -1); Alt+L or a
+      // Nothing is focused or highlighted on load (r -1), so the page opens at
+      // its top; only a brand new order jumps to its new line. Alt+L or a
       // click still moves into the lines.
-      state.focus = saved ? saved.focus : { r: order.editable ? state.lines.length - 1 : -1, c: 0 };
+      state.focus = saved ? saved.focus : { r: -1, c: 0 };
       state.confirm = null;
       state.cancelAsk = false;
       state.placeError = null;
       state.result = null;
       state.view = "order";
       render();
+      // Opened from a long orders list: start at the top, not where it was scrolled.
+      if (!saved) window.scrollTo(0, 0);
     }
 
     // Leave an existing order (Change customer, New order).
