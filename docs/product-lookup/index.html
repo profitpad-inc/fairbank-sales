@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <script src="../auth.js"></script>
+  <script>
+    // Theme before first paint, the same choice as order placement (shared
+    // localStorage key), else the system setting. See app.js.
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem("fop-theme"); } catch (e) {}
+      if (t !== "light" && t !== "dark") t = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      document.documentElement.setAttribute("data-theme", t);
+    })();
+  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fairbank | Product Lookup</title>
+  <link rel="icon" href="../favicon.png" type="image/png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700&family=Barlow:wght@400;500;600&family=Lexend+Deca:wght@400;500;600&display=swap">
+  <!-- Order placement's stylesheet (header, cards, order rows, status
+       tiles), so both pages look the same; styles.css adds this page's bits. -->
+  <link rel="stylesheet" href="../order-placement/styles.css">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <!--
+    Product lookup: search a product, then see every order with a line for
+    it (or the customers on those orders). ?e_product_id=106331 opens a
+    product straight away. All behaviour lives in app.js.
+  -->
+  <main id="app" class="fop-app">
+    <noscript>
+      <div class="fop-alert fop-alert--error">
+        This tool requires JavaScript. Enable JavaScript and reload the page.
+      </div>
+    </noscript>
+  </main>
+</body>
+</html>

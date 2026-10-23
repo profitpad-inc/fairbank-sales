@@ -1,0 +1,445 @@
+{
+ "name": "e-order-placement: product lookup",
+ "nodes": [
+  {
+   "id": "d47f76aa-40e0-41af-a697-ee52c35dc22e",
+   "name": "Webhook",
+   "type": "n8n-nodes-base.webhook",
+   "typeVersion": 2,
+   "position": [
+    0,
+    272
+   ],
+   "parameters": {
+    "httpMethod": "GET",
+    "path": "e-order-placement/product-lookup",
+    "responseMode": "responseNode",
+    "authentication": "jwtAuth",
+    "options": {
+     "allowedOrigins": "*"
+    }
+   },
+   "webhookId": "3bbec917-462b-4cff-aabb-e933f6716e3a",
+   "credentials": {
+    "jwtAuth": {
+     "id": "6sDOPAJdRYI8fpxX",
+     "name": "Fairbank session (JWT)"
+    }
+   }
+  },
+  {
+   "id": "4aaf1964-269f-42a8-a0e9-82f61a3fe761",
+   "name": "Validate",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    224,
+    272
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "// GET ?q=<text> searches HubSpot products (name or Eclipse product id).\n// GET ?e_product_id=106331 lists every Eclipse order generation (HubSpot\n// deal) with a line item for that product. Read-only, HubSpot only.\nconst q = $input.first().json.query || {};\nconst stop = (statusCode, error) => [{ json: { ok: false, mode: 'error', statusCode, body: { success: false, error, step: 'validate' } } }];\nconst pid = String(q.e_product_id || '').trim();\nif (pid) {\n  if (!/^\\d+$/.test(pid)) return stop(400, 'e_product_id must be a number.');\n  const filter = { filterGroups: [{ filters: [\n    { propertyName: 'e_product_id_', operator: 'EQ', value: pid },\n    { propertyName: 'e_sorder_id', operator: 'HAS_PROPERTY' },\n  ] }] };\n  return [{ json: { ok: true, mode: 'deals', e_product_id: pid, filter } }];\n}\nconst text = String(q.q || '').trim().replace(/\\s+/g, ' ');\nif (text.length < 2) return stop(400, 'Type at least 2 characters (q), or pass e_product_id.');\n// A leading dot (.1000) looks up that Eclipse product id only, like the\n// product-inquiry search: no name or description match.\n// A dot followed by anything but digits matches nothing.\nif (text.charAt(0) === '.' && !/^\\.\\s*\\d+$/.test(text)) return [{ json: { ok: false, mode: 'error', statusCode: 200, body: { success: true, q: text, total: 0, products: [] } } }];\nconst dot = text.match(/^\\.\\s*(\\d+)$/);\nif (dot) return [{ json: { ok: true, mode: 'search', q: dot[1], filter: { filterGroups: [{ filters: [{ propertyName: 'e_product_id_', operator: 'EQ', value: dot[1] }] }] } } }];\n// Each word must appear in the name (or each in the description); a number\n// also matches the Eclipse product id exactly. HubSpot allows 5 groups and\n// 6 filters per group, so only the first 5 words count.\nconst words = text.split(' ').map((w) => w.replace(/[*\"]/g, '')).filter(Boolean).slice(0, 5);\nconst has = { propertyName: 'e_product_id_', operator: 'HAS_PROPERTY' };\nconst groups = ['name', 'description'].map((prop) => ({\n  filters: [has].concat(words.map((w) => ({ propertyName: prop, operator: 'CONTAINS_TOKEN', value: '*' + w + '*' }))),\n}));\nif (/^\\d+$/.test(text)) groups.unshift({ filters: [{ propertyName: 'e_product_id_', operator: 'EQ', value: text }] });\nreturn [{ json: { ok: true, mode: 'search', q: text, filter: { filterGroups: groups } } }];\n"
+   }
+  },
+  {
+   "id": "d8b0708e-d7c0-48cd-8ed4-5a6beeb3bd0e",
+   "name": "Route",
+   "type": "n8n-nodes-base.switch",
+   "typeVersion": 3.2,
+   "position": [
+    448,
+    256
+   ],
+   "parameters": {
+    "rules": {
+     "values": [
+      {
+       "outputKey": "search",
+       "conditions": {
+        "options": {
+         "caseSensitive": true,
+         "leftValue": "",
+         "typeValidation": "loose"
+        },
+        "conditions": [
+         {
+          "leftValue": "={{ $json.mode }}",
+          "operator": {
+           "type": "string",
+           "operation": "equals"
+          },
+          "rightValue": "search"
+         }
+        ],
+        "combinator": "and"
+       }
+      },
+      {
+       "outputKey": "deals",
+       "conditions": {
+        "options": {
+         "caseSensitive": true,
+         "leftValue": "",
+         "typeValidation": "loose"
+        },
+        "conditions": [
+         {
+          "leftValue": "={{ $json.mode }}",
+          "operator": {
+           "type": "string",
+           "operation": "equals"
+          },
+          "rightValue": "deals"
+         }
+        ],
+        "combinator": "and"
+       }
+      }
+     ]
+    },
+    "options": {
+     "fallbackOutput": "extra",
+     "renameFallbackOutput": "Invalid"
+    }
+   }
+  },
+  {
+   "id": "6d025b06-9499-4326-910e-a04db7789b0f",
+   "name": "HubSpot: search products",
+   "type": "CUSTOM.hubspotApi",
+   "typeVersion": 1,
+   "position": [
+    1344,
+    0
+   ],
+   "parameters": {
+    "resource": "objects",
+    "objectType": "0-7",
+    "operation": "search",
+    "searchInputMode": "json",
+    "filterJson": "={{ JSON.stringify($json.filter) }}",
+    "properties": [
+     "name",
+     "description",
+     "e_product_id_",
+     "e_uom",
+     "e_product_status"
+    ],
+    "returnAll": false,
+    "limit": 25
+   },
+   "alwaysOutputData": true,
+   "onError": "continueRegularOutput",
+   "credentials": {
+    "hubspotApi": {
+     "id": "4HKK5aFFmTGesa3H",
+     "name": "fairbank"
+    }
+   }
+  },
+  {
+   "id": "21760f05-5e44-45f0-b1bb-a63b12842e91",
+   "name": "Shape products",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1568,
+    0
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "// Products for the search box: an exact product id match first, then\n// HubSpot's order. Only products that carry an Eclipse id.\nconst v = $('Validate').first().json;\nconst items = $input.all().map((i) => i.json || {});\nconst err = items.find((j) => j.error);\nif (err) return [{ json: { statusCode: 502, body: { success: false, error: 'HubSpot product search failed: ' + err.error + ' ' + JSON.stringify(err.message || '').substring(0, 300), step: 'searchProducts' } } }];\nconst rows = [];\nfor (const j of items) {\n  if (Array.isArray(j.results)) rows.push(...j.results);\n  else if (j.id && j.properties) rows.push(j);\n}\n// total: every match in HubSpot (the page shows the first 25).\nconst total = items.reduce((t, j) => (j.total != null ? Number(j.total) : t), null);\nconst seen = new Set();\nconst products = [];\nfor (const r of rows) {\n  const p = r.properties || {};\n  const id = String(p.e_product_id_ || '').trim();\n  if (!id || seen.has(id)) continue;\n  seen.add(id);\n  products.push({\n    e_product_id: id,\n    name: p.name || '',\n    description: p.description || '',\n    uom: p.e_uom || '',\n    status: p.e_product_status || '',\n    hs_product_id: String(r.id),\n  });\n}\nproducts.sort((a, b) => (b.e_product_id === v.q) - (a.e_product_id === v.q));\nreturn [{ json: { statusCode: 200, body: { success: true, q: v.q, total: total == null ? products.length : total, products } } }];\n"
+   }
+  },
+  {
+   "id": "b92a2673-3095-43e3-8515-f987b2f70205",
+   "name": "Respond",
+   "type": "n8n-nodes-base.respondToWebhook",
+   "typeVersion": 1.1,
+   "position": [
+    1792,
+    272
+   ],
+   "parameters": {
+    "respondWith": "json",
+    "responseBody": "={{ JSON.stringify($json.body) }}",
+    "options": {
+     "responseCode": "={{ $json.statusCode || 200 }}"
+    }
+   }
+  },
+  {
+   "id": "a41562dc-7ce8-4f21-95bf-382cdfbb65fc",
+   "name": "HubSpot: search lines",
+   "type": "CUSTOM.hubspotApi",
+   "typeVersion": 1,
+   "position": [
+    672,
+    272
+   ],
+   "parameters": {
+    "resource": "objects",
+    "objectType": "0-8",
+    "operation": "search",
+    "searchInputMode": "json",
+    "filterJson": "={{ JSON.stringify($json.filter) }}",
+    "properties": [
+     "e_sorder_id",
+     "quantity",
+     "e_uom"
+    ],
+    "returnAll": true,
+    "returnAllMode": "allInOne",
+    "maxPages": 50
+   },
+   "alwaysOutputData": true,
+   "onError": "continueRegularOutput",
+   "credentials": {
+    "hubspotApi": {
+     "id": "4HKK5aFFmTGesa3H",
+     "name": "fairbank"
+    }
+   }
+  },
+  {
+   "id": "577c7ea2-516d-42d7-b68f-2a651b0b2bfd",
+   "name": "Pick orders",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    896,
+    272
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "// Line items for the product → one entry per order generation\n// (e_sorder_id, e.g. S2738846.0001) with the product's total quantity on it.\n// Quote copies of deal lines carry no e_sorder_id, so the search skips them.\nconst v = $('Validate').first().json;\nconst items = $input.all().map((i) => i.json || {});\nconst err = items.find((j) => j.error);\nif (err) return [{ json: { ok: false, statusCode: 502, body: { success: false, error: 'HubSpot line item search failed: ' + err.error + ' ' + JSON.stringify(err.message || '').substring(0, 300), step: 'searchLines' } } }];\nconst rows = [];\nfor (const j of items) {\n  if (Array.isArray(j.results)) rows.push(...j.results);\n  else if (j.id && j.properties) rows.push(j);\n}\nconst gens = {};\nfor (const r of rows) {\n  const p = r.properties || {};\n  const id = String(p.e_sorder_id || '').trim().toUpperCase();\n  if (!/^S\\d+\\.\\d+$/.test(id)) continue;\n  const g = gens[id] || (gens[id] = { qty: 0, uom: '' });\n  const q = Number(p.quantity);\n  if (isFinite(q)) g.qty += q;\n  if (!g.uom && p.e_uom) g.uom = String(p.e_uom).toLowerCase();\n}\nconst ids = Object.keys(gens);\n// HubSpot search stops at 10,000 results.\nconst truncated = rows.length >= 10000;\nif (!ids.length) return [{ json: { ok: false, statusCode: 200, body: { success: true, e_product_id: v.e_product_id, orders: [], line_count: 0, truncated: false } } }];\nreturn [{ json: { ok: true, ids: ids.join(','), gens, line_count: rows.length, truncated } }];\n"
+   }
+  },
+  {
+   "id": "d309ae72-ccff-416c-bb4e-f433820af52b",
+   "name": "Any orders?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    1120,
+    272
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose"
+     },
+     "conditions": [
+      {
+       "leftValue": "={{ $json.ok }}",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       },
+       "rightValue": ""
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "e9d97d76-d074-4f3c-8db9-967c7fdbd627",
+   "name": "HubSpot: read deals",
+   "type": "CUSTOM.hubspotApi",
+   "typeVersion": 1,
+   "position": [
+    1344,
+    192
+   ],
+   "parameters": {
+    "resource": "objects",
+    "objectType": "0-3",
+    "operation": "batchRead",
+    "batchReadInputMode": "ui",
+    "batchReadObjectIds": "={{ $json.ids }}",
+    "batchReadReturnAllMode": "allInOne",
+    "batchReadOptions": {
+     "idProperty": "e_sorder_id",
+     "properties": [
+      "e_sorder_id",
+      "e_generation_number",
+      "e_status",
+      "e_order_date",
+      "e_invoice_number",
+      "e_ship_to_id",
+      "e_ship_to_name",
+      "e_bill_to_id",
+      "bill_to_name",
+      "e_po_number",
+      "e_sales_total",
+      "e_sorder_deleted"
+     ]
+    }
+   },
+   "executeOnce": true,
+   "alwaysOutputData": true,
+   "onError": "continueRegularOutput",
+   "credentials": {
+    "hubspotApi": {
+     "id": "4HKK5aFFmTGesa3H",
+     "name": "fairbank"
+    }
+   }
+  },
+  {
+   "id": "daa735ed-6eb3-4041-a0e1-5be1f35455ef",
+   "name": "Shape deals",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1568,
+    192
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "// Deals grouped into orders like customer-orders: newest order date first,\n// generations by number. Deals archived in Eclipse (e_sorder_deleted) are\n// left out.\nconst v = $('Validate').first().json;\nconst picked = $('Pick orders').first().json;\nconst items = $input.all().map((i) => i.json || {});\nconst err = items.find((j) => j.error);\nif (err) return [{ json: { statusCode: 502, body: { success: false, error: 'HubSpot deal read failed: ' + err.error + ' ' + JSON.stringify(err.message || '').substring(0, 300), step: 'readDeals' } } }];\nconst rows = [];\nfor (const j of items) {\n  if (Array.isArray(j.results)) rows.push(...j.results);\n  else if (j.id && j.properties) rows.push(j);\n}\nconst num = (x) => (x == null || x === '' || !isFinite(Number(x)) ? null : Number(x));\nconst str = (x) => (x == null ? '' : String(x).trim());\nconst orders = {};\nfor (const r of rows) {\n  const p = r.properties || {};\n  if (str(p.e_sorder_deleted)) continue;\n  const id = str(p.e_sorder_id).toUpperCase();\n  const m = id.match(/^(S\\d+)\\.(\\d+)$/);\n  if (!m) continue;\n  const o = orders[m[1]] || (orders[m[1]] = { order_id: m[1], order_date: '', generations: [] });\n  const g = picked.gens[id] || {};\n  const gen = {\n    e_sorder_id: id,\n    generation_id: num(p.e_generation_number) != null ? num(p.e_generation_number) : Number(m[2]),\n    status: str(p.e_status),\n    order_date: str(p.e_order_date).slice(0, 10),\n    invoice_number: str(p.e_invoice_number),\n    ship_to_id: str(p.e_ship_to_id),\n    ship_to_name: str(p.e_ship_to_name),\n    bill_to_id: str(p.e_bill_to_id),\n    bill_to_name: str(p.bill_to_name),\n    po: str(p.e_po_number),\n    sales_total: num(p.e_sales_total),\n    qty: g.qty == null ? null : g.qty,\n    uom: g.uom || '',\n    hs_deal_id: String(r.id),\n  };\n  o.generations.push(gen);\n  if (gen.order_date && (!o.order_date || gen.order_date < o.order_date)) o.order_date = gen.order_date;\n}\nconst list = Object.values(orders);\nlist.forEach((o) => o.generations.sort((a, b) => a.generation_id - b.generation_id));\nlist.sort((a, b) => (b.order_date || '').localeCompare(a.order_date || '') || b.order_id.localeCompare(a.order_id));\nreturn [{ json: { statusCode: 200, body: { success: true, e_product_id: v.e_product_id, orders: list, line_count: picked.line_count, truncated: picked.truncated } } }];\n"
+   }
+  }
+ ],
+ "connections": {
+  "Webhook": {
+   "main": [
+    [
+     {
+      "node": "Validate",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Validate": {
+   "main": [
+    [
+     {
+      "node": "Route",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Route": {
+   "main": [
+    [
+     {
+      "node": "HubSpot: search products",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "HubSpot: search lines",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Respond",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "HubSpot: search products": {
+   "main": [
+    [
+     {
+      "node": "Shape products",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Shape products": {
+   "main": [
+    [
+     {
+      "node": "Respond",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "HubSpot: search lines": {
+   "main": [
+    [
+     {
+      "node": "Pick orders",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Pick orders": {
+   "main": [
+    [
+     {
+      "node": "Any orders?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Any orders?": {
+   "main": [
+    [
+     {
+      "node": "HubSpot: read deals",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Respond",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "HubSpot: read deals": {
+   "main": [
+    [
+     {
+      "node": "Shape deals",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Shape deals": {
+   "main": [
+    [
+     {
+      "node": "Respond",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1"
+ }
+}

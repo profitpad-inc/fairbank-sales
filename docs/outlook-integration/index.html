@@ -7,7 +7,7 @@
   <title>Fairbank | Outlook Sync</title>
   <link rel="icon" href="../favicon.png" type="image/png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700&family=Barlow:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lexend+Deca:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="styles.css">
   <script src="index.js" defer></script>
 </head>
@@ -218,6 +218,26 @@
             <div class="fom-field-error" id="fom-users-form-error"></div>
           </div>
 
+          <!-- Domains to include -->
+          <div class="fom-card">
+            <div class="fom-card-head">
+              <span>Domains to Include</span>
+              <span class="fom-count" id="fom-include-domains-count">0</span>
+            </div>
+            <div class="fom-card-desc">Messages to or from any address at these domains are included in the sync.</div>
+
+            <div class="fom-chips" id="fom-include-domains-chips"></div>
+
+            <form class="fom-add-inline" id="fom-include-domains-form" autocomplete="off" novalidate>
+              <input type="text" name="value" placeholder="example.com, example.org" />
+              <button type="submit" class="fom-add-btn" title="Add domain">
+                <svg viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2v10M2 7h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                <span>Add</span>
+              </button>
+            </form>
+            <div class="fom-field-error" id="fom-include-domains-form-error"></div>
+          </div>
+
           <!-- Domains to exclude -->
           <div class="fom-card">
             <div class="fom-card-head">
@@ -256,6 +276,31 @@
               </button>
             </form>
             <div class="fom-field-error" id="fom-emails-form-error"></div>
+          </div>
+
+          <!-- Always excluded (fixed rules in the sync, not editable here) -->
+          <div class="fom-card fom-note-card">
+            <div class="fom-card-head">
+              <span>Always Excluded</span>
+            </div>
+            <div class="fom-card-desc">The sync also skips these messages on its own, whatever the settings above say. Matching ignores upper and lower case.</div>
+
+            <div class="fom-note">
+              <h3>By subject</h3>
+              <ul>
+                <li><strong>Calendar responses and invitations:</strong> subjects starting with Accepted, Declined, Tentative, Tentatively accepted, Canceled, Cancelled, Updated invitation, Invitation or New time proposed.</li>
+                <li><strong>Automatic replies:</strong> subjects starting with Automatic reply, Auto reply, Autoreply, Out of office or Out of the office.</li>
+                <li><strong>Bounces:</strong> subjects containing Undeliverable, Delivery status notification, Mail delivery failed or Mail delivery subsystem.</li>
+              </ul>
+
+              <h3>Automated senders</h3>
+              <ul>
+                <li><strong>No-reply addresses:</strong> noreply, no-reply, no.reply, no_reply, donotreply or do-not-reply anywhere in the name before the @, e.g. <code>jobalerts-noreply@</code>.</li>
+                <li><strong>Automated mailboxes:</strong> a name before the @ that is, or starts with, notification(s), alert(s), mailer-daemon, postmaster, news, newsletter, marketing, update(s), receipt(s) or digest, e.g. <code>alerts@</code> or <code>news.ca@</code>.</li>
+                <li><strong>Bulk-mail subdomains:</strong> a domain that starts with e, em, email, e-mail, mail, mailer, mc, tx, news, info, marketing, mp, s, go, m, t, link, reply, bounce, notify, notification(s), message(s), communication(s), connect, connected, members or travel (mp and travel can have digits after them, e.g. mp2), followed by another domain, e.g. <code>em.example.com</code>.</li>
+                <li><strong>Mailer platforms:</strong> addresses containing ccsend, mailchimp, sendgrid, constantcontact, hubspotemail, exacttarget, mcsv, rsgsv, medallia, knowbe4, zywave, linkedin, facebookmail or amazonses.</li>
+              </ul>
+            </div>
           </div>
 
         </div><!-- /fom-settings-body -->

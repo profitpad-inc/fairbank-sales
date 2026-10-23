@@ -304,12 +304,13 @@
   function isShortcutMod(e) { return isMac ? e.ctrlKey && !e.altKey && !e.metaKey : e.altKey && !e.ctrlKey && !e.metaKey; }
 
   // Rewrite one query param (null removes it). Also normalizes a URL that
-  // used "?" between params into a proper "&"-joined query.
+  // used "?" between params into a proper "&"-joined query. Keeps the
+  // entry's history state (syncHistory in initApp).
   function setUrlParam(key, value) {
     var p = readParams();
     if (value == null) p.delete(key); else p.set(key, value);
     var q = p.toString().replace(/%2C/gi, ",");
-    window.history.replaceState(null, "", window.location.pathname + (q ? "?" + q : "") + window.location.hash);
+    window.history.replaceState(window.history.state, "", window.location.pathname + (q ? "?" + q : "") + window.location.hash);
   }
 
   // ?e_product_ids=106331,110723&quantities=50,1 → [{id, qty}]. Missing or
@@ -388,6 +389,7 @@
     var lineSeq = 0;
     var quoteCache = {};         // productId → { loading, error, data }
     var hsQuotes = {};           // e_sorder_id → "checking" | "creating": View Quote in flight (nothing cached)
+    var newDraft = null;         // { customerId, shipTo }: the new order on the grid, kept for Back / Forward
 
     function newLine() {
       // comment: the line's Eclipse line comment (lineItemProduct.comments).
@@ -417,6 +419,14 @@
       return branchIdOf(shipTo && shipTo.home_branch) || branchIdOf(bt.home_branch) || branchIdOf(user.default_branch) || "";
     }
 
+    // Email a new order starts with: the ship-to's HubSpot
+    // e_recent_order_email (customer-lookup recent_order_email), else the
+    // bill-to's, else blank.
+    function recentEmail(shipTo) {
+      var bt = (state.customer && state.customer.bill_to) || {};
+      return String((shipTo && shipTo.recent_order_email) || bt.recent_order_email || "").trim().toLowerCase();
+    }
+
     function defaultHeader() {
       // Ship via starts blank (required for orders, optional for bids).
       // Customer release # is pre-filled from the bill-to's Eclipse default
@@ -435,6 +445,7 @@
         shippingInstructions: "",
         freightIn: "",           // totals box; sent to create-order as freight_in
         outsideSales: String(user.default_territory || "").trim(),  // outsideSalesOptions()
+        email: recentEmail(state.shipTo),  // contactFields(); sent as email
       };
     }
 
@@ -553,13 +564,17 @@
         if (state.header.shipBranch === defaultShipBranch(state.shipTo)) {
           state.header.shipBranch = defaultShipBranch(shipTo);
         }
+        // Same for the email, unless the rep changed it.
+        if (state.header.email === recentEmail(state.shipTo)) state.header.email = recentEmail(shipTo);
         state.shipTo = shipTo;
+        if (newDraft) newDraft.shipTo = shipTo;
         state.view = "order";
         render();
         return;
       }
       state.keepOrder = false;
       state.shipTo = shipTo;
+      newDraft = { customerId: state.customerId, shipTo: shipTo };
       state.header = defaultHeader();
       state.lines = [newLine()];
       state.customModal = null;
@@ -579,6 +594,9 @@
         urlProducts.forEach(function (p) { fetchQuote(p.id); lookupDescription(p.id); });
         urlProducts = [];
       }
+      // Phones and touch screens: no field focused on open, so the keyboard
+      // stays down until the rep taps a box.
+      if (phoneDates()) state.focus = { r: -1, c: 0 };
       state.placeError = null;
       state.result = null;
       state.view = "order";
@@ -669,6 +687,7 @@
     }
 
     function openExisting(order, shipTo, saved) {
+      newDraft = null;
       state.existing = order;
       state.shipTo = shipTo;
       state.keepOrder = false;
@@ -856,10 +875,34 @@
       return q && q.data ? parseFloat(q.data.unit_cost) : NaN;
     }
 
-    // Floor for any unit price: unit cost + $0.01. Null when cost is unknown.
+    // Lowest quantity break price in the product's pricing lookup. Null
+    // when it has no breaks.
+    function lowestBreak(line) {
+      var q = quoteOf(line);
+      var breaks = q && q.data && Array.isArray(q.data.quantity_breaks) ? q.data.quantity_breaks : [];
+      var low = null;
+      breaks.forEach(function (b) {
+        var p = parseFloat(b.unitPrice);
+        if (isFinite(p) && (low == null || p < low)) low = p;
+      });
+      return low;
+    }
+
+    // Floor for any unit price: unit cost + $0.01, unless the lowest
+    // quantity break is under that, then the lowest break (breaks win over
+    // the cost floor, 2026-10-22). Null when cost is unknown.
     function minPrice(line) {
       var cost = lineCost(line);
-      return isFinite(cost) ? Math.round((cost + 0.01) * 1000) / 1000 : null;
+      if (!isFinite(cost)) return null;
+      var m = Math.round((cost + 0.01) * 1000) / 1000;
+      var low = lowestBreak(line);
+      return low != null && low < m ? low : m;
+    }
+
+    // True when minPrice() is the lowest quantity break, not cost + $0.01.
+    function floorIsBreak(line) {
+      var low = lowestBreak(line), m = minPrice(line);
+      return low != null && m != null && low === m && low < Math.round((lineCost(line) + 0.01) * 1000) / 1000;
     }
 
     // Eclipse's own price for the qty (quantity breaks), before the floor.
@@ -878,7 +921,7 @@
     }
 
     // True when the order must send an explicit unitPrice: the rep typed
-    // one, or Eclipse's price is under the cost + $0.01 floor.
+    // one, or Eclipse's price is under the floor (minPrice()).
     function sendsPrice(line) {
       if (line.priceOverride) return true;
       var a = autoPrice(line), m = minPrice(line);
@@ -1241,6 +1284,7 @@
       // Ship via is required for an order but not a bid; a blank bid is sent
       // without one (the create-order flow omits shipVia).
       if (mode !== "bid" && !h.shipVia) return "Pick a ship via.";
+      if (String(h.email || "").trim() && !EMAIL_RE.test(String(h.email).trim().toLowerCase())) return "Enter a valid email.";
       if (mode === "order" && creditLimitReason()) return creditLimitReason();
       if (h.requiredDate && h.shipDate && h.requiredDate < h.shipDate) return "Required date cannot be before ship date.";
       if (!user.e_user_id) return "Sign in again: no Eclipse user on this session.";
@@ -1271,6 +1315,7 @@
       if (newSide) newSide.scrollTop = sideTop;
       scrollActiveTab();
       paintHeader();
+      syncHistory();
       afterRender();
     }
 
@@ -1576,7 +1621,9 @@
         '<div class="fop-ac__list" id="fop-customer-list" role="listbox"></div>' +
         "</div>" +
         '<div class="fop-hint">↑ ↓ to move, Enter to pick. Prefix with a dot (.12345) to search by ID.</div>' +
-        "</div></div>"
+        "</div>" +
+        '<a class="fop-xlink" href="../product-lookup/">Find an order by product</a>' +
+        "</div>"
       );
     }
 
@@ -1827,6 +1874,26 @@
       return field("Outside sales", selectHtml("outsideSales", outsideSalesOptions(), state.header.outsideSales, "Select…"));
     }
 
+    // Email and phone, on their own row above writer / outside sales. A new
+    // order: Customer P/O # then email (editable, starts from the last
+    // order, recentEmail(); sent to create-order as email), no phone. An existing order: both
+    // read-only, the order's own (order-lookup email / phone).
+    function contactFields() {
+      var ex = state.existing;
+      if (!ex) {
+        return poField("fop-field--row") + field("Email", '<input class="fop-input" type="email" data-head="email" autocomplete="off" spellcheck="false" value="' + esc(state.header.email) + '">' +
+          '<span class="fop-branch-hint" data-cell="email-note">' + emailNote() + "</span>");
+      }
+      return field("Email", '<input class="fop-input" value="' + esc(ex.email || "") + '" disabled>', "fop-field--row") +
+        field("Phone", '<input class="fop-input" value="' + esc(ex.phone || "") + '" disabled>');
+    }
+
+    // Under a new order's Email while it still holds the pre-filled address.
+    function emailNote() {
+      var h = state.header;
+      return h.email && h.email === recentEmail(state.shipTo) ? "From the last order." : "";
+    }
+
     function poField(cls) {
       var h = state.header;
       return field("Customer P/O #", '<input class="fop-input" data-head="po" maxlength="30" value="' + esc(h.po) + '"' + lockAttr("po") + ">", cls);
@@ -1977,11 +2044,13 @@
         // Order date is never editable: the order's own, or today on a new
         // order (Eclipse dates it when it is created).
         field("Order date", '<input class="fop-input" value="' + esc(dateText(state.existing ? state.existing.order_date : isoDate(0))) + '" disabled>') +
+        contactFields() +
         writerField() + outsideSalesField() + orderInfoField("insideSales") +
-        // A new order or a bid: P/O ends the writer row and release is hidden
-        // (a new order still sends the bill-to's default release). Other
-        // orders: P/O, release and print status on their own row.
-        poField(linesLocked() ? "fop-field--row" : "") +
+        // A new order: P/O sits before email (contactFields()). A bid: P/O
+        // ends the writer row. Release is hidden on both (a new order still
+        // sends the bill-to's default release). Other orders: P/O, release
+        // and print status on their own row.
+        (state.existing ? poField(linesLocked() ? "fop-field--row" : "") : "") +
         (linesLocked() ? field("Customer release #", '<input class="fop-input" data-head="release" maxlength="30" value="' + esc(h.release) + '"' + lockAttr("release") + ">") : "") +
         orderInfoField("printStatus") +
         // Bottom row: shipping instructions left, internal notes right.
@@ -2393,7 +2462,7 @@
       var a = autoPrice(line);
       var autoLow = !line.priceOverride && a != null && m != null && a < m;
       var raised = (line.priceRaised || autoLow) && m != null
-        ? '<span class="fop-warn-text fop-block">Price raised to the minimum, cost + $0.01 (' + unitMoney(m) + ")</span>" : "";
+        ? '<span class="fop-warn-text fop-block">Price raised to the minimum, ' + (floorIsBreak(line) ? "the lowest quantity break" : "cost + $0.01") + " (" + unitMoney(m) + ")</span>" : "";
       var mx = maxPrice(line);
       var capped = line.priceCapped && mx != null
         ? '<span class="fop-warn-text fop-block">Price capped at the original unit price (' + unitMoney(mx) + ")</span>" : "";
@@ -4034,6 +4103,7 @@
       var field =
         blocked === "Pick a ship branch." ? "shipBranch" :
         blocked === "Pick a ship via." ? "shipVia" :
+        blocked === "Enter a valid email." ? "email" :
         blocked === seeInstructionReason() ? "shippingInstructions" :
         blocked === "Required date cannot be before ship date." ? "requiredDate" : null;
       if (field) flashField(root.querySelector('#fop-head [data-head="' + field + '"]'));
@@ -4078,6 +4148,9 @@
     // stays up (Placing… / Updating…) until it has loaded. If the reload
     // fails, the done screen is shown instead (the bid was saved either way).
     function reopenAfterSave(id, data) {
+      // The saved order takes the place of the new order (or the old
+      // generation) in the browser history, so Back skips the stale grid.
+      navReplace = true;
       return getJson(API.order, { e_sorder_id: id })
         .then(function (o) {
           var placed = data.mode === "bid" || data.mode === "order";
@@ -4269,7 +4342,7 @@
         freight_in: freightInValue(),
         writer: user.e_user_id,
         outside_sales: h.outsideSales || "",
-        email: user.email || "",
+        email: String(h.email || "").trim().toLowerCase(),
         // ship_branch per line: lines on another branch than the header's
         // become their own generation (one per branch) in create-order.
         lines: filledLines().map(function (l) {
@@ -4309,6 +4382,7 @@
     // ?e_sorder_id has no list yet, so it loads its bill-to's.
     function exitToOrders() {
       var lc = state.listCustomer;
+      newDraft = null;
       leaveExisting();
       if (!lc) { loadCustomer(state.customerId); return; }
       if (state.customer !== lc.data) quoteCache = {};
@@ -4322,6 +4396,7 @@
     }
 
     function goToCustomerSearch() {
+      newDraft = null;
       leaveExisting();
       state.view = "customer";
       state.customer = null;
@@ -4329,6 +4404,126 @@
       setUrlParam("e_customer_id", null);
       render();
     }
+
+    // ── Browser Back / Forward (2026-10-22) ─────────────────────────────────
+    // Every screen is one history entry: the customer search, a customer's
+    // orders list, the ship-to pick, a new order, and each generation of an
+    // existing order. render() pushes an entry when the screen changes
+    // (syncHistory); Back and Forward put that screen back (popstate) from
+    // what is already loaded where possible. Loading screens, errors and the
+    // done fallback get no entry of their own. Leaving an order with unsaved
+    // changes asks first, as Exit does; Cancel steps the browser back to the
+    // entry on show (history.go, never a new entry: Chrome skips entries a
+    // page adds without a click when going Back).
+    var popping = false;         // a Back / Forward is being restored: replace, don't push
+    var navReplace = false;      // the next screen replaces the current entry (after a save)
+    var navUndo = false;         // the next popstate is that step back: ignore it
+    var curEntry = null;         // the entry for the screen on show ({ fop, url, i })
+
+    // The screen on show as a history key, or "" for none.
+    function navKey() {
+      switch (state.view) {
+        case "customer": return "customer";
+        case "orders": return "orders:" + state.customerId;
+        case "shipto": return "shipto:" + state.customerId;
+        case "order": return state.existing ? "order:" + state.existing.e_sorder_id : "new:" + state.customerId;
+        default: return "";
+      }
+    }
+
+    function syncHistory() {
+      if (state.view === "loading") return;
+      var key = navKey();
+      if (!key) { popping = navReplace = false; return; }
+      var cur = window.history.state;
+      var at = cur && cur.fop ? cur.i || 0 : 0;
+      var entry = { fop: key, url: window.location.pathname + window.location.search + window.location.hash, i: at };
+      if (cur && cur.fop === key) {
+        if (cur.url !== entry.url) window.history.replaceState(entry, "", entry.url);
+      } else if (popping || navReplace || !cur || !cur.fop) {
+        window.history.replaceState(entry, "", entry.url);
+      } else {
+        entry.i = at + 1;
+        window.history.pushState(entry, "", entry.url);
+      }
+      curEntry = entry;
+      popping = navReplace = false;
+    }
+
+    function navParts(key) {
+      var i = key.indexOf(":");
+      return i < 0 ? { kind: key, id: "" } : { kind: key.slice(0, i), id: key.slice(i + 1) };
+    }
+
+    // The open order's generation with this e_sorder_id, if any.
+    function sameOrderGen(id) {
+      if (state.view !== "order" || !state.existing || !state.order) return null;
+      return (state.order.generations || []).filter(function (g) { return String(g.e_sorder_id) === id; })[0] || null;
+    }
+
+    // May the page leave the screen on show for this one?
+    function navLeaveOk(to) {
+      var t = navParts(to);
+      if (sameOrderGen(t.id)) return true;   // another tab of the same order keeps its edits
+      if (state.view === "order" && !state.existing && t.kind === "shipto") return true;   // Change ship-to keeps the lines
+      if (state.view === "order" || (state.view === "shipto" && state.keepOrder)) return confirmLeave();
+      return true;
+    }
+
+    function navTo(to) {
+      var t = navParts(to);
+      state.confirm = null;
+      state.cancelAsk = false;
+      state.placeError = null;
+      state.logModal = false;
+      state.quoteModal = null;
+      state.customModal = null;
+      state.detailsModal = null;
+      state.branchMenu = null;
+      if (t.kind === "customer") { goToCustomerSearch(); return; }
+      if (t.kind === "order") {
+        var gen = sameOrderGen(t.id);
+        state.notice = null;
+        if (gen) openGen(gen.generation_id);
+        else { newDraft = null; urlProducts = []; loadExistingOrder(t.id); }
+        return;
+      }
+      // orders / shipto / new: on the customer the orders list was opened for.
+      var lc = state.listCustomer;
+      if (!lc || lc.id !== t.id) { newDraft = null; leaveExisting(); loadCustomer(t.id); return; }
+      if (t.kind === "orders") { exitToOrders(); return; }
+      var draft = newDraft && newDraft.customerId === t.id ? newDraft : null;
+      leaveExisting();
+      if (state.customer !== lc.data) quoteCache = {};
+      state.customer = lc.data;
+      state.customerId = lc.id;
+      setUrlParam("e_customer_id", lc.id);
+      if (t.kind === "shipto") {
+        state.keepOrder = !!draft;
+        state.view = "shipto";
+        render();
+      } else if (draft) {
+        state.shipTo = draft.shipTo;
+        state.view = "order";
+        render();
+      } else {
+        newOrderFromList();
+      }
+    }
+
+    window.addEventListener("popstate", function (e) {
+      var to = e.state && e.state.fop;
+      if (navUndo) { navUndo = false; return; }
+      if (!to) return;   // not an entry this page made
+      if (state.placing || !navLeaveOk(to)) {
+        var back = curEntry ? curEntry.i - (e.state.i || 0) : 0;
+        if (back) { navUndo = true; window.history.go(back); }
+        return;
+      }
+      window.history.replaceState(e.state, "", e.state.url);
+      popping = true;
+      navTo(to);
+    });
 
     // Desktop: a click on the dimmed backdrop around any dialog closes it,
     // the same as Esc (change log on request, then every dialog 2026-10-19).
@@ -4545,6 +4740,12 @@
       }
       if (key) {
         state.header[key] = t.value;
+        if (key === "email") {
+          // Lowercase on leaving the box.
+          state.header.email = t.value = t.value.trim().toLowerCase();
+          var en = root.querySelector('[data-cell="email-note"]');
+          if (en) en.textContent = emailNote();
+        }
         // A ship branch picked in the header: every line ships from it again.
         if (key === "shipBranch") {
           state.lines.forEach(function (l) { l.branch = ""; });
@@ -4989,9 +5190,10 @@
     var header = document.createElement("header");
     header.className = "fop-header";
     header.innerHTML =
+      '<div class="fop-header__start">' +
       '<div class="fop-header__logo">' +
       '<img src="fairbank-mark.png" alt="Fairbank" width="32" height="24">' +
-      "</div>" +
+      "</div>" + toolsMenuHtml("order-placement") + "</div>" +
       '<div class="fop-header__end">' +
       '<span class="fop-header__links" data-cell="hdr-links"></span>' +
       '<div class="fop-umenu">' +
@@ -5001,6 +5203,7 @@
       '<span class="fop-umenu__name fop-umenu__name--first">' + esc(name.split(/\s+/)[0]) + "</span>" +
       '<svg class="fop-umenu__caret" viewBox="0 0 10 6" aria-hidden="true"><path d="M0 0h10L5 6z" fill="currentColor"/></svg></button>' +
       '<div class="fop-umenu__panel" hidden>' +
+      '<div class="fop-umenu__tools"><span class="fop-umenu__lbl">Tools</span>' + toolsItemsHtml("order-placement") + "</div>" +
       (user.email ? '<div class="fop-umenu__row"><span class="fop-umenu__lbl">Email</span>' + esc(user.email) + "</div>" : "") +
       '<div class="fop-umenu__row"><span class="fop-umenu__lbl">Eclipse ID</span>' + esc(user.e_user_id || "") + "</div>" +
       '<button type="button" class="fop-umenu__theme"></button>' +
@@ -5011,21 +5214,11 @@
     bindThemeBtn(header.querySelector(".fop-umenu__theme"));
     header.querySelector(".fop-umenu__out").addEventListener("click", function () { window.fbSignOut(); });
 
-    // User menu: the name button toggles it; a click outside or Escape
-    // closes it (Escape puts focus back on the button).
-    var menuBtn = header.querySelector(".fop-umenu__btn");
-    var menu = header.querySelector(".fop-umenu__panel");
-    function setMenu(open) {
-      menu.hidden = !open;
-      menuBtn.setAttribute("aria-expanded", open ? "true" : "false");
-    }
-    menuBtn.addEventListener("click", function () { setMenu(menu.hidden); });
-    document.addEventListener("click", function (e) {
-      if (!menu.hidden && !header.querySelector(".fop-umenu").contains(e.target)) setMenu(false);
-    });
-    document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && !menu.hidden) { setMenu(false); menuBtn.focus(); }
-    });
+    // User menu and Tools menu: the button toggles its panel (opening one
+    // closes the other); a click outside or Escape closes it (Escape puts
+    // focus back on the button).
+    bindHeaderMenu(header, ".fop-umenu");
+    bindHeaderMenu(header, ".fop-tools");
 
     // Phones only (the class does nothing on desktop, see styles.css): hide
     // on a scroll down past the header, show again on a scroll up. Moves
@@ -5040,6 +5233,49 @@
       lastY = y;
     }, { passive: true });
     return header;
+  }
+
+  // Tools menu (2026-10-23), left of the bar beside the mark: links to the
+  // site's pages, the current one marked. Same markup in
+  // ../product-lookup/app.js.
+  var TOOLS = [
+    ["order-placement", "Order placement", "../order-placement/"],
+    ["product-lookup", "Find order by product", "../product-lookup/"],
+  ];
+
+  function toolsMenuHtml(current) {
+    return '<div class="fop-tools">' +
+      '<button type="button" class="fop-tools__btn" aria-haspopup="true" aria-expanded="false">Tools' +
+      '<svg class="fop-umenu__caret" viewBox="0 0 10 6" aria-hidden="true"><path d="M0 0h10L5 6z" fill="currentColor"/></svg></button>' +
+      '<div class="fop-tools__panel" hidden>' + toolsItemsHtml(current) + "</div></div>";
+  }
+
+  // The page links, also at the top of the user menu on phones, where the
+  // Tools button is hidden (styles.css).
+  function toolsItemsHtml(current) {
+    return TOOLS.map(function (t) {
+      var on = t[0] === current;
+      return '<a class="fop-tools__item' + (on ? " fop-tools__item--on" : "") + '" href="' + t[2] + '"' + (on ? ' aria-current="page"' : "") + ">" + esc(t[1]) + "</a>";
+    }).join("");
+  }
+
+  // One header dropdown (wrap = ".fop-umenu" or ".fop-tools"): its first
+  // button toggles its panel.
+  function bindHeaderMenu(header, wrap) {
+    var box = header.querySelector(wrap);
+    var btn = box.querySelector("button");
+    var panel = box.querySelector(wrap + "__panel");
+    function setOpen(open) {
+      panel.hidden = !open;
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+    btn.addEventListener("click", function () { setOpen(panel.hidden); });
+    document.addEventListener("click", function (e) {
+      if (!panel.hidden && !box.contains(e.target)) setOpen(false);
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !panel.hidden) { setOpen(false); btn.focus(); }
+    });
   }
 
   function boot() {
