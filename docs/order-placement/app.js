@@ -53,6 +53,7 @@
     order: N8N + "e-order-placement/order",
     updateBid: N8N + "e-order-placement/update-bid",
     cancelOrder: N8N + "e-order-placement/cancel-order",
+    pickUpNow: N8N + "e-order-placement/pick-up-now",
     customer: N8N + "e-order-placement/customer",
     customerOrders: N8N + "e-order-placement/customer-orders",
     orderChangelog: N8N + "e-order-placement/order-changelog",
@@ -160,10 +161,13 @@
 
   function statusLabel(s) { return STATUS_LABELS[s] || s || "Unknown"; }
 
-  // Pick Up Now: offered in Place Order and Convert to Order only when the
-  // ship via is CPU PICK UP; the rep then picks a printer at the ship branch.
+  // Pick Up Now: first (and the default) in Place Order and Convert to Order
+  // when every line is in stock at the ship branch; the rep then picks a
+  // printer at that branch, and the order is invoiced and its ticket printed.
   var PICK_UP_NOW = ["Pick Up Now", "PickUpNow"];
-  var PICK_UP_SHIP_VIA = "CPU PICK UP";
+  // Eclipse's change log entry once the ticket has printed, e.g. ' Printed
+  // Ship Ticket on printer "15-Shipping" using "Automatically Select".'
+  var PRINTED_RE = /^Printed .*Ticket on printer/i;
 
   // Printers by ship branch id: [printerId, printerName]. Static for now
   // (the list the user gave on 2026-10-22).
@@ -1027,7 +1031,10 @@
     function lineStock(line) {
       var q = quoteOf(line);
       if (!q || !q.data) return null;
-      var stock = Array.isArray(q.data.stock_info) ? q.data.stock_info : [];
+      // Rows with no branch in `warehouse` (" - ", seen 2026-10-23 on product
+      // 246: 25 rows of qty 1 after the real branches) are dropped, so they
+      // get no tile and are not counted in All.
+      var stock = (Array.isArray(q.data.stock_info) ? q.data.stock_info : []).filter(function (x) { return branchIdOf(x.warehouse); });
       var branch = lineBranch(line);
       var atBranch = 0, total = 0;
       for (var i = 0; i < stock.length; i++) {
@@ -3559,11 +3566,35 @@
       return !!state.confirm && (state.confirm.mode === "order" || state.confirm.mode === "convert");
     }
 
-    // The statuses the dialog offers: Place Order and Convert to Order with
-    // ship via CPU PICK UP add "6. Pick Up Now".
+    // The statuses the dialog offers: "1. Pick Up Now" first when it is
+    // available (any ship via), then the usual five.
     function confirmStatuses() {
-      var pickUp = confirmIsOrder() && state.header.shipVia === PICK_UP_SHIP_VIA;
-      return pickUp ? ORDER_STATUSES.concat([PICK_UP_NOW]) : ORDER_STATUSES;
+      return confirmIsOrder() && !pickUpReason() ? [PICK_UP_NOW].concat(ORDER_STATUSES) : ORDER_STATUSES;
+    }
+
+    // Why Pick Up Now is not offered ("" when it is): every product line of
+    // the generation must ship from the header's branch and be in stock
+    // there. A bid with other Bid generations is left out, since Convert to
+    // Order converts them all at once.
+    function pickUpReason() {
+      if (!confirmIsOrder()) return "";
+      var h = state.header;
+      var br = branchIdOf(h.shipBranch);
+      var no = "Pick Up Now isn't an option: ";
+      if (state.confirm.mode === "convert") {
+        var others = ((state.order && state.order.generations) || []).filter(function (g) {
+          return g.status === "Bid" && g.e_sorder_id !== state.existing.e_sorder_id;
+        });
+        if (others.length) return no + "this bid has other generations (" + others.map(function (g) { return g.e_sorder_id; }).join(", ") + ") that convert with it.";
+      }
+      var ls = filledLines().filter(function (l) { return !isFreightLine(l); });
+      if (customLines().length || ls.some(isItemLine)) return no + "custom lines are never in stock at branch " + br + ".";
+      if (ls.some(function (l) { return lineBranch(l) !== h.shipBranch; })) return no + "some lines ship from another branch.";
+      if (ls.some(function (l) { return !lineStock(l); })) return no + "the stock at branch " + br + " is still loading.";
+      if (ls.some(function (l) { return lineStock(l).atBranch < Number(l.qty); })) {
+        return no + "not everything in this generation is in stock at branch " + br + ".";
+      }
+      return "";
     }
 
     function isPickUpNow() {
@@ -3586,6 +3617,7 @@
         list.map(function (o, i) {
           return '<option value="' + esc(o[1]) + '"' + (o[1] === h.orderStatus ? " selected" : "") + ">" + (i + 1) + ". " + esc(o[0]) + "</option>";
         }).join("") + "</select></div>" +
+        (pickUpReason() ? '<div class="fop-muted fop-confirm-gens">' + esc(pickUpReason()) + "</div>" : "") +
         (isPickUpNow() ? printerPickerHtml() : "");
     }
 
@@ -3690,7 +3722,7 @@
         '<button class="fop-btn fop-btn--ghost" data-action="cancel-place"' + (state.placing ? " disabled" : "") + ">Back <span class=\"fop-key\">Esc</span></button>" +
         '<button class="fop-btn" data-action="confirm-place"' + (state.placing ? " disabled" : "") +
         (needsStatus() ? ' aria-disabled="true" title="Pick an order status."' : needsPrinter() ? ' aria-disabled="true" title="Pick a printer."' : "") + ">" +
-        (state.placing ? (isPickUpNow() ? "Fake printing..." : "Placing…") : (isBid ? "Place Bid" : isPickUpNow() ? "Print Now" : "Place Order") + ' <span class="fop-key fop-key--dark">Enter</span>') +
+        (state.placing ? (isPickUpNow() ? state.pickUpStep || "Placing…" : "Placing…") : (isBid ? "Place Bid" : isPickUpNow() ? "Print Now" : "Place Order") + ' <span class="fop-key fop-key--dark">Enter</span>') +
         "</button></div></div></div>"
       );
     }
@@ -3759,7 +3791,7 @@
         '<button class="fop-btn fop-btn--ghost" data-action="cancel-place"' + (state.placing ? " disabled" : "") + ">Back <span class=\"fop-key\">Esc</span></button>" +
         '<button class="fop-btn" data-action="confirm-place"' + (state.placing ? " disabled" : "") +
         (needsStatus() ? ' aria-disabled="true" title="Pick an order status."' : needsPrinter() ? ' aria-disabled="true" title="Pick a printer."' : "") + ">" +
-        (state.placing ? (isPickUpNow() ? "Fake printing..." : convert ? "Converting…" : "Updating…") : (convert ? (isPickUpNow() ? "Print Now" : "Convert to Order") : "Update Bid") + ' <span class="fop-key fop-key--dark">Enter</span>') +
+        (state.placing ? (isPickUpNow() ? state.pickUpStep || "Converting…" : convert ? "Converting…" : "Updating…") : (convert ? (isPickUpNow() ? "Print Now" : "Convert to Order") : "Update Bid") + ' <span class="fop-key fop-key--dark">Enter</span>') +
         "</button></div></div></div>"
       );
     }
@@ -4190,6 +4222,11 @@
       // holds "Bid" until then).
       if (mode === "convert") state.header.orderStatus = "";
       state.confirm = { mode: mode };
+      // Pick Up Now is the default whenever it is offered.
+      if (confirmIsOrder()) {
+        if (!pickUpReason()) state.header.orderStatus = PICK_UP_NOW[1];
+        else if (state.header.orderStatus === PICK_UP_NOW[1]) state.header.orderStatus = "";
+      }
       state.placeError = null;
       render();
     }
@@ -4226,7 +4263,8 @@
           var placed = data.mode === "bid" || data.mode === "order";
           var what = data.what === "bid" ? "Bid " : "Order ";
           state.notice = {
-            text: data.mode === "cancel" ? what + (data.e_sorder_id || id) + " cancelled."
+            // Pick Up Now brings its own text (then updates it while printing).
+            text: data.noticeText ? data.noticeText : data.mode === "cancel" ? what + (data.e_sorder_id || id) + " cancelled."
               : placed ? (data.mode === "bid" ? "Bid " : "Order ") + (data.e_sorder_id || id) + " placed." + splitNote(data)
               : data.mode === "convert" ? "Bid converted to an order (" + statusLabel(data.status) + ")" + savedAt(o) + "." + movedNote(data)
               : data.unchanged ? "Nothing to update; the bid already matched Eclipse." : "Bid updated" + savedAt(o) + "." + movedNote(data),
@@ -4275,28 +4313,31 @@
       return out;
     }
 
-    // Update Bid, or Convert to Order (orderStatus: the picked status). One
-    // update-bid call saves the header and line changes, then converts.
-    function updateBid(orderStatus) {
-      var ex = state.existing;
+    // update-bid's body: the bid's changes, plus order_status to convert.
+    function updateBidBody(orderStatus) {
       var ch = bidChanges();
-      // Started from View Quote: open the quote once the bid is saved.
-      var thenQuote = !orderStatus && !!(state.confirm && state.confirm.thenQuote);
-      var saved = false;
-      state.placing = true;
-      state.placeError = null;
-      render();
       var body = {
-        e_sorder_id: ex.e_sorder_id,
+        e_sorder_id: state.existing.e_sorder_id,
         writer: user.e_user_id,
         header: ch.header,
         lines: ch.lines,
         custom_lines: ch.custom_lines,
       };
       if (orderStatus) body.order_status = orderStatus;
-      // Pick Up Now: the printer the rep picked (update-bid does not use it yet).
-      if (orderStatus === PICK_UP_NOW[1] && state.confirm && state.confirm.printerId) body.printer_id = Number(state.confirm.printerId);
-      postJson(API.updateBid, body)
+      return body;
+    }
+
+    // Update Bid, or Convert to Order (orderStatus: the picked status). One
+    // update-bid call saves the header and line changes, then converts.
+    function updateBid(orderStatus) {
+      var ex = state.existing;
+      // Started from View Quote: open the quote once the bid is saved.
+      var thenQuote = !orderStatus && !!(state.confirm && state.confirm.thenQuote);
+      var saved = false;
+      state.placing = true;
+      state.placeError = null;
+      render();
+      postJson(API.updateBid, updateBidBody(orderStatus))
         .then(function (data) {
           data.mode = orderStatus ? "convert" : "update";
           data.status = orderStatus;
@@ -4355,45 +4396,127 @@
       render();
     }
 
-    // Pick Up Now: printing is not wired up yet, so Print Now only pretends
-    // (3 seconds of "Fake printing...") and closes the dialog. Nothing is
-    // sent to n8n or Eclipse.
-    function fakePrint() {
-      state.placing = true;
-      state.placeError = null;
-      render();
-      setTimeout(function () {
-        state.placing = false;
-        state.confirm = null;
-        render();
-      }, 3000);
+    function wait(ms) {
+      return new Promise(function (resolve) { setTimeout(resolve, ms); });
     }
 
-    function place() {
+    // Print Now (Pick Up Now): place the order (create-order) or convert the
+    // bid (update-bid) with status PickUpNow, wait 0.5 s, set it to Invoice
+    // (pick-up-now, action invoice), reopen it with "now printing", then
+    // print the ticket (printTicket). A failed placement stays in the
+    // dialog; once the order exists, a failed step shows on the order.
+    function pickUpNow() {
       var mode = state.confirm.mode;
-      var h = state.header;
-      if (mode === "update") { updateBid(); return; }
-      // An order needs a status picked in the dialog; blank flashes the box.
-      if ((mode === "order" || mode === "convert") && !h.orderStatus) {
-        var st = root.querySelector("#fop-confirm-status");
-        flashField(st);
-        if (st) st.focus();
-        return;
-      }
-      // Pick Up Now needs a printer; blank flashes the printer box.
-      if (needsPrinter()) {
-        var pr = root.querySelector("#fop-confirm-printer");
-        flashField(pr);
-        if (pr) pr.focus();
-        return;
-      }
-      if (isPickUpNow()) { fakePrint(); return; }
-      if (mode === "convert") { updateBid(h.orderStatus); return; }
-      var c = state.customer;
+      var printer = branchPrinters().filter(function (p) { return String(p[0]) === String(state.confirm.printerId); })[0];
+      var ex = state.existing;
+      var id = "";
       state.placing = true;
       state.placeError = null;
+      state.pickUpStep = mode === "convert" ? "Converting…" : "Placing…";
       render();
-      postJson(API.createOrder, {
+      var saved = mode === "convert"
+        ? postJson(API.updateBid, updateBidBody(PICK_UP_NOW[1]))
+        : postJson(API.createOrder, createOrderBody(mode));
+      saved
+        .then(function (data) {
+          id = data.e_sorder_id || (ex ? ex.e_sorder_id : "");
+          state.result = data;
+          state.ordersList = null;
+          if (!id) { state.confirm = null; state.view = "done"; return; }
+          state.pickUpStep = "Invoicing…";
+          render();
+          return wait(500)
+            .then(function () { return postJson(API.pickUpNow, { e_sorder_id: id, writer: user.e_user_id, action: "invoice" }); })
+            .then(function (inv) {
+              data.noticeText = "Order " + id + " updated, now printing on " + printer[1] + "…";
+              data.hubspot_sync = inv.hubspot_sync;
+              return reopenAfterSave(id, data).then(function () {
+                if (state.view === "order" && state.notice) printTicket(id, printer, state.notice);
+              });
+            }, function (err) {
+              data.noticeText = "Order " + id + " is Pick Up Now, but it could not be invoiced, so nothing was printed.";
+              data.warning = err.message;
+              return reopenAfterSave(id, data);
+            });
+        })
+        .catch(function (err) {
+          state.placeError = placeErrorFrom(err);
+        })
+        .then(function () {
+          state.placing = false;
+          state.pickUpStep = "";
+          render();
+        });
+    }
+
+    // Change log entries saying a ticket printed on this generation, as
+    // "at|comment" keys.
+    function printedKeys(log, id) {
+      var gen = String(Number(String(id).split(".")[1] || 1));
+      var out = {};
+      ((log && log.entries) || []).forEach(function (e) {
+        var c = String(e.comment || "").trim();
+        var gens = (e.gens || []).map(String);
+        if (PRINTED_RE.test(c) && (gens.indexOf("ALL") >= 0 || gens.indexOf(gen) >= 0)) out[e.at + "|" + c] = c;
+      });
+      return out;
+    }
+
+    // Print the invoiced order's ticket, then read the change log every
+    // second (each read starts 1 s after the last one answered) until a new
+    // "Printed … Ticket on printer …" entry shows, for up to 60 seconds.
+    // The note on the order (`note`) says how it went; leaving the order
+    // stops the watch.
+    function printTicket(id, printer, note) {
+      var here = function () { return state.notice === note; };
+      var base = {};
+      var start = 0;
+      function tell(text, warning) {
+        if (!here()) return;
+        note.text = text;
+        note.warning = warning || "";
+        render();
+      }
+      function poll() {
+        if (!here()) return;
+        getJson(API.orderChangelog, { e_sorder_id: id })
+          .then(function (log) {
+            var now = printedKeys(log, id);
+            var fresh = Object.keys(now).filter(function (k) { return !base[k]; })[0];
+            if (fresh) {
+              state.changeLog = null;   // the Change log dialog refetches
+              tell("Order " + id + " invoiced. " + now[fresh]);
+              return true;
+            }
+          }, function () { return false; })
+          .then(function (done) {
+            if (done || !here()) return;
+            if (Date.now() - start > 60000) {
+              tell("Order " + id + " invoiced and sent to " + printer[1] + ".",
+                "Eclipse's change log has not shown the print after 60 seconds. Check the printer and the Change log.");
+              return;
+            }
+            setTimeout(poll, 1000);
+          });
+      }
+      getJson(API.orderChangelog, { e_sorder_id: id })
+        .then(function (log) { base = printedKeys(log, id); }, function () {})
+        .then(function () {
+          return postJson(API.pickUpNow, { e_sorder_id: id, writer: user.e_user_id, action: "print", printer_id: Number(printer[0]) });
+        })
+        .then(function () {
+          start = Date.now();
+          setTimeout(poll, 1000);
+        }, function (err) {
+          tell("Order " + id + " invoiced, but the ticket did not print.", "Printing on " + printer[1] + " failed: " + err.message);
+        });
+    }
+
+    // create-order's body for a new bid or order (mode "bid" or "order").
+    function createOrderBody(mode) {
+      var h = state.header;
+      var c = state.customer;
+      return {
         bill_to_id: c.bill_to.e_customer_id,
         ship_to_id: state.shipTo.e_customer_id,
         ship_branch: h.shipBranch,
@@ -4421,9 +4544,33 @@
         }),
         // Custom lines (bid only), placed in their page order as product 15680.
         custom_lines: customPayload(),
-        // Pick Up Now: the printer the rep picked (create-order does not use it yet).
-        printer_id: isPickUpNow() && state.confirm.printerId ? Number(state.confirm.printerId) : undefined,
-      })
+      };
+    }
+
+    function place() {
+      var mode = state.confirm.mode;
+      var h = state.header;
+      if (mode === "update") { updateBid(); return; }
+      // An order needs a status picked in the dialog; blank flashes the box.
+      if ((mode === "order" || mode === "convert") && !h.orderStatus) {
+        var st = root.querySelector("#fop-confirm-status");
+        flashField(st);
+        if (st) st.focus();
+        return;
+      }
+      // Pick Up Now needs a printer; blank flashes the printer box.
+      if (needsPrinter()) {
+        var pr = root.querySelector("#fop-confirm-printer");
+        flashField(pr);
+        if (pr) pr.focus();
+        return;
+      }
+      if (isPickUpNow()) { pickUpNow(); return; }
+      if (mode === "convert") { updateBid(h.orderStatus); return; }
+      state.placing = true;
+      state.placeError = null;
+      render();
+      postJson(API.createOrder, createOrderBody(mode))
         .then(function (data) {
           data.mode = mode;
           state.result = data;
