@@ -1770,3 +1770,9 @@ html[data-theme="light"] .fop-tabst--open { color: #1f6fbf; border-color: rgba(3
   .fop-tabst { display: none; } /* phones: no tab status (2026-10-21, on request) */
 }
 
+
+/* Phones: every box is at least 16px so iOS does not zoom in on focus
+   (`html .fop-app { font-size: 14px }` above would leave the rest at 14px). */
+@media (max-width: 767px) {
+  html .fop-app .fop-input { font-size: 16px; }
+}

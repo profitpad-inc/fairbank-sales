@@ -1551,3 +1551,8 @@ body {
   .fairbank-outlook-module .fom-chart-wrap    { padding: 10px 12px 0; }
   .fairbank-outlook-module .fom-tip           { width: 240px; }
 }
+
+/* Phones: 16px so iOS does not zoom in when the dropdown gets focus. */
+@media (max-width: 767px) {
+  .fairbank-outlook-module .fom-select-wrap select { font-size: 16px; }
+}
