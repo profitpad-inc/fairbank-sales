@@ -566,15 +566,20 @@
       '<div class="fop-header__end">' +
       '<span class="fop-header__links" data-cell="hdr-links"></span>' +
       '<div class="fop-umenu">' +
-      '<button type="button" class="fop-umenu__btn" aria-haspopup="true" aria-expanded="false">' +
+      '<button type="button" class="fop-umenu__btn" aria-haspopup="true" aria-expanded="false"' +
+      (user.acting_for ? ' title="Acting as ' + esc(name) + '"' : "") + ">" +
       '<span class="fop-umenu__name fop-umenu__name--full">' + esc(name) + "</span>" +
       '<span class="fop-umenu__name fop-umenu__name--first">' + esc(name.split(/\s+/)[0]) + "</span>" +
       '<svg class="fop-umenu__caret" viewBox="0 0 10 6" aria-hidden="true"><path d="M0 0h10L5 6z" fill="currentColor"/></svg></button>' +
       '<div class="fop-umenu__panel" hidden>' +
       '<div class="fop-umenu__tools"><span class="fop-umenu__lbl">Tools</span>' + toolsItemsHtml("product-lookup") + "</div>" +
+      // Acting as another rep (?e_user_id=): who is really signed in.
+      (user.acting_for ? '<div class="fop-umenu__row"><span class="fop-umenu__lbl">Signed in as</span>' +
+        esc(user.acting_for.name || user.acting_for.e_user_id) + "</div>" : "") +
       (user.email ? '<div class="fop-umenu__row"><span class="fop-umenu__lbl">Email</span>' + esc(user.email) + "</div>" : "") +
       '<div class="fop-umenu__row"><span class="fop-umenu__lbl">Eclipse ID</span>' + esc(user.e_user_id || "") + "</div>" +
       '<button type="button" class="fop-umenu__theme"></button>' +
+      '<a class="fop-umenu__link" target="_blank" rel="noopener" href="' + esc(feedbackUrl(user)) + '">Feedback</a>' +
       '<button type="button" class="fop-umenu__out">Sign out</button>' +
       "</div></div>" +
       "</div>";
@@ -596,6 +601,20 @@
       lastY = y;
     }, { passive: true });
     return header;
+  }
+
+  // Feedback form, the user menu row above Sign out: a copy of order
+  // placement's feedbackUrl() (no customer or order is open here).
+  var FEEDBACK_URL = "https://n8n.profitpad.com/form/fairbank-feedback";
+
+  function feedbackUrl(user, customerId, orderId) {
+    var p = new URLSearchParams();
+    var userId = (user.acting_for && user.acting_for.e_user_id) || user.e_user_id;
+    if (userId) p.set("e_user_id", userId);
+    if (customerId) p.set("e_customer_id", customerId);
+    if (orderId) p.set("e_sorder_id", orderId);
+    var q = p.toString();
+    return FEEDBACK_URL + (q ? "?" + q : "");
   }
 
   // Tools menu: same list and markup as order placement's (its styles.css).
@@ -668,6 +687,7 @@
   }
 
   // Last, so the theme icons above are set before the header uses them.
-  if (window.FB_USER) boot();
+  // Acting as another rep (?e_user_id=, auth.js): wait for their user.
+  if (window.FB_USER) (window.FB_USER_READY || Promise.resolve()).then(boot);
   else window.addEventListener("fb:auth", boot, { once: true });
 })();
