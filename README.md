@@ -41,6 +41,7 @@ The workflow exports are in `n8n-flows/`. Import each one into n8n (Workflows â†
 | `order-changelog-comment.json` | `POST order-changelog-comment` | order placement (Change log comment box) |
 | `update-bid.json` | `POST update-bid` | order placement (Update Bid) |
 | `cancel-order.json` | `POST cancel-order` | order placement (Cancel) |
+| `pick-up-now.json` | `POST pick-up-now` | order placement (Pick Up Now: invoice and print; branch `printing-on-demand`) |
 | `v1-inventory-lookup.json` | `POST v1/inventory-lookup` | order placement v1 |
 | `v1-place-order.json` | `POST v1/place-order` | order placement v1 |
 

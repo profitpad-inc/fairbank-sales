@@ -53,6 +53,7 @@
     order: N8N + "e-order-placement/order",
     updateBid: N8N + "e-order-placement/update-bid",
     cancelOrder: N8N + "e-order-placement/cancel-order",
+    pickUpNow: N8N + "e-order-placement/pick-up-now",
     customer: N8N + "e-order-placement/customer",
     customerOrders: N8N + "e-order-placement/customer-orders",
     orderChangelog: N8N + "e-order-placement/order-changelog",
@@ -160,6 +161,33 @@
   };
 
   function statusLabel(s) { return STATUS_LABELS[s] || s || "Unknown"; }
+
+  // Pick Up Now: first (and the default) in Place Order and Convert to Order
+  // when every line is in stock at the ship branch; the rep then picks a
+  // printer at that branch, and the order is invoiced and its ticket printed.
+  var PICK_UP_NOW = ["Pick Up Now", "PickUpNow"];
+  // Eclipse's change log entry once the ticket has printed, e.g. ' Printed
+  // Ship Ticket on printer "15-Shipping" using "Automatically Select".'
+  var PRINTED_RE = /^Printed .*Ticket on printer/i;
+
+  // Printers by ship branch id: [printerId, printerName]. Static for now
+  // (the list the user gave on 2026-10-22).
+  var PRINTERS = {
+    "1": [[17, "01-CanonOFC-LP1"], [23, "01-CFO-LP8"], [29, "01-Sales1-LP15"], [33, "01-Purchasing-LP44"], [38, "01-ReceivingLaser-LP46"], [48, "01-WHSEOffice1-LP45"], [55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [86, "01-Starship"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "2": [[55, "09-Laser1-LP36"], [57, "02-GI Laser-LP6"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [84, "02-Office-HP"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "3": [[49, "03-Laser1-LP12"], [55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [81, "03-Counter"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "4": [[3, "04-Laser1-LP19"], [50, "04-CTR"], [55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "5": [[51, "05-Laser1-LP21"], [55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "6": [[52, "06-Laser1-LP27"], [55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "7": [[53, "07-Office1-LP24"], [55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [92, "07-Counter"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "8": [[55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [89, "08-Shipping"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "9": [[55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "12": [[55, "09-Laser1-LP36"], [58, "12-Reports1-Lp34"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "14": [[55, "09-Laser1-LP36"], [59, "06-Shipping"], [61, "14-Counter"], [65, "12-Shipping"], [67, "14-Shipping"], [68, "14-BudOffice"], [69, "14-Accounting2"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [82, "14-EdOffice"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [95, "Brothers Model HL-L6200DW"], [97, "17-Shipping"]],
+    "15": [[55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [71, "15-ManagerOffice"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [83, "Fresno Counter"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "16": [[55, "09-Laser1-LP36"], [59, "06-Shipping"], [62, "16-Warehouse"], [63, "16-Marlon"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [76, "16-Counter"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "17": [[55, "09-Laser1-LP36"], [59, "06-Shipping"], [62, "16-Warehouse"], [65, "12-Shipping"], [66, "17-Counter"], [67, "14-Shipping"], [72, "15-Shipping"], [73, "17-IP50-HPColorLaserJetProMFPM479"], [74, "17-IP42-HPPageWidePro"], [75, "17-IP114"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+  };
 
   // Bill-to terms that pay up front, so a credit limit never blocks them.
   var COD_TERMS = ["COD.CO.CHECK", "COD.CC"];
@@ -1010,7 +1038,10 @@
     function lineStock(line) {
       var q = quoteOf(line);
       if (!q || !q.data) return null;
-      var stock = Array.isArray(q.data.stock_info) ? q.data.stock_info : [];
+      // Rows with no branch in `warehouse` (" - ", seen 2026-10-23 on product
+      // 246: 25 rows of qty 1 after the real branches) are dropped, so they
+      // get no tile and are not counted in All.
+      var stock = (Array.isArray(q.data.stock_info) ? q.data.stock_info : []).filter(function (x) { return branchIdOf(x.warehouse); });
       var branch = lineBranch(line);
       var atBranch = 0, total = 0;
       for (var i = 0; i < stock.length; i++) {
@@ -3583,15 +3614,77 @@
       return state.confirm.mode === "bid";
     }
 
+    // Place Order or Convert to Order (not a bid).
+    function confirmIsOrder() {
+      return !!state.confirm && (state.confirm.mode === "order" || state.confirm.mode === "convert");
+    }
+
+    // The statuses the dialog offers: "1. Pick Up Now" first when it is
+    // available (any ship via), then the usual five.
+    function confirmStatuses() {
+      return confirmIsOrder() && !pickUpReason() ? [PICK_UP_NOW].concat(ORDER_STATUSES) : ORDER_STATUSES;
+    }
+
+    // Why Pick Up Now is not offered ("" when it is): every product line of
+    // the generation must ship from the header's branch and be in stock
+    // there. A bid with other Bid generations is left out, since Convert to
+    // Order converts them all at once.
+    function pickUpReason() {
+      if (!confirmIsOrder()) return "";
+      var h = state.header;
+      var br = branchIdOf(h.shipBranch);
+      var no = "Pick Up Now isn't an option: ";
+      if (state.confirm.mode === "convert") {
+        var others = ((state.order && state.order.generations) || []).filter(function (g) {
+          return g.status === "Bid" && g.e_sorder_id !== state.existing.e_sorder_id;
+        });
+        if (others.length) return no + "this bid has other generations (" + others.map(function (g) { return g.e_sorder_id; }).join(", ") + ") that convert with it.";
+      }
+      var ls = filledLines().filter(function (l) { return !isFreightLine(l); });
+      if (customLines().length || ls.some(isItemLine)) return no + "custom lines are never in stock at branch " + br + ".";
+      if (ls.some(function (l) { return lineBranch(l) !== h.shipBranch; })) return no + "some lines ship from another branch.";
+      if (ls.some(function (l) { return !lineStock(l); })) return no + "the stock at branch " + br + " is still loading.";
+      if (ls.some(function (l) { return lineStock(l).atBranch < Number(l.qty); })) {
+        return no + "not everything in this generation is in stock at branch " + br + ".";
+      }
+      return "";
+    }
+
+    function isPickUpNow() {
+      return confirmIsOrder() && state.header.orderStatus === PICK_UP_NOW[1];
+    }
+
+    // Printers at the order's ship branch (location is ignored).
+    function branchPrinters() {
+      return PRINTERS[branchIdOf(state.header.shipBranch)] || [];
+    }
+
     function statusPickerHtml() {
       var h = state.header;
+      var list = confirmStatuses();
       return '<div class="fop-field fop-confirm-status"><label class="fop-label" for="fop-confirm-status">Order status ' +
-        '<span class="fop-muted">(↑↓ or 1–' + ORDER_STATUSES.length + ")</span></label>" +
+        '<span class="fop-muted">(↑↓ or 1–' + list.length + ")</span></label>" +
         '<select class="fop-input" id="fop-confirm-status" data-head="orderStatus">' +
         // Starts on "Select…"; placing with it blank flashes the box.
         '<option value="" disabled' + (h.orderStatus ? "" : " selected") + ">Select…</option>" +
-        ORDER_STATUSES.map(function (o, i) {
+        list.map(function (o, i) {
           return '<option value="' + esc(o[1]) + '"' + (o[1] === h.orderStatus ? " selected" : "") + ">" + (i + 1) + ". " + esc(o[0]) + "</option>";
+        }).join("") + "</select></div>" +
+        (pickUpReason() ? '<div class="fop-muted fop-confirm-gens">' + esc(pickUpReason()) + "</div>" : "") +
+        (isPickUpNow() ? printerPickerHtml() : "");
+    }
+
+    // Pick Up Now: the printer at the ship branch that prints the order.
+    function printerPickerHtml() {
+      var pid = state.confirm.printerId || "";
+      var list = branchPrinters();
+      var br = branchIdOf(state.header.shipBranch);
+      return '<div class="fop-field fop-confirm-status"><label class="fop-label" for="fop-confirm-printer">Printer ' +
+        '<span class="fop-muted">(branch ' + esc(br || "--") + ")</span></label>" +
+        '<select class="fop-input" id="fop-confirm-printer">' +
+        '<option value="" disabled' + (pid ? "" : " selected") + ">" + (list.length ? "Select…" : "No printers for this branch") + "</option>" +
+        list.map(function (p) {
+          return '<option value="' + p[0] + '"' + (String(p[0]) === pid ? " selected" : "") + ">" + esc(p[1]) + " (" + p[0] + ")</option>";
         }).join("") + "</select></div>";
     }
 
@@ -3602,9 +3695,10 @@
       var title = root.querySelector("#fop-confirm-title");
       var btn = root.querySelector("[data-action=confirm-place]");
       if (title && placing) title.textContent = isBid ? "Place as Bid?" : "Place Order?";
-      if (btn && placing && !state.placing) btn.innerHTML = (isBid ? "Place Bid" : "Place Order") + ' <span class="fop-key fop-key--dark">Enter</span>';
+      if (btn && placing && !state.placing) btn.innerHTML = (isBid ? "Place Bid" : isPickUpNow() ? "Print Now" : "Place Order") + ' <span class="fop-key fop-key--dark">Enter</span>';
       if (btn) {
         if (needsStatus()) { btn.setAttribute("aria-disabled", "true"); btn.title = "Pick an order status."; }
+        else if (needsPrinter()) { btn.setAttribute("aria-disabled", "true"); btn.title = "Pick a printer."; }
         else { btn.removeAttribute("aria-disabled"); btn.removeAttribute("title"); }
       }
     }
@@ -3613,6 +3707,11 @@
     // out (aria-disabled, so a click still reaches place() and flashes the box).
     function needsStatus() {
       return state.confirm && (state.confirm.mode === "order" || state.confirm.mode === "convert") && !state.header.orderStatus;
+    }
+
+    // Pick Up Now with no printer picked yet: Print Now is grayed out the same way.
+    function needsPrinter() {
+      return isPickUpNow() && !state.confirm.printerId;
     }
 
     // A line's comment under its description in the confirm dialogs.
@@ -3675,8 +3774,8 @@
         '<div class="fop-row fop-row--end">' +
         '<button class="fop-btn fop-btn--ghost" data-action="cancel-place"' + (state.placing ? " disabled" : "") + ">Back <span class=\"fop-key\">Esc</span></button>" +
         '<button class="fop-btn" data-action="confirm-place"' + (state.placing ? " disabled" : "") +
-        (needsStatus() ? ' aria-disabled="true" title="Pick an order status."' : "") + ">" +
-        (state.placing ? "Placing…" : (isBid ? "Place Bid" : "Place Order") + ' <span class="fop-key fop-key--dark">Enter</span>') +
+        (needsStatus() ? ' aria-disabled="true" title="Pick an order status."' : needsPrinter() ? ' aria-disabled="true" title="Pick a printer."' : "") + ">" +
+        (state.placing ? (isPickUpNow() ? state.pickUpStep || "Placing…" : "Placing…") : (isBid ? "Place Bid" : isPickUpNow() ? "Print Now" : "Place Order") + ' <span class="fop-key fop-key--dark">Enter</span>') +
         "</button></div></div></div>"
       );
     }
@@ -3744,8 +3843,8 @@
         '<div class="fop-row fop-row--end">' +
         '<button class="fop-btn fop-btn--ghost" data-action="cancel-place"' + (state.placing ? " disabled" : "") + ">Back <span class=\"fop-key\">Esc</span></button>" +
         '<button class="fop-btn" data-action="confirm-place"' + (state.placing ? " disabled" : "") +
-        (needsStatus() ? ' aria-disabled="true" title="Pick an order status."' : "") + ">" +
-        (state.placing ? (convert ? "Converting…" : "Updating…") : (convert ? "Convert to Order" : "Update Bid") + ' <span class="fop-key fop-key--dark">Enter</span>') +
+        (needsStatus() ? ' aria-disabled="true" title="Pick an order status."' : needsPrinter() ? ' aria-disabled="true" title="Pick a printer."' : "") + ">" +
+        (state.placing ? (isPickUpNow() ? state.pickUpStep || "Converting…" : convert ? "Converting…" : "Updating…") : (convert ? (isPickUpNow() ? "Print Now" : "Convert to Order") : "Update Bid") + ' <span class="fop-key fop-key--dark">Enter</span>') +
         "</button></div></div></div>"
       );
     }
@@ -4176,6 +4275,11 @@
       // holds "Bid" until then).
       if (mode === "convert") state.header.orderStatus = "";
       state.confirm = { mode: mode };
+      // Pick Up Now is the default whenever it is offered.
+      if (confirmIsOrder()) {
+        if (!pickUpReason()) state.header.orderStatus = PICK_UP_NOW[1];
+        else if (state.header.orderStatus === PICK_UP_NOW[1]) state.header.orderStatus = "";
+      }
       state.placeError = null;
       render();
     }
@@ -4212,7 +4316,8 @@
           var placed = data.mode === "bid" || data.mode === "order";
           var what = data.what === "bid" ? "Bid " : "Order ";
           state.notice = {
-            text: data.mode === "cancel" ? what + (data.e_sorder_id || id) + " cancelled."
+            // Pick Up Now brings its own text (then updates it while printing).
+            text: data.noticeText ? data.noticeText : data.mode === "cancel" ? what + (data.e_sorder_id || id) + " cancelled."
               : placed ? (data.mode === "bid" ? "Bid " : "Order ") + (data.e_sorder_id || id) + " placed." + splitNote(data)
               : data.mode === "convert" ? "Bid converted to an order (" + statusLabel(data.status) + ")" + savedAt(o) + "." + movedNote(data)
               : data.unchanged ? "Nothing to update; the bid already matched Eclipse." : "Bid updated" + savedAt(o) + "." + movedNote(data),
@@ -4261,26 +4366,31 @@
       return out;
     }
 
-    // Update Bid, or Convert to Order (orderStatus: the picked status). One
-    // update-bid call saves the header and line changes, then converts.
-    function updateBid(orderStatus) {
-      var ex = state.existing;
+    // update-bid's body: the bid's changes, plus order_status to convert.
+    function updateBidBody(orderStatus) {
       var ch = bidChanges();
-      // Started from View Quote: open the quote once the bid is saved.
-      var thenQuote = !orderStatus && !!(state.confirm && state.confirm.thenQuote);
-      var saved = false;
-      state.placing = true;
-      state.placeError = null;
-      render();
       var body = {
-        e_sorder_id: ex.e_sorder_id,
+        e_sorder_id: state.existing.e_sorder_id,
         writer: user.e_user_id,
         header: ch.header,
         lines: ch.lines,
         custom_lines: ch.custom_lines,
       };
       if (orderStatus) body.order_status = orderStatus;
-      postJson(API.updateBid, body)
+      return body;
+    }
+
+    // Update Bid, or Convert to Order (orderStatus: the picked status). One
+    // update-bid call saves the header and line changes, then converts.
+    function updateBid(orderStatus) {
+      var ex = state.existing;
+      // Started from View Quote: open the quote once the bid is saved.
+      var thenQuote = !orderStatus && !!(state.confirm && state.confirm.thenQuote);
+      var saved = false;
+      state.placing = true;
+      state.placeError = null;
+      render();
+      postJson(API.updateBid, updateBidBody(orderStatus))
         .then(function (data) {
           data.mode = orderStatus ? "convert" : "update";
           data.status = orderStatus;
@@ -4339,23 +4449,127 @@
       render();
     }
 
-    function place() {
+    function wait(ms) {
+      return new Promise(function (resolve) { setTimeout(resolve, ms); });
+    }
+
+    // Print Now (Pick Up Now): place the order (create-order) or convert the
+    // bid (update-bid) with status PickUpNow, wait 0.5 s, set it to Invoice
+    // (pick-up-now, action invoice), reopen it with "now printing", then
+    // print the ticket (printTicket). A failed placement stays in the
+    // dialog; once the order exists, a failed step shows on the order.
+    function pickUpNow() {
       var mode = state.confirm.mode;
-      var h = state.header;
-      if (mode === "update") { updateBid(); return; }
-      // An order needs a status picked in the dialog; blank flashes the box.
-      if ((mode === "order" || mode === "convert") && !h.orderStatus) {
-        var st = root.querySelector("#fop-confirm-status");
-        flashField(st);
-        if (st) st.focus();
-        return;
-      }
-      if (mode === "convert") { updateBid(h.orderStatus); return; }
-      var c = state.customer;
+      var printer = branchPrinters().filter(function (p) { return String(p[0]) === String(state.confirm.printerId); })[0];
+      var ex = state.existing;
+      var id = "";
       state.placing = true;
       state.placeError = null;
+      state.pickUpStep = mode === "convert" ? "Converting…" : "Placing…";
       render();
-      postJson(API.createOrder, {
+      var saved = mode === "convert"
+        ? postJson(API.updateBid, updateBidBody(PICK_UP_NOW[1]))
+        : postJson(API.createOrder, createOrderBody(mode));
+      saved
+        .then(function (data) {
+          id = data.e_sorder_id || (ex ? ex.e_sorder_id : "");
+          state.result = data;
+          state.ordersList = null;
+          if (!id) { state.confirm = null; state.view = "done"; return; }
+          state.pickUpStep = "Invoicing…";
+          render();
+          return wait(500)
+            .then(function () { return postJson(API.pickUpNow, { e_sorder_id: id, writer: user.e_user_id, action: "invoice" }); })
+            .then(function (inv) {
+              data.noticeText = "Order " + id + " updated, now printing on " + printer[1] + "…";
+              data.hubspot_sync = inv.hubspot_sync;
+              return reopenAfterSave(id, data).then(function () {
+                if (state.view === "order" && state.notice) printTicket(id, printer, state.notice);
+              });
+            }, function (err) {
+              data.noticeText = "Order " + id + " is Pick Up Now, but it could not be invoiced, so nothing was printed.";
+              data.warning = err.message;
+              return reopenAfterSave(id, data);
+            });
+        })
+        .catch(function (err) {
+          state.placeError = placeErrorFrom(err);
+        })
+        .then(function () {
+          state.placing = false;
+          state.pickUpStep = "";
+          render();
+        });
+    }
+
+    // Change log entries saying a ticket printed on this generation, as
+    // "at|comment" keys.
+    function printedKeys(log, id) {
+      var gen = String(Number(String(id).split(".")[1] || 1));
+      var out = {};
+      ((log && log.entries) || []).forEach(function (e) {
+        var c = String(e.comment || "").trim();
+        var gens = (e.gens || []).map(String);
+        if (PRINTED_RE.test(c) && (gens.indexOf("ALL") >= 0 || gens.indexOf(gen) >= 0)) out[e.at + "|" + c] = c;
+      });
+      return out;
+    }
+
+    // Print the invoiced order's ticket, then read the change log every
+    // second (each read starts 1 s after the last one answered) until a new
+    // "Printed … Ticket on printer …" entry shows, for up to 60 seconds.
+    // The note on the order (`note`) says how it went; leaving the order
+    // stops the watch.
+    function printTicket(id, printer, note) {
+      var here = function () { return state.notice === note; };
+      var base = {};
+      var start = 0;
+      function tell(text, warning) {
+        if (!here()) return;
+        note.text = text;
+        note.warning = warning || "";
+        render();
+      }
+      function poll() {
+        if (!here()) return;
+        getJson(API.orderChangelog, { e_sorder_id: id })
+          .then(function (log) {
+            var now = printedKeys(log, id);
+            var fresh = Object.keys(now).filter(function (k) { return !base[k]; })[0];
+            if (fresh) {
+              state.changeLog = null;   // the Change log dialog refetches
+              tell("Order " + id + " invoiced. " + now[fresh]);
+              return true;
+            }
+          }, function () { return false; })
+          .then(function (done) {
+            if (done || !here()) return;
+            if (Date.now() - start > 60000) {
+              tell("Order " + id + " invoiced and sent to " + printer[1] + ".",
+                "Eclipse's change log has not shown the print after 60 seconds. Check the printer and the Change log.");
+              return;
+            }
+            setTimeout(poll, 1000);
+          });
+      }
+      getJson(API.orderChangelog, { e_sorder_id: id })
+        .then(function (log) { base = printedKeys(log, id); }, function () {})
+        .then(function () {
+          return postJson(API.pickUpNow, { e_sorder_id: id, writer: user.e_user_id, action: "print", printer_id: Number(printer[0]) });
+        })
+        .then(function () {
+          start = Date.now();
+          setTimeout(poll, 1000);
+        }, function (err) {
+          tell("Order " + id + " invoiced, but the ticket did not print.", "Printing on " + printer[1] + " failed: " + err.message);
+        });
+    }
+
+    // create-order's body for a new bid or order (mode "bid" or "order").
+    function createOrderBody(mode) {
+      var h = state.header;
+      var c = state.customer;
+      return {
         bill_to_id: c.bill_to.e_customer_id,
         ship_to_id: state.shipTo.e_customer_id,
         ship_branch: h.shipBranch,
@@ -4383,7 +4597,33 @@
         }),
         // Custom lines (bid only), placed in their page order as product 15680.
         custom_lines: customPayload(),
-      })
+      };
+    }
+
+    function place() {
+      var mode = state.confirm.mode;
+      var h = state.header;
+      if (mode === "update") { updateBid(); return; }
+      // An order needs a status picked in the dialog; blank flashes the box.
+      if ((mode === "order" || mode === "convert") && !h.orderStatus) {
+        var st = root.querySelector("#fop-confirm-status");
+        flashField(st);
+        if (st) st.focus();
+        return;
+      }
+      // Pick Up Now needs a printer; blank flashes the printer box.
+      if (needsPrinter()) {
+        var pr = root.querySelector("#fop-confirm-printer");
+        flashField(pr);
+        if (pr) pr.focus();
+        return;
+      }
+      if (isPickUpNow()) { pickUpNow(); return; }
+      if (mode === "convert") { updateBid(h.orderStatus); return; }
+      state.placing = true;
+      state.placeError = null;
+      render();
+      postJson(API.createOrder, createOrderBody(mode))
         .then(function (data) {
           data.mode = mode;
           state.result = data;
@@ -4780,8 +5020,18 @@
           refreshAllRows();
         }
         if (key === "shipVia") refreshAllRows();
-        if (key === "orderStatus") refreshConfirmText();
+        if (key === "orderStatus") {
+          // Place Order and Convert to Order redraw: Pick Up Now shows the
+          // printer box and turns the button into Print Now.
+          if (confirmIsOrder()) render();
+          else refreshConfirmText();
+        }
         refreshTotals();
+        return;
+      }
+      if (t.id === "fop-confirm-printer") {
+        state.confirm.printerId = t.value;
+        refreshConfirmText();
         return;
       }
       if (t.classList.contains("fop-grid-in")) {
@@ -5035,11 +5285,19 @@
         } else if (t.id === "fop-confirm-status" && (e.key === "ArrowDown" || e.key === "ArrowUp" || /^[1-9]$/.test(e.key))) {
           // Pick the status without opening the native list. Option 0 is the
           // blank "Select…", so status k is option k and ↑ stops at status 1.
-          var n = ORDER_STATUSES.length;
+          var n = confirmStatuses().length;
           var next = /^[1-9]$/.test(e.key) ? Number(e.key) : t.selectedIndex + (e.key === "ArrowDown" ? 1 : -1);
           if (next >= 1 && next <= n) {
             e.preventDefault();
             t.selectedIndex = next;
+            t.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+        } else if (t.id === "fop-confirm-printer" && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+          // Same for the printer: option 0 is the blank "Select…".
+          var pnext = t.selectedIndex + (e.key === "ArrowDown" ? 1 : -1);
+          e.preventDefault();
+          if (pnext >= 1 && pnext < t.options.length) {
+            t.selectedIndex = pnext;
             t.dispatchEvent(new Event("change", { bubbles: true }));
           }
         } else if (e.key === "Tab") {
