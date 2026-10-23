@@ -413,6 +413,7 @@
         shippingInstructions: "",
         freightIn: "",           // totals box; sent to create-order as freight_in
         outsideSales: String(user.default_territory || "").trim(),  // outsideSalesOptions()
+        email: "",               // contactFields(); starts blank, sent as email
       };
     }
 
@@ -1222,6 +1223,7 @@
       // Ship via is required for an order but not a bid; a blank bid is sent
       // without one (the create-order flow omits shipVia).
       if (mode !== "bid" && !h.shipVia) return "Pick a ship via.";
+      if (String(h.email || "").trim() && !EMAIL_RE.test(String(h.email).trim().toLowerCase())) return "Enter a valid email.";
       if (mode === "order" && creditLimitReason()) return creditLimitReason();
       if (h.requiredDate && h.shipDate && h.requiredDate < h.shipDate) return "Required date cannot be before ship date.";
       if (!user.e_user_id) return "Sign in again: no Eclipse user on this session.";
@@ -1809,6 +1811,19 @@
       return field("Outside sales", selectHtml("outsideSales", outsideSalesOptions(), state.header.outsideSales, "Select…"));
     }
 
+    // Email and phone, on their own row above writer / outside sales. A new
+    // order: Customer P/O # then email (editable, starts blank, sent to
+    // create-order as email), no phone. An existing order: both
+    // read-only, the order's own (order-lookup email / phone).
+    function contactFields() {
+      var ex = state.existing;
+      if (!ex) {
+        return poField("fop-field--row") + field("Email", '<input class="fop-input" type="email" data-head="email" autocomplete="off" spellcheck="false" value="' + esc(state.header.email) + '">');
+      }
+      return field("Email", '<input class="fop-input" value="' + esc(ex.email || "") + '" disabled>', "fop-field--row") +
+        field("Phone", '<input class="fop-input" value="' + esc(ex.phone || "") + '" disabled>');
+    }
+
     function poField(cls) {
       var h = state.header;
       return field("Customer P/O #", '<input class="fop-input" data-head="po" maxlength="30" value="' + esc(h.po) + '"' + lockAttr("po") + ">", cls);
@@ -1959,11 +1974,13 @@
         // Order date is never editable: the order's own, or today on a new
         // order (Eclipse dates it when it is created).
         field("Order date", '<input class="fop-input" value="' + esc(dateText(state.existing ? state.existing.order_date : isoDate(0))) + '" disabled>') +
+        contactFields() +
         writerField() + outsideSalesField() + orderInfoField("insideSales") +
-        // A new order or a bid: P/O ends the writer row and release is hidden
-        // (a new order still sends the bill-to's default release). Other
-        // orders: P/O, release and print status on their own row.
-        poField(linesLocked() ? "fop-field--row" : "") +
+        // A new order: P/O sits before email (contactFields()). A bid: P/O
+        // ends the writer row. Release is hidden on both (a new order still
+        // sends the bill-to's default release). Other orders: P/O, release
+        // and print status on their own row.
+        (state.existing ? poField(linesLocked() ? "fop-field--row" : "") : "") +
         (linesLocked() ? field("Customer release #", '<input class="fop-input" data-head="release" maxlength="30" value="' + esc(h.release) + '"' + lockAttr("release") + ">") : "") +
         orderInfoField("printStatus") +
         // Bottom row: shipping instructions left, internal notes right.
@@ -3973,6 +3990,7 @@
       var field =
         blocked === "Pick a ship branch." ? "shipBranch" :
         blocked === "Pick a ship via." ? "shipVia" :
+        blocked === "Enter a valid email." ? "email" :
         blocked === seeInstructionReason() ? "shippingInstructions" :
         blocked === "Required date cannot be before ship date." ? "requiredDate" : null;
       if (field) flashField(root.querySelector('#fop-head [data-head="' + field + '"]'));
@@ -4187,7 +4205,7 @@
         freight_in: freightInValue(),
         writer: user.e_user_id,
         outside_sales: h.outsideSales || "",
-        email: user.email || "",
+        email: String(h.email || "").trim(),
         // ship_branch per line: lines on another branch than the header's
         // become their own generation (one per branch) in create-order.
         lines: filledLines().map(function (l) {
