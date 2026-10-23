@@ -56,6 +56,7 @@
     customer: N8N + "e-order-placement/customer",
     customerOrders: N8N + "e-order-placement/customer-orders",
     orderChangelog: N8N + "e-order-placement/order-changelog",
+    orderChangelogComment: N8N + "e-order-placement/order-changelog-comment",
     quote: N8N + "e-order-placement/quote",
     createQuote: N8N + "e-order-placement/create-quote",
     sendQuote: N8N + "e-order-placement/send-quote",
@@ -356,6 +357,9 @@
     // ?e_customer_id with both e_product_ids and quantities skips the orders
     // list once and starts a new order with those lines.
     var urlAutoNew = !!(params.get("e_product_ids") && params.get("quantities")) && urlProducts.length > 0;
+    // ?e_sorder_id with showChangelog=true opens the change log once the
+    // order has loaded (render keeps the param in step with the dialog).
+    var urlShowLog = params.get("showChangelog") === "true" && !!params.get("e_sorder_id");
 
     var state = {
       view: "customer",          // customer | loading | orders | shipto | order | done | error
@@ -381,6 +385,7 @@
       logModal: false,           // "Change log" dialog open
       logGenOnly: false,         // change log filtered to the open generation
       changeLog: null,           // { orderId, loading, error, data } from order-changelog
+      logNote: { text: "", busy: false, error: "" },   // change log comment box (order-changelog-comment)
       cancelAsk: false,          // "Cancel this order?" dialog open
       sidePanel: true,           // side layout only: stock / breaks box open
       detailsModal: null,        // details layout only: { r, comment } "Line details" dialog
@@ -615,6 +620,7 @@
       state.genEdits = {};
       state.changeLog = null;
       state.logModal = false;
+      state.logNote = { text: "", busy: false, error: "" };
       state.quoteModal = null;
       hsQuotes = {};
       render();
@@ -680,6 +686,7 @@
         openExisting(Object.assign({}, gen, {
           order_id: o.order_id, last_modified: o.last_modified, last_modified_by: o.last_modified_by,
         }), res.shipTo, state.genEdits[gen.generation_id]);
+        if (urlShowLog) { urlShowLog = false; openChangeLog(); }
       });
     }
 
@@ -1346,6 +1353,7 @@
       if (newSide) newSide.scrollTop = sideTop;
       scrollActiveTab();
       paintHeader();
+      syncLogParam();
       syncHistory();
       afterRender();
     }
@@ -1594,7 +1602,10 @@
         } else if (state.logModal) {
           var lc = root.querySelector("[data-action=close-log]");
           // Close sits below the log: no scroll, so the log opens at the top.
-          if (lc) lc.focus({ preventScroll: true });
+          // After a failed comment, back in the comment box to fix or retry.
+          var ln = state.logNote.error && root.querySelector("#fop-log-note");
+          if (ln) ln.focus({ preventScroll: true });
+          else if (lc) lc.focus({ preventScroll: true });
         } else if (state.cancelAsk) {
           // Default to the safe choice.
           var keep = root.querySelector("[data-action=keep-order]");
@@ -2987,6 +2998,8 @@
           : '<div class="fop-muted">' + (all.length ? "No entries for this generation." : "No change log entries for this order.") + "</div>";
         if (all.length) body = '<div class="fop-muted fop-log__count">' + rows.length + (rows.length === all.length ? "" : " of " + all.length) + " entries</div>" + body;
       }
+      var note = state.logNote;
+      var noteBlock = note.busy ? "Adding the comment…" : !note.text.trim() ? "Type a comment first." : "";
       return (
         '<div class="fop-modal" role="dialog" aria-modal="true" aria-labelledby="fop-log-title">' +
         '<div class="fop-modal__box fop-modal__box--wide">' +
@@ -2994,9 +3007,49 @@
         '<label class="fop-check"><input type="checkbox" data-action="log-gen-only"' + (state.logGenOnly ? " checked" : "") + "> " +
         esc(genLabel(ex)) + " only</label></div>" +
         body +
-        '<div class="fop-row fop-row--end"><button class="fop-btn fop-btn--ghost" data-action="close-log">Close <span class="fop-key">Esc</span></button></div>' +
+        // A comment goes on the open generation only (one per call, as the
+        // Eclipse node takes it), prefixed with the writer by the flow.
+        '<div class="fop-field fop-log__add"><label class="fop-label" for="fop-log-note">Add a comment to ' + esc(genLabel(ex, true)) + "</label>" +
+        '<textarea class="fop-input fop-notes" id="fop-log-note" data-log-note rows="2"' + (note.busy ? " disabled" : "") + ">" + esc(note.text) + "</textarea></div>" +
+        (note.error ? '<div class="fop-alert fop-alert--error">Not added: ' + esc(note.error) + "</div>" : "") +
+        '<div class="fop-row fop-row--end"><button class="fop-btn fop-btn--ghost" data-action="close-log">Close <span class="fop-key">Esc</span></button>' +
+        '<button class="fop-btn" data-action="add-log-note"' + (noteBlock ? ' aria-disabled="true" title="' + noteBlock + '"' : "") + ">" +
+        (note.busy ? "Adding…" : "Add comment") + ' <span class="fop-key fop-key--dark">Ctrl+Enter</span></button></div>' +
         "</div></div>"
       );
+    }
+
+    // Keep ?showChangelog=true in step with the change log dialog, so a copied
+    // URL opens it again. Left alone while loading (the order is not open yet).
+    function syncLogParam() {
+      if (state.view === "loading") return;
+      var want = state.view === "order" && state.logModal && state.existing ? "true" : null;
+      if (readParams().get("showChangelog") !== want) setUrlParam("showChangelog", want);
+    }
+
+    // Add the comment box's text to the open generation's change log, then
+    // reload the log so the new entry shows.
+    function addLogNote() {
+      var ex = state.existing;
+      var note = state.logNote;
+      var text = note.text.trim();
+      if (!ex || note.busy || !text) return;
+      note.busy = true;
+      note.error = "";
+      render();
+      var id = ex.order_id;
+      postJson(API.orderChangelogComment, { e_sorder_id: ex.e_sorder_id, comment: text, writer: user.e_user_id })
+        .then(function () {
+          state.logNote = { text: "", busy: false, error: "" };
+          state.changeLog = null;
+          if (state.logModal && state.existing && state.existing.order_id === id) openChangeLog();
+          else render();
+        })
+        .catch(function (err) {
+          note.busy = false;
+          note.error = err.message;
+          render();
+        });
     }
 
     function openChangeLog() {
@@ -4574,6 +4627,7 @@
         case "new-from-list": newOrderFromList(); break;
         case "change-log": openChangeLog(); break;
         case "close-log": closeChangeLog(); break;
+        case "add-log-note": addLogNote(); break;
         case "view-quote": openQuote(); break;
         case "close-quote": closeQuote(); break;
         case "send-quote": sendQuote(); break;
@@ -4643,6 +4697,14 @@
       var t = e.target;
       if (state.quoteModal && t.id === "fop-quote-email") { onEmailInput(t); return; }
       if (state.customModal && t.hasAttribute("data-cf")) { onCustomField(t); return; }
+      if (state.logModal && t.hasAttribute("data-log-note")) {
+        state.logNote.text = t.value;
+        autosize(t);
+        var ab = root.querySelector("[data-action=add-log-note]");
+        var blocked = !t.value.trim();
+        if (ab) { if (blocked) { ab.setAttribute("aria-disabled", "true"); ab.title = "Type a comment first."; } else { ab.removeAttribute("aria-disabled"); ab.removeAttribute("title"); } }
+        return;
+      }
       // Line comments: the inline strip writes straight to the line, the
       // details dialog to its draft.
       if (t.hasAttribute("data-comment")) {
@@ -4895,10 +4957,12 @@
         return;
       }
 
-      // Change log dialog: Esc closes, Tab stays in the dialog.
+      // Change log dialog: Esc closes, Ctrl+Enter in the comment box adds it,
+      // Tab stays in the dialog.
       if (state.view === "order" && state.logModal) {
-        var lf = Array.prototype.slice.call(root.querySelectorAll(".fop-modal input, .fop-modal button"));
+        var lf = Array.prototype.slice.call(root.querySelectorAll(".fop-modal input, .fop-modal textarea:not(:disabled), .fop-modal button"));
         if (e.key === "Escape") { e.preventDefault(); closeChangeLog(); }
+        else if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && t.hasAttribute("data-log-note")) { e.preventDefault(); addLogNote(); }
         else if (e.key === "Tab" && lf.length) {
           e.preventDefault();
           var li = lf.indexOf(document.activeElement);

@@ -38,6 +38,7 @@ The workflow exports are in `n8n-flows/`. Import each one into n8n (Workflows â†
 | `order-lookup.json` | `GET order?e_sorder_id=` | order placement (existing order, every generation) |
 | `customer-orders.json` | `GET customer-orders?e_customer_id=` | order placement (Other orders) |
 | `order-changelog.json` | `GET order-changelog?e_sorder_id=` | order placement (Change log) |
+| `order-changelog-comment.json` | `POST order-changelog-comment` | order placement (Change log comment box) |
 | `update-bid.json` | `POST update-bid` | order placement (Update Bid) |
 | `cancel-order.json` | `POST cancel-order` | order placement (Cancel) |
 | `v1-inventory-lookup.json` | `POST v1/inventory-lookup` | order placement v1 |

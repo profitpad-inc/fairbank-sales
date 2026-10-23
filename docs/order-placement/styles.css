@@ -852,6 +852,7 @@ html[data-theme="light"] .fop-status--partial { color: #a14d00; border-color: rg
 .fop-log--other td { color: var(--muted); }
 .fop-log__count { font-size: 13px; }
 .fop-log__gshort { display: none; }
+.fop-log__add { margin-top: 14px; }
 /* Phones: each entry stacks. Generation, time and user on one line, the
    comment under them at full width; the dialog scrolls, not the table. */
 @media (max-width: 767px) {
