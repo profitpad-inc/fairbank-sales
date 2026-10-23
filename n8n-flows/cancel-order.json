@@ -263,6 +263,55 @@
         1320,
         220
       ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// A change log comment on the cancelled generation: who cancelled it and\n// from where (2026-10-23, on request).\nconst writer = $('Validate').first().json.writer;\nconst comment = 'Cancelled by ' + writer + ' from the HubSpot Order Placement Card';\nreturn $('Check cancel').first().json.e_sorder_ids.map((id) => ({ json: { orderId: id, comment } }));\n"
+      },
+      "id": "e418ec3b-5747-47b2-bee9-4738ea7ed66f",
+      "name": "Emit changelog",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2040,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "addOrderChangeLogComment",
+        "changeLogCommentOrderId": "={{ $json.orderId }}",
+        "changeLogComment": "={{ $json.comment }}"
+      },
+      "id": "ea2d36e7-deff-4317-a72d-5d3657f50623",
+      "name": "Eclipse: add change log comment",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        2040,
+        432
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// A failed comment never fails the cancel (the status is saved); it is kept\n// here for troubleshooting. Check cancel goes on unchanged to the deal sync.\nconst ids = $('Check cancel').first().json.e_sorder_ids;\nconst errors = $input.all().map((it, i) => (it.json.error ? ids[i] + ': ' + it.json.error : '')).filter(Boolean);\nreturn [{ json: Object.assign({}, $('Check cancel').first().json, { changelog_error: errors.join('; ') }) }];\n"
+      },
+      "id": "3b89654d-01b8-47c2-880a-32c5d15b007d",
+      "name": "Check changelog",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2040,
+        640
+      ]
     }
   ],
   "connections": {
@@ -372,7 +421,7 @@
       "main": [
         [
           {
-            "node": "Trigger HubSpot deal sync",
+            "node": "Emit changelog",
             "type": "main",
             "index": 0
           }
@@ -402,6 +451,39 @@
         [
           {
             "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emit changelog": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: add change log comment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: add change log comment": {
+      "main": [
+        [
+          {
+            "node": "Check changelog",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check changelog": {
+      "main": [
+        [
+          {
+            "node": "Trigger HubSpot deal sync",
             "type": "main",
             "index": 0
           }

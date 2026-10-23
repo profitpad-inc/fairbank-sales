@@ -1631,7 +1631,7 @@
           var qin = root.querySelector("#fop-quote-email");
           if (qin && !(window.matchMedia && window.matchMedia("(hover: none)").matches)) qin.focus({ preventScroll: true });
         } else if (state.logModal) {
-          var lc = root.querySelector("[data-action=close-log]");
+          var lc = root.querySelector(".fop-btn[data-action=close-log]");
           // Close sits below the log: no scroll, so the log opens at the top.
           // After a failed comment, back in the comment box to fix or retry.
           var ln = state.logNote.error && root.querySelector("#fop-log-note");
@@ -3034,9 +3034,13 @@
       return (
         '<div class="fop-modal" role="dialog" aria-modal="true" aria-labelledby="fop-log-title">' +
         '<div class="fop-modal__box fop-modal__box--wide">' +
-        '<div class="fop-log__head"><h2 class="fop-h2" id="fop-log-title">Change log · ' + esc(ex.order_id) + "</h2>" +
+        // Title and × in their own row, which stays at the top on phones while
+        // the rest scrolls (styles.css). Wide screens: one row, no ×.
+        '<div class="fop-log__head"><div class="fop-log__title"><h2 class="fop-h2" id="fop-log-title">Change log · ' + esc(ex.order_id) + "</h2>" +
+        '<button type="button" class="fop-icon-btn fop-quote__x fop-log__x" data-action="close-log" aria-label="Close">×</button></div>' +
         '<label class="fop-check"><input type="checkbox" data-action="log-gen-only"' + (state.logGenOnly ? " checked" : "") + "> " +
-        esc(genLabel(ex)) + " only</label></div>" +
+        // Phones show the short label, as on the generation tabs.
+        '<span class="fop-tab__full">' + esc(genLabel(ex)) + '</span><span class="fop-tab__short">' + esc(genLabel(ex, true)) + "</span> only</label></div>" +
         body +
         // A comment goes on the open generation only (one per call, as the
         // Eclipse node takes it), prefixed with the writer by the flow.

@@ -897,6 +897,55 @@
         4320,
         800
       ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// One change log comment per generation this placement made: who placed it\n// and from where (2026-10-23, on request).\nconst writer = $('Validate').first().json.input.writer;\nconst comment = 'Created by ' + writer + ' from the HubSpot Order Placement Card';\nreturn $('Sync list').first().json.e_sorder_ids.map((id) => ({ json: { orderId: id, comment } }));\n"
+      },
+      "id": "25ab9ee5-61b7-4369-9c07-39fd4487e3d5",
+      "name": "Emit changelog",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4560,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "addOrderChangeLogComment",
+        "changeLogCommentOrderId": "={{ $json.orderId }}",
+        "changeLogComment": "={{ $json.comment }}"
+      },
+      "id": "3adb1515-b8f1-43bb-b8ac-e3c5e5228f3a",
+      "name": "Eclipse: add change log comment",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        4560,
+        416
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// A failed comment never fails the placement (the order exists); it is kept\n// here for troubleshooting. Sync list goes on unchanged to the deal sync.\nconst ids = $('Sync list').first().json.e_sorder_ids;\nconst errors = $input.all().map((it, i) => (it.json.error ? ids[i] + ': ' + it.json.error : '')).filter(Boolean);\nreturn [{ json: Object.assign({}, $('Sync list').first().json, { changelog_error: errors.join('; ') }) }];\n"
+      },
+      "id": "672a633e-b6f6-4490-a381-8578cfccaa6c",
+      "name": "Check changelog",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4560,
+        624
+      ]
     }
   ],
   "connections": {
@@ -1380,7 +1429,7 @@
       "main": [
         [
           {
-            "node": "Trigger HubSpot deal sync",
+            "node": "Emit changelog",
             "type": "main",
             "index": 0
           }
@@ -1403,6 +1452,39 @@
         [
           {
             "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emit changelog": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: add change log comment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: add change log comment": {
+      "main": [
+        [
+          {
+            "node": "Check changelog",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check changelog": {
+      "main": [
+        [
+          {
+            "node": "Trigger HubSpot deal sync",
             "type": "main",
             "index": 0
           }

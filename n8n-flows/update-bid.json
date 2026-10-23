@@ -1482,6 +1482,108 @@
         4560,
         800
       ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// One change log comment per generation this update touched (the deal sync\n// list): who saved it and from where (2026-10-23, on request).\nconst writer = $('Validate').first().json.writer;\nconst comment = 'Updated by ' + writer + ' from the HubSpot Order Placement Card';\nreturn $('Resolve').first().json.syncIds.map((id) => ({ json: { orderId: id, comment } }));\n"
+      },
+      "id": "2fa8911e-737c-429a-8be5-e58f27324966",
+      "name": "Emit changelog",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4680,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "addOrderChangeLogComment",
+        "changeLogCommentOrderId": "={{ $json.orderId }}",
+        "changeLogComment": "={{ $json.comment }}"
+      },
+      "id": "e9213487-ffaf-4fc6-9b47-06702b767b72",
+      "name": "Eclipse: add change log comment",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        4680,
+        416
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// A failed comment never fails the update (the changes are saved); it is\n// kept here for troubleshooting. The deal sync reads Resolve itself.\nconst ids = $('Resolve').first().json.syncIds;\nconst errors = $input.all().map((it, i) => (it.json.error ? ids[i] + ': ' + it.json.error : '')).filter(Boolean);\nreturn [{ json: { ok: true, changelog_error: errors.join('; ') } }];\n"
+      },
+      "id": "ff9b0b21-1a13-4407-93e4-0e7c9a2afcbd",
+      "name": "Check changelog",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4680,
+        624
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "90920d7e-25aa-4bdb-832d-adc9c1af4ef9",
+              "name": "objectId",
+              "value": "={{ $json.orders[0].keys()[0] }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        5040,
+        -208
+      ],
+      "id": "66b606f2-8e18-4d48-a53e-8639c4a580ea",
+      "name": "set"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "qUK6790gaYNOjFRK",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/qUK6790gaYNOjFRK",
+          "cachedResultName": "Deal Updated → Update Quote"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        5280,
+        -208
+      ],
+      "id": "c82ceaef-60b7-414e-bac8-ff2865845f9e",
+      "name": "Call 'Deal Updated → Update Quote'"
     }
   ],
   "connections": {
@@ -2135,7 +2237,7 @@
         ],
         [
           {
-            "node": "Trigger HubSpot deal sync",
+            "node": "Emit changelog",
             "type": "main",
             "index": 0
           }
@@ -2179,7 +2281,7 @@
       "main": [
         [
           {
-            "node": "Trigger HubSpot deal sync",
+            "node": "Emit changelog",
             "type": "main",
             "index": 0
           }
@@ -2320,6 +2422,11 @@
             "node": "Final",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "set",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -2329,6 +2436,50 @@
         [
           {
             "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emit changelog": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: add change log comment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: add change log comment": {
+      "main": [
+        [
+          {
+            "node": "Check changelog",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check changelog": {
+      "main": [
+        [
+          {
+            "node": "Trigger HubSpot deal sync",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "set": {
+      "main": [
+        [
+          {
+            "node": "Call 'Deal Updated → Update Quote'",
             "type": "main",
             "index": 0
           }

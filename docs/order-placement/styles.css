@@ -842,6 +842,9 @@ html[data-theme="light"] .fop-status--partial { color: #a14d00; border-color: rg
 .fop-modal__box--wide { max-width: 1100px; }
 .fop-log__head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .fop-log__head .fop-h2 { margin: 0; }
+/* Wide screens: the title row's parts join the head row; no × (phones only). */
+.fop-log__title { display: contents; }
+.fop-log__title .fop-log__x { display: none; }   /* beats .fop-quote__x, later in the file */
 .fop-check { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); cursor: pointer; }
 .fop-check input { accent-color: var(--gold); }
 .fop-log-wrap { max-height: 65vh; overflow-y: auto; }
@@ -857,6 +860,20 @@ html[data-theme="light"] .fop-status--partial { color: #a14d00; border-color: rg
    comment under them at full width; the dialog scrolls, not the table. */
 @media (max-width: 767px) {
   .fop-log__head .fop-h2 { font-size: 21px; }
+  /* Title and × stay at the top of the dialog while it scrolls; the
+     checkbox under them scrolls away. The head steps aside so the title
+     row is the dialog's own child (sticky needs that). The negative margins
+     cover the dialog's padding, so entries scroll under a solid band;
+     top -16px because sticky stops at the padding edge, 16px down. */
+  .fop-log__head { display: contents; }
+  .fop-log__head .fop-check { align-self: flex-start; }
+  .fop-log__title .fop-log__x { display: inline-flex; }
+  .fop-log__title {
+    position: sticky; top: -16px; z-index: 1; flex: none;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    margin: -16px -14px 0; padding: 10px 8px 6px 14px; background: var(--panel-hi);
+  }
+  .fop-log__title .fop-h2 { min-width: 0; }
   .fop-log-wrap { max-height: none; overflow: visible; }
   .fop-log, .fop-log tbody { display: block; }
   .fop-log thead { display: none; }
