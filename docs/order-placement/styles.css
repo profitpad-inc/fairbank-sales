@@ -200,6 +200,9 @@ textarea.fop-notes { display: block; min-height: calc(2.1em + 18px); line-height
 .fop-alert--error   { color: var(--err-text); background: rgba(255, 95, 95, .12);  border-color: rgba(255, 95, 95, .45); }
 .fop-alert--warning { color: var(--warn-text); background: rgba(240, 196, 106, .1); border-color: rgba(240, 196, 106, .45); }
 .fop-alert--success { color: var(--ok-text); background: rgba(62, 207, 142, .1);  border-color: rgba(62, 207, 142, .45); }
+.fop-alert--lock { display: grid; gap: 6px; line-height: 1.4; }
+.fop-alert__title { font-weight: 700; }
+.fop-alert__note { font-size: 13px; opacity: .85; }
 
 /* ── Loading ── */
 .fop-center { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 80px 0; color: var(--muted); }
@@ -402,10 +405,6 @@ textarea.fop-notes { display: block; min-height: calc(2.1em + 18px); line-height
 .fop-sum__row:first-child { border-top: 0; }
 .fop-sum__lbl { font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
 .fop-sum__val { text-align: right; }
-/* Editable freight in (new orders): compact, right-aligned like the values. */
-.fop-sum__row:has(.fop-sum__in) { align-items: center; padding: 5px 8px 5px 14px; }
-.fop-sum__in { width: 120px; padding: 5px 8px; text-align: right; font-variant-numeric: tabular-nums; }
-.fop-confirm-freight { font-size: 15px; color: var(--muted); }
 .fop-sum__row--total { border-top: 2px solid var(--steel); padding: 10px 14px; }
 .fop-sum__row--total .fop-sum__lbl { font-size: 13px; color: var(--text); }
 .fop-sum__row--total .fop-sum__val { font-family: 'Barlow Condensed', sans-serif; font-size: 22px; font-weight: 700; color: var(--gold-lt); }
@@ -1618,7 +1617,12 @@ html[data-theme="light"] .fop-modal__box { border-radius: 12px; box-shadow: 0 10
 }
 .fop-umenu__out:hover,
 .fop-umenu__theme:hover { background: rgba(255, 255, 255, .08); }
-/* Theme row, above Sign out. */
+/* Feedback row (opens the n8n form in a new tab), above Sign out. */
+.fop-umenu__link {
+  display: block; padding: 12px 16px; color: #ffffff; text-decoration: none; border-bottom: 1px solid #555555;
+}
+.fop-umenu__link:hover { background: rgba(255, 255, 255, .08); }
+/* Theme row, above Feedback. */
 .fop-umenu__theme {
   display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px 16px; text-align: left;
   font: inherit; color: #ffffff; background: none; border: 0; border-bottom: 1px solid #555555; cursor: pointer;

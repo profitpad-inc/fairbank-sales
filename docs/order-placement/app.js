@@ -187,6 +187,12 @@
   // Bill-to terms that pay up front, so a credit limit never blocks them.
   var COD_TERMS = ["COD.CO.CHECK", "COD.CC"];
 
+  // Eclipse user ids (upper case) with no markup floor: their prices only
+  // have to stay above unit cost, cost + $0.01 (markupFloor()).
+  var NO_MARKUP_FLOOR = [
+    "FERERO",  // Eron Ferguson
+  ];
+
   // Grid columns that hold an input, in keyboard order.
   var COLS = ["product", "qty", "price"];
 
@@ -196,6 +202,26 @@
     return String(s == null ? "" : s)
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+
+  // A failed Place / Update / Cancel. Eclipse refuses any change (403) while
+  // someone has the order open; that one gets a plain-English message instead
+  // of the raw error. Anything else keeps the raw text and the failing step.
+  function placeErrorFrom(err) {
+    var m = /Not allow(?:ed)? to edit .*?order ID:\s*([A-Z0-9]+(?:\.\d+)?)\.?\s*Order is being edited by\s*([A-Za-z0-9_.-]+)/i.exec(err.message || "");
+    if (m) return { lockedBy: m[2], orderId: m[1] };
+    return err.message + (err.data && err.data.step ? " (step: " + err.data.step + ")" : "");
+  }
+
+  function placeErrorHtml(pe) {
+    if (!pe) return "";
+    if (typeof pe === "string") return '<div class="fop-alert fop-alert--error">' + esc(pe) + "</div>";
+    return '<div class="fop-alert fop-alert--warning fop-alert--lock">' +
+      '<div class="fop-alert__title">' + esc(pe.orderId) + " is open in Eclipse by " + esc(pe.lockedBy) + "</div>" +
+      "<div>Eclipse won't accept changes while someone else has the order open. Ask " + esc(pe.lockedBy) +
+      " to close it, then try again. Your edits are still here.</div>" +
+      '<div class="fop-alert__note">Some changes may already have saved before Eclipse stopped the update.</div>' +
+      "</div>";
   }
 
   // Unit prices keep Eclipse's third decimal when there is one (183.619).
@@ -335,6 +361,8 @@
     // HS Deal / HS Customer follow the open order and customer (every render).
     function paintHeader() {
       header.querySelector('[data-cell="hdr-links"]').innerHTML = dealLinkHtml() + customerLinkHtml();
+      header.querySelector('[data-cell="hdr-feedback"]').href =
+        feedbackUrl(user, pricingCustomerId(), state.existing && state.existing.e_sorder_id);
     }
     // Layout variant: <main id="app" data-layout="side"> (side.html)
     // shows stock + qty breaks for every line in a box to the
@@ -428,7 +456,7 @@
     }
 
     function defaultHeader() {
-      // Ship via starts blank (required for orders, optional for bids).
+      // Ship via starts blank (required for bids and orders).
       // Customer release # is pre-filled from the bill-to's Eclipse default
       // release number; a blank PO falls back to the customer's default PO
       // in create-order.
@@ -443,7 +471,6 @@
         release: bt.release_number || "",
         internalNotes: "",
         shippingInstructions: "",
-        freightIn: "",           // totals box; sent to create-order as freight_in
         outsideSales: String(user.default_territory || "").trim(),  // outsideSalesOptions()
         email: recentEmail(state.shipTo),  // contactFields(); sent as email
       };
@@ -457,12 +484,6 @@
       return list.map(function (v) { return String(v).trim(); })
         .filter(function (v, i, a) { return v && a.indexOf(v) === i; })
         .map(function (v) { return [v, v]; });
-    }
-
-    // The rep's freight in on a new order, in dollars (0 when blank or invalid).
-    function freightInValue() {
-      var v = parseFloat(state.header && state.header.freightIn);
-      return isFinite(v) && v > 0 ? Math.round(v * 100) / 100 : 0;
     }
 
     function pricingCustomerId() {
@@ -586,7 +607,7 @@
         state.lines = urlProducts.map(function (p) {
           var line = newLine();
           line.productId = p.id;
-          line.qty = p.qty;
+          line.qty = p.id === FREIGHT_PRODUCT_ID ? 1 : p.qty;
           line.lookingUp = true;
           return line;
         }).concat([newLine()]);
@@ -814,7 +835,7 @@
     // The line's unit, lower case ("ft", "ea"): the product search's uom,
     // else the unit on the loaded order line, else none.
     function uomOf(line) {
-      if (!line.productId) return "";
+      if (!line.productId || isFreightLine(line)) return "";
       return String(line.uom || line.orderUm || "").toLowerCase();
     }
 
@@ -888,21 +909,46 @@
       return low;
     }
 
-    // Floor for any unit price: unit cost + $0.01, unless the lowest
-    // quantity break is under that, then the lowest break (breaks win over
-    // the cost floor, 2026-10-22). Null when cost is unknown.
-    function minPrice(line) {
+    // Minimum markup on unit cost for the rep (2026-10-23): HubSpot user
+    // property branch_region "AG Plains" / "AG West" 12%, "LP" (propane)
+    // and anyone else 15%. Reps in NO_MARKUP_FLOOR only stay above cost.
+    function markupFloor() {
+      if (NO_MARKUP_FLOOR.indexOf(String(user.e_user_id || "").toUpperCase()) >= 0) return 0;
+      return /^AG\b/i.test(String(user.branch_region || "").trim()) ? 0.12 : 0.15;
+    }
+
+    // The cost floor alone: cost + the rep's markup, rounded up to the cent,
+    // never under cost + $0.01. Null when cost is unknown.
+    function costFloor(line) {
       var cost = lineCost(line);
       if (!isFinite(cost)) return null;
-      var m = Math.round((cost + 0.01) * 1000) / 1000;
+      var m = Math.max(cost + 0.01, Math.ceil(cost * (1 + markupFloor()) * 100 - 1e-6) / 100);
+      return Math.round(m * 1000) / 1000;
+    }
+
+    // Floor for any unit price: costFloor(), unless the lowest quantity
+    // break is under that, then the lowest break (breaks win over the cost
+    // floor, 2026-10-22). Null when cost is unknown. The freight line has no
+    // floor.
+    function minPrice(line) {
+      if (isFreightLine(line)) return null;
+      var m = costFloor(line);
+      if (m == null) return null;
       var low = lowestBreak(line);
       return low != null && low < m ? low : m;
     }
 
-    // True when minPrice() is the lowest quantity break, not cost + $0.01.
+    // True when minPrice() is the lowest quantity break, not the cost floor.
     function floorIsBreak(line) {
-      var low = lowestBreak(line), m = minPrice(line);
-      return low != null && m != null && low === m && low < Math.round((lineCost(line) + 0.01) * 1000) / 1000;
+      var low = lowestBreak(line), m = minPrice(line), f = costFloor(line);
+      return low != null && m != null && f != null && low === m && low < f;
+    }
+
+    // "15% over cost" (or "cost + $0.01" with no markup floor), for the
+    // "Price raised to the minimum" note.
+    function floorText() {
+      var f = markupFloor();
+      return f ? Math.round(f * 100) + "% over cost" : "cost + $0.01";
     }
 
     // Eclipse's own price for the qty (quantity breaks), before the floor.
@@ -910,14 +956,6 @@
       var q = quoteOf(line);
       if (!q || !q.data) return null;
       return breakPrice(q.data, Number(line.qty) || 0);
-    }
-
-    // Ceiling for any unit price: a loaded bid line's own Eclipse price (the
-    // original unit price already on the order), else the auto / qty-break
-    // price. Null when neither is known, same as minPrice.
-    function maxPrice(line) {
-      if (line.orig && line.orig.price != null) return line.orig.price;
-      return autoPrice(line);
     }
 
     // True when the order must send an explicit unitPrice: the rep typed
@@ -947,7 +985,7 @@
     // on a bid) as one generation per branch.
 
     function lineBranch(line) {
-      return (line && !line.custom && line.branch) || (state.header ? state.header.shipBranch : "") || "";
+      return (line && !line.custom && !isFreightLine(line) && line.branch) || (state.header ? state.header.shipBranch : "") || "";
     }
 
     // Branches the lines ship from, in line order (custom lines ship from
@@ -971,10 +1009,12 @@
     // header's ship branch (and the lines follow it again).
     function pickBranch(r, id) {
       var line = state.lines[r];
-      if (!line || line.custom || linesLocked() || !id) return;
+      if (!line || line.custom || isFreightLine(line) || linesLocked() || !id) return;
       line.branch = id === state.header.shipBranch ? "" : id;
       state.branchMenu = null;
-      var ls = state.lines.filter(function (l) { return !l.custom && l.productId; });
+      // The freight line follows the header, so it never holds the header
+      // back from moving to the products' branch.
+      var ls = state.lines.filter(function (l) { return !l.custom && !isFreightLine(l) && l.productId; });
       var first = ls.length ? lineBranch(ls[0]) : "";
       if (first && ls.every(function (l) { return lineBranch(l) === first; })) {
         state.header.shipBranch = first;
@@ -1038,6 +1078,16 @@
     var ITEM_PRODUCT_ID = "15680";
     function isItemLine(line) { return !!line && String(line.productId) === ITEM_PRODUCT_ID; }
     function pidText(line) { return isItemLine(line) ? "Custom" : line.productId; }
+
+    // Freight in (2026-10-23): the rep adds a line on product 10508 (typed
+    // ".10508") instead of the old Freight in box. Qty is always 1 with no
+    // unit, the price has no floor, it shows no inventory or quantity
+    // breaks, and it always ships from the header's branch, so it never
+    // makes a generation of its own.
+    var FREIGHT_PRODUCT_ID = "10508";
+    function isFreightLine(line) { return !!line && !line.custom && String(line.productId) === FREIGHT_PRODUCT_ID; }
+    // Lines with no inventory or quantity breaks to show.
+    function noStockLine(line) { return isItemLine(line) || isFreightLine(line); }
     // Product id cell of the confirm dialogs: 15680 as a Custom tag.
     function pidCellHtml(id) { return String(id) === ITEM_PRODUCT_ID ? '<span class="fop-badge">Custom</span>' : esc(id); }
 
@@ -1267,10 +1317,13 @@
       if (mode === "update" || mode === "convert") {
         if (!state.existing || !state.existing.editable) return "Only a bid can be " + (mode === "update" ? "updated." : "converted.");
         if (!h.shipBranch) return "Pick a ship branch.";
-        // Convert to Order: an order needs a ship via, and custom lines that
-        // are not saved yet keep it a bid (same rule as a new order).
+        // Custom lines that are not saved yet keep it a bid (same rule as a
+        // new order). Ship via and required date are needed for an update
+        // too, like a new bid, and so is the ship date (2026-10-23).
         if (mode === "convert" && customLines().length) return "An order with custom lines can only be placed as a bid.";
-        if (mode === "convert" && !h.shipVia) return "Pick a ship via.";
+        if (!h.shipVia) return "Pick a ship via.";
+        if (!h.shipDate) return "Pick a ship date.";
+        if (!h.requiredDate) return "Pick a required date.";
         if (mode === "convert" && creditLimitReason()) return creditLimitReason();
         if (h.requiredDate && h.shipDate && h.requiredDate < h.shipDate) return "Required date cannot be before ship date.";
         if (!user.e_user_id) return "Sign in again: no Eclipse user on this session.";
@@ -1281,9 +1334,11 @@
       // Custom lines need approval, so only a bid can carry them.
       if (mode === "order" && customLines().length) return "An order with custom lines can only be placed as a bid.";
       if (!h.shipBranch) return "Pick a ship branch.";
-      // Ship via is required for an order but not a bid; a blank bid is sent
-      // without one (the create-order flow omits shipVia).
-      if (mode !== "bid" && !h.shipVia) return "Pick a ship via.";
+      // Ship via, ship date and required date are required for a bid and an
+      // order (2026-10-23; a bid could go without a ship via before).
+      if (!h.shipVia) return "Pick a ship via.";
+      if (!h.shipDate) return "Pick a ship date.";
+      if (!h.requiredDate) return "Pick a required date.";
       if (String(h.email || "").trim() && !EMAIL_RE.test(String(h.email).trim().toLowerCase())) return "Enter a valid email.";
       if (mode === "order" && creditLimitReason()) return creditLimitReason();
       if (h.requiredDate && h.shipDate && h.requiredDate < h.shipDate) return "Required date cannot be before ship date.";
@@ -1510,7 +1565,10 @@
             },
           });
           // Typing a full YYYY-MM-DD moves the calendar to that month.
+          // Emptying the box clears the date (2026-10-23): flatpickr kept the
+          // old one, so a bid placed with the box empty went out with it.
           if (fp.altInput) fp.altInput.addEventListener("input", function () {
+            if (!fp.altInput.value.trim()) { if (fp.selectedDates.length) fp.clear(); return; }
             var d = isoDateOnly(fp.altInput.value);
             if (d && fp.isOpen) fp.jumpToDate(d);
           });
@@ -1836,12 +1894,19 @@
     // inside sales, order date and print status, in that order (read-only,
     // from e-order-placement/order). Print status is Eclipse's one-letter
     // code as stored.
-    // Top right of the header, read-only: an existing order's own price
-    // branch, else the bill-to's Eclipse home branch, which create-order uses
-    // as the price branch (the page never sends one).
-    function priceBranchField() {
+    // Price branch of a new order (2026-10-23): the writer's home branch
+    // (HubSpot e_user_default_branch, FB_USER.default_branch), sent as
+    // price_branch. A rep with none falls back to the bill-to's Eclipse home
+    // branch, which create-order also uses when no price_branch is sent.
+    function newPriceBranch() {
       var bt = (state.customer && state.customer.bill_to) || {};
-      var id = branchIdOf(state.existing ? state.existing.price_branch : bt.home_branch);
+      return branchIdOf(user.default_branch) || branchIdOf(bt.home_branch);
+    }
+
+    // Top right of the header, read-only: an existing order's own price
+    // branch, else newPriceBranch().
+    function priceBranchField() {
+      var id = state.existing ? branchIdOf(state.existing.price_branch) : newPriceBranch();
       var known = BRANCHES.filter(function (b) { return b[0] === id; })[0];
       var text = id ? id + (known ? " - " + known[1] : "") : "";
       return field("Price branch", '<input class="fop-input" value="' + esc(text) + '" disabled>', "fop-field--end");
@@ -2065,6 +2130,8 @@
     function lineRowHtml(line, r) {
       // A non-bid existing order shows its lines read-only (arrows still move).
       var ro = linesLocked() ? " readonly" : "";
+      // The freight line's qty is fixed at 1: no steppers, read-only box.
+      var qro = ro || (isFreightLine(line) ? " readonly" : "");
       var edited = line.priceOverride && !line.keepPrice;
       return (
         '<div class="fop-line' + (r % 2 ? " fop-line--alt" : "") + (ro ? " fop-line--ro" : "") + '" data-row="' + r + '" role="row">' +
@@ -2088,14 +2155,14 @@
         '<div class="fop-cell fop-cell--qty" role="cell">' +
         '<label class="fop-mlabel">Qty</label>' +
         '<div class="fop-qty">' +
-        (ro ? "" : '<button class="fop-step" tabindex="-1" data-action="qty-dec" data-r="' + r + '" aria-label="Decrease">−</button>') +
+        (qro ? "" : '<button class="fop-step" tabindex="-1" data-action="qty-dec" data-r="' + r + '" aria-label="Decrease">−</button>') +
         // The box holds the bare number; showQty lays "50 ft" over it
         // (unit in grey) while it is not focused.
         '<span class="fop-qty__box">' +
         '<input class="fop-input fop-grid-in fop-num" data-r="' + r + '" data-c="1" inputmode="numeric" ' +
-        'value="' + esc(line.qty) + '" aria-label="Quantity, line ' + (r + 1) + '"' + ro + ">" +
+        'value="' + esc(line.qty) + '" aria-label="Quantity, line ' + (r + 1) + '"' + qro + ">" +
         '<span class="fop-qty__show" aria-hidden="true"></span></span>' +
-        (ro ? "" : '<button class="fop-step" tabindex="-1" data-action="qty-inc" data-r="' + r + '" aria-label="Increase">+</button>') +
+        (qro ? "" : '<button class="fop-step" tabindex="-1" data-action="qty-inc" data-r="' + r + '" aria-label="Increase">+</button>') +
         "</div></div>" +
         '<div class="fop-cell fop-cell--price" role="cell">' +
         '<label class="fop-mlabel">Unit price</label>' +
@@ -2130,7 +2197,7 @@
     function inlineStripsHtml(line, r) {
       var on = stripShown(r);
       var hid = on ? "" : " hidden";
-      var shid = on && !isItemLine(line) ? "" : " hidden";
+      var shid = on && !noStockLine(line) ? "" : " hidden";
       var withStock = !noStock();
       return (withStock ? '<div class="fop-stockstrip" data-cell="strip"' + shid + ">" + (on ? stockStripHtml(line, false, r) : "") + "</div>" : "") +
         (withStock ? '<div class="fop-stockstrip" data-cell="breaks"' + shid + ">" + (on ? breaksStripHtml(line) : "") + "</div>" : "") +
@@ -2462,11 +2529,8 @@
       var a = autoPrice(line);
       var autoLow = !line.priceOverride && a != null && m != null && a < m;
       var raised = (line.priceRaised || autoLow) && m != null
-        ? '<span class="fop-warn-text fop-block">Price raised to the minimum, ' + (floorIsBreak(line) ? "the lowest quantity break" : "cost + $0.01") + " (" + unitMoney(m) + ")</span>" : "";
-      var mx = maxPrice(line);
-      var capped = line.priceCapped && mx != null
-        ? '<span class="fop-warn-text fop-block">Price capped at the original unit price (' + unitMoney(mx) + ")</span>" : "";
-      return esc(line.description || "") + err + raised + capped + lineBranchHtml(line) + eclipseCommentsHtml(line);
+        ? '<span class="fop-warn-text fop-block">Price raised to the minimum, ' + (floorIsBreak(line) ? "the lowest quantity break" : floorText()) + " (" + unitMoney(m) + ")</span>" : "";
+      return esc(line.description || "") + err + raised + lineBranchHtml(line) + eclipseCommentsHtml(line);
     }
 
     // A line shipping from another branch than the header's says so under
@@ -2515,7 +2579,7 @@
     }
 
     function availHtml(line) {
-      if (!line.productId || noStock() || isItemLine(line)) return "";
+      if (!line.productId || noStock() || noStockLine(line)) return "";
       var s = lineStock(line);
       if (!s) return '<span class="fop-dots">···</span>';
       // No ship branch picked yet: no branch count to show.
@@ -2529,7 +2593,7 @@
     }
 
     function totalStockHtml(line) {
-      if (!line.productId || noStock() || isItemLine(line)) return "";
+      if (!line.productId || noStock() || noStockLine(line)) return "";
       var s = lineStock(line);
       if (!s) return "";
       return '<span class="fop-mlabel">All branches </span>' + s.total;
@@ -2553,7 +2617,6 @@
         handling: amt("handling"), tax: amt("tax_total"),
       };
       var unchanged = ex && (!ex.editable || !bidChanges().any);
-      if (!ex) s.freightIn = freightInValue();
       s.total = unchanged && num(ex.order_total) != null ? num(ex.order_total)
         : s.subtotal + (s.freightIn || 0) + (s.freightOut || 0) + (s.handling || 0) + (s.tax || 0);
       return s;
@@ -2578,15 +2641,13 @@
     }
 
     // The summary box under the lines, right-aligned (like a quote's totals).
-    // A new order shows an editable Freight in and the Total: freight out and
+    // A new order shows only the Total (freight in is a line on product
+    // 10508 since 2026-10-23, so it is in the lines): freight out and
     // tax are unknown until Eclipse creates the order.
     function summaryHtml() {
       var s = summary();
       if (!state.existing) {
-        return '<div class="fop-sum__row"><label class="fop-sum__lbl" for="fop-freight-in">Freight in</label>' +
-          '<input id="fop-freight-in" class="fop-input fop-sum__in" data-head="freightIn" inputmode="decimal" autocomplete="off" placeholder="0.00" value="' +
-          esc(state.header.freightIn) + '"></div>' +
-          '<div class="fop-sum__row fop-sum__row--total"><span class="fop-sum__lbl">Total</span><span class="fop-sum__val" data-cell="sum-total">' +
+        return '<div class="fop-sum__row fop-sum__row--total"><span class="fop-sum__lbl">Total</span><span class="fop-sum__val" data-cell="sum-total">' +
           sumTotalHtml(s) + "</span></div>";
       }
       var row = function (label, v) {
@@ -2619,7 +2680,7 @@
       var head = '<div class="fop-side__head"><span class="fop-party__lbl">Stock &amp; qty breaks</span>' +
         '<button class="fop-icon-btn" data-action="close-side" aria-label="Close stock and qty breaks" title="Close (' + altKey("S") + ')">×</button></div>';
       var items = state.lines.map(function (line, r) {
-        if (!line.productId || isItemLine(line)) return "";
+        if (!line.productId || noStockLine(line)) return "";
         // Name capped at 35 characters plus "..."; the full name is the tooltip.
         var name = (line.description || ("Product " + line.productId)).trim();
         var short = name.length > 35 ? name.slice(0, 35).replace(/\s+$/, "") + "..." : name;
@@ -2665,7 +2726,7 @@
       if (noStock() && !commentEditable(line)) return;
       state.detailsModal = {
         r: r, comment: line.comment || "",
-        orig: { qty: line.qty, price: line.price, priceOverride: line.priceOverride, keepPrice: line.keepPrice, priceRaised: line.priceRaised, priceCapped: line.priceCapped },
+        orig: { qty: line.qty, price: line.price, priceOverride: line.priceOverride, keepPrice: line.keepPrice, priceRaised: line.priceRaised },
         // A branch tile picked here can move the header's ship branch and
         // every line's branch (pickBranch), so Cancel puts all of them back.
         branches: state.lines.map(function (l) { return l.branch; }), shipBranch: state.header.shipBranch,
@@ -2698,7 +2759,7 @@
     }
 
     function detailsStockHtml(line) {
-      if (noStock() || isItemLine(line)) return "";
+      if (noStock() || noStockLine(line)) return "";
       return '<div class="fop-details__cols">' +
         '<div class="fop-side__sec" data-cell="details-stock">' + stockStripHtml(line, true, state.detailsModal.r) + "</div>" +
         '<div class="fop-side__sec" data-cell="details-breaks">' + breaksStripHtml(line) + "</div></div>";
@@ -2713,7 +2774,7 @@
       };
       return '<div class="fop-details__nums">' +
         '<div class="fop-field"><label class="fop-label" for="fop-dm-qty">Qty</label>' +
-        '<input class="fop-input fop-num" id="fop-dm-qty" data-dm="qty" inputmode="numeric" autocomplete="off" value="' + esc(line.qty) + '"' + ro + "></div>" +
+        '<input class="fop-input fop-num" id="fop-dm-qty" data-dm="qty" inputmode="numeric" autocomplete="off" value="' + esc(line.qty) + '"' + (ro || (isFreightLine(line) ? " readonly" : "")) + "></div>" +
         '<div class="fop-field"><label class="fop-label" for="fop-dm-price">Unit price</label>' +
         '<input class="fop-input fop-num' + (edited ? " fop-input--override" : "") + '" id="fop-dm-price" data-dm="price" inputmode="decimal" autocomplete="off" value="' +
         esc(priceText(line)) + '"' + ro + "></div>" +
@@ -3401,7 +3462,7 @@
         '<h2 class="fop-h2" id="fop-cancel-title">Cancel ' + what + " " + esc(ex.e_sorder_id) + "?</h2>" +
         '<p class="fop-cancel-desc" id="fop-cancel-desc">Are you sure? This sets the ' + what + "'s status to Cancel in Eclipse. " +
         "It can't be undone from this page.</p>" +
-        (state.placeError ? '<div class="fop-alert fop-alert--error">' + esc(state.placeError) + "</div>" : "") +
+        placeErrorHtml(state.placeError) +
         '<div class="fop-row fop-row--end">' +
         '<button class="fop-btn fop-btn--ghost" data-action="keep-order"' + (state.placing ? " disabled" : "") + ">Keep " + what + ' <span class="fop-key">Esc</span></button>' +
         '<button class="fop-btn fop-btn--danger-solid" data-action="confirm-cancel"' + (state.placing ? " disabled" : "") + ">" +
@@ -3465,7 +3526,7 @@
         headerHtml() +
         // Error + action bar: in the side layout they stay in the left column
         // (under the header), so the stock card's column runs the full height.
-        (state.placeError ? '<div class="fop-alert fop-alert--error">' + esc(state.placeError) + "</div>" : "") +
+        placeErrorHtml(state.placeError) +
         '<div data-cell="quote-error">' + (state.quoteError ? '<div class="fop-alert fop-alert--error">' + esc(state.quoteError) + "</div>" : "") + "</div>" +
         '<div class="fop-bar">' +
         '<div class="fop-bar__totals" data-cell="totals">' + totalsHtml() + "</div>" +
@@ -3623,9 +3684,8 @@
         (state.confirm.mode === "order" ? statusPickerHtml() : "") +
         '<div class="fop-table-wrap"><table class="fop-table"><thead><tr><th>Product</th><th>Description</th>' + (multi ? '<th class="fop-num">Br</th>' : "") +
         '<th class="fop-num">Qty</th><th class="fop-num">Ext.</th></tr></thead><tbody>' + rows + "</tbody></table></div>" +
-        (freightInValue() ? '<div class="fop-confirm-total fop-confirm-freight">Freight in ' + money(freightInValue()) + "</div>" : "") +
-        '<div class="fop-confirm-total">Total ' + money(t.total + freightInValue()) + (t.unknown ? " + Eclipse pricing" : "") + "</div>" +
-        (state.placeError ? '<div class="fop-alert fop-alert--error">' + esc(state.placeError) + "</div>" : "") +
+        '<div class="fop-confirm-total">Total ' + money(t.total) + (t.unknown ? " + Eclipse pricing" : "") + "</div>" +
+        placeErrorHtml(state.placeError) +
         '<div class="fop-row fop-row--end">' +
         '<button class="fop-btn fop-btn--ghost" data-action="cancel-place"' + (state.placing ? " disabled" : "") + ">Back <span class=\"fop-key\">Esc</span></button>" +
         '<button class="fop-btn" data-action="confirm-place"' + (state.placing ? " disabled" : "") +
@@ -3694,7 +3754,7 @@
         '<div class="fop-table-wrap"><table class="fop-table"><thead><tr><th>Product</th><th>Description</th>' + (multi ? '<th class="fop-num">Br</th>' : "") +
         '<th class="fop-num">Qty</th><th class="fop-num">Ext.</th><th></th></tr></thead><tbody>' + rows + "</tbody></table></div>" +
         '<div class="fop-confirm-total">Total ' + money(t.total) + (t.unknown ? " + Eclipse pricing" : "") + "</div>" +
-        (state.placeError ? '<div class="fop-alert fop-alert--error">' + esc(state.placeError) + "</div>" : "") +
+        placeErrorHtml(state.placeError) +
         '<div class="fop-row fop-row--end">' +
         '<button class="fop-btn fop-btn--ghost" data-action="cancel-place"' + (state.placing ? " disabled" : "") + ">Back <span class=\"fop-key\">Esc</span></button>" +
         '<button class="fop-btn" data-action="confirm-place"' + (state.placing ? " disabled" : "") +
@@ -3791,7 +3851,7 @@
       var strip = el.querySelector('[data-cell="strip"]');
       var brk = el.querySelector('[data-cell="breaks"]');
       var cm = el.querySelector('[data-cell="comment"]');
-      var stockOn = on && !isItemLine(line);
+      var stockOn = on && !noStockLine(line);
       if (strip) { strip.hidden = !stockOn; if (stockOn) strip.innerHTML = stockStripHtml(line, false, r); }
       if (brk) { brk.hidden = !stockOn; if (stockOn) brk.innerHTML = breaksStripHtml(line); }
       if (cm) {
@@ -3832,7 +3892,7 @@
     function refreshTotals() {
       var t = root.querySelector('[data-cell="totals"]');
       if (t) t.innerHTML = totalsHtml();
-      // New order: only the total, so the freight input keeps focus.
+      // New order: only the total cell.
       var sm = root.querySelector('[data-cell="summary"]');
       var st = sm && sm.querySelector('[data-cell="sum-total"]');
       if (sm && !state.existing && st) st.innerHTML = sumTotalHtml(summary());
@@ -3953,16 +4013,19 @@
       line.orig = null;
       line.orderCost = null;
       line.eclipseComments = null;
+      // Freight: qty is always 1, so the cursor goes straight to the price.
+      var freight = isFreightLine(line);
+      if (freight) { line.qty = 1; line.branch = ""; }
       fetchQuote(line.productId);
       // Keep a blank line at the bottom so the rep can keep typing.
       if (r === state.lines.length - 1) state.lines.push(newLine());
-      state.focus = { r: r, c: 1 };
+      state.focus = { r: r, c: freight ? 2 : 1 };
       render();
     }
 
     function setQty(r, raw) {
       var n = Math.round(Number(raw));
-      state.lines[r].qty = isFinite(n) && n > 0 ? n : 1;
+      state.lines[r].qty = isFinite(n) && n > 0 && !isFreightLine(state.lines[r]) ? n : 1;
       refreshRow(r);
     }
 
@@ -3975,7 +4038,6 @@
         line.keepPrice = false;
         line.priceOverride = false;
         line.priceRaised = false;
-        line.priceCapped = false;
         line.price = null;
       } else if (isFinite(Number(s)) && Number(s) >= 0) {
         line.keepPrice = false;
@@ -3984,12 +4046,7 @@
         var m = minPrice(line);
         line.priceRaised = m != null && v < m;
         if (line.priceRaised) v = m;
-        // Ceiling: never let the rep raise a price above the original unit
-        // price (checked after the floor, so a line priced under cost still
-        // gets raised to the floor even if that is above the ceiling).
-        var mx = maxPrice(line);
-        line.priceCapped = mx != null && v > mx;
-        if (line.priceCapped) v = mx;
+        // No ceiling (2026-10-23): reps may raise a price as far as they like.
         if (auto == null || Math.abs(v - auto) >= 0.0005) {
           line.priceOverride = true;
           line.price = v;
@@ -4074,6 +4131,14 @@
       if (sn) sn.focus();
     }
 
+    // A product search containing "freight" lists the freight line's product
+    // (10508) first when the search returned it (2026-10-23).
+    function freightFirst(items, q) {
+      if (!/freight/i.test(q)) return items;
+      var hit = items.filter(function (p) { return String(p.e_product_id) === FREIGHT_PRODUCT_ID; });
+      return hit.concat(items.filter(function (p) { return String(p.e_product_id) !== FREIGHT_PRODUCT_ID; }));
+    }
+
     var acSearch = debounce(function (input, kind, r) {
       var q = input.value.trim();
       // Focus already left (a pick, or a click elsewhere before the delay ran).
@@ -4085,6 +4150,7 @@
         : getJson(API.inquiry, { e_customer_id: pricingCustomerId(), e_product_name: q }).then(function (d) { return d.e_products || []; });
       req.then(function (items) {
         if (document.activeElement !== input || input.value.trim() !== q) return;
+        if (kind === "product") items = freightFirst(items, q);
         acRender(input, kind, r, items, items.length ? null : "No matches");
       }).catch(function (err) {
         if (document.activeElement === input) acRender(input, kind, r, [], "Search failed: " + err.message);
@@ -4105,8 +4171,12 @@
         blocked === "Pick a ship via." ? "shipVia" :
         blocked === "Enter a valid email." ? "email" :
         blocked === seeInstructionReason() ? "shippingInstructions" :
-        blocked === "Required date cannot be before ship date." ? "requiredDate" : null;
-      if (field) flashField(root.querySelector('#fop-head [data-head="' + field + '"]'));
+        blocked === "Pick a ship date." ? "shipDate" :
+        blocked === "Pick a required date." || blocked === "Required date cannot be before ship date." ? "requiredDate" : null;
+      if (!field) return;
+      // Dates are flatpickr fields: flash the visible box, not the hidden input.
+      var el = root.querySelector('#fop-head [data-head="' + field + '"]') || root.querySelector('#fop-head [data-date="' + field + '"]');
+      flashField(el && el._flatpickr && el._flatpickr.altInput ? el._flatpickr.altInput : el);
     }
 
     function requestPlace(mode) {
@@ -4237,7 +4307,7 @@
           return reopenAfterSave(data.e_sorder_id || ex.e_sorder_id, data);
         })
         .catch(function (err) {
-          state.placeError = err.message + (err.data && err.data.step ? " (step: " + err.data.step + ")" : "");
+          state.placeError = placeErrorFrom(err);
         })
         .then(function () {
           state.placing = false;
@@ -4263,7 +4333,7 @@
           return reopenAfterSave(data.e_sorder_id || ex.e_sorder_id, data);
         })
         .catch(function (err) {
-          state.placeError = err.message + (err.data && err.data.step ? " (step: " + err.data.step + ")" : "");
+          state.placeError = placeErrorFrom(err);
         })
         .then(function () {
           state.placing = false;
@@ -4327,8 +4397,9 @@
         bill_to_id: c.bill_to.e_customer_id,
         ship_to_id: state.shipTo.e_customer_id,
         ship_branch: h.shipBranch,
-        // price_branch omitted: the flow uses the bill-to's home branch,
-        // so changing the ship branch never changes pricing.
+        // The writer's home branch, never the ship branch, so changing the
+        // ship branch never changes pricing.
+        price_branch: newPriceBranch(),
         order_status: mode === "bid" ? "Bid" : h.orderStatus,
         ship_via: h.shipVia,
         ship_date: h.shipDate,
@@ -4337,9 +4408,6 @@
         release: h.release,
         internal_notes: h.internalNotes,
         shipping_instructions: h.shippingInstructions,
-        // create-order sends it to Eclipse as freightCharges (UNVERIFIED that
-        // Eclipse books that as freight in).
-        freight_in: freightInValue(),
         writer: user.e_user_id,
         outside_sales: h.outsideSales || "",
         email: String(h.email || "").trim().toLowerCase(),
@@ -4366,7 +4434,7 @@
           state.view = "done";
         })
         .catch(function (err) {
-          state.placeError = err.message + (err.data && err.data.step ? " (step: " + err.data.step + ")" : "");
+          state.placeError = placeErrorFrom(err);
         })
         .then(function () {
           state.placing = false;
@@ -4687,7 +4755,6 @@
         return;
       }
       if (t.id === "fop-customer-search") { acSearch(t, "customer", null); return; }
-      if (t.id === "fop-freight-in") { state.header.freightIn = t.value; refreshTotals(); return; }
       if (t.classList.contains("fop-notes")) {
         autosizeNotes(t);
         state.header[t.getAttribute("data-head")] = t.value;
@@ -4730,14 +4797,6 @@
         return;
       }
       var key = t.getAttribute("data-head");
-      if (key === "freightIn") {
-        // Tidy to two decimals on leaving the box; blank or invalid → empty.
-        state.header.freightIn = t.value;
-        var fv = freightInValue();
-        state.header.freightIn = t.value = fv ? fv.toFixed(2) : "";
-        refreshTotals();
-        return;
-      }
       if (key) {
         state.header[key] = t.value;
         if (key === "email") {
@@ -5126,7 +5185,7 @@
       }
 
       // Backspace on Ship via clears it (a native select has no other way
-      // to blank a picked value); ship via is optional on a bid.
+      // to blank a picked value).
       if (e.key === "Backspace" && t.tagName === "SELECT" && t.getAttribute("data-head") === "shipVia" && !t.disabled && state.header.shipVia) {
         e.preventDefault();
         state.header.shipVia = t.value = "";
@@ -5197,16 +5256,21 @@
       '<div class="fop-header__end">' +
       '<span class="fop-header__links" data-cell="hdr-links"></span>' +
       '<div class="fop-umenu">' +
-      '<button type="button" class="fop-umenu__btn" aria-haspopup="true" aria-expanded="false">' +
+      '<button type="button" class="fop-umenu__btn" aria-haspopup="true" aria-expanded="false"' +
+      (user.acting_for ? ' title="Acting as ' + esc(name) + '"' : "") + ">" +
       // Phones show the first name only (CSS swaps the two spans).
       '<span class="fop-umenu__name fop-umenu__name--full">' + esc(name) + "</span>" +
       '<span class="fop-umenu__name fop-umenu__name--first">' + esc(name.split(/\s+/)[0]) + "</span>" +
       '<svg class="fop-umenu__caret" viewBox="0 0 10 6" aria-hidden="true"><path d="M0 0h10L5 6z" fill="currentColor"/></svg></button>' +
       '<div class="fop-umenu__panel" hidden>' +
       '<div class="fop-umenu__tools"><span class="fop-umenu__lbl">Tools</span>' + toolsItemsHtml("order-placement") + "</div>" +
+      // Acting as another rep (?e_user_id=): who is really signed in.
+      (user.acting_for ? '<div class="fop-umenu__row"><span class="fop-umenu__lbl">Signed in as</span>' +
+        esc(user.acting_for.name || user.acting_for.e_user_id) + "</div>" : "") +
       (user.email ? '<div class="fop-umenu__row"><span class="fop-umenu__lbl">Email</span>' + esc(user.email) + "</div>" : "") +
       '<div class="fop-umenu__row"><span class="fop-umenu__lbl">Eclipse ID</span>' + esc(user.e_user_id || "") + "</div>" +
       '<button type="button" class="fop-umenu__theme"></button>' +
+      '<a class="fop-umenu__link" data-cell="hdr-feedback" target="_blank" rel="noopener" href="' + esc(feedbackUrl(user)) + '">Feedback</a>' +
       '<button type="button" class="fop-umenu__out">Sign out</button>' +
       "</div></div>" +
       "</div>";
@@ -5233,6 +5297,22 @@
       lastY = y;
     }, { passive: true });
     return header;
+  }
+
+  // Feedback form (2026-10-23), the user menu row above Sign out. Carries
+  // the rep, plus the open customer and order when there are any; the rep
+  // is the one really signed in when acting as someone (acting_for). Same
+  // helper in ../product-lookup/app.js and ../outlook-integration/index.js.
+  var FEEDBACK_URL = "https://n8n.profitpad.com/form/fairbank-feedback";
+
+  function feedbackUrl(user, customerId, orderId) {
+    var p = new URLSearchParams();
+    var userId = (user.acting_for && user.acting_for.e_user_id) || user.e_user_id;
+    if (userId) p.set("e_user_id", userId);
+    if (customerId) p.set("e_customer_id", customerId);
+    if (orderId) p.set("e_sorder_id", orderId);
+    var q = p.toString();
+    return FEEDBACK_URL + (q ? "?" + q : "");
   }
 
   // Tools menu (2026-10-23), left of the bar beside the mark: links to the
@@ -5315,6 +5395,7 @@
   // Last, so the theme icons above are set before the header uses them.
   // Loaded with defer, so the DOM is ready. Wait for the password gate so
   // FB_USER (writer, branch) is known.
-  if (window.FB_USER) boot();
+  // Acting as another rep (?e_user_id=, auth.js): wait for their user.
+  if (window.FB_USER) (window.FB_USER_READY || Promise.resolve()).then(boot);
   else window.addEventListener("fb:auth", boot, { once: true });
 })();

@@ -69,6 +69,15 @@
   }
 
 
+  // Feedback form, the user menu row above Sign out: like order
+  // placement's feedbackUrl(), with the rep's Eclipse id only.
+  var FEEDBACK_URL = 'https://n8n.profitpad.com/form/fairbank-feedback';
+
+  function feedbackUrl(user) {
+    var userId = (user.acting_for && user.acting_for.e_user_id) || user.e_user_id;
+    return FEEDBACK_URL + (userId ? '?e_user_id=' + encodeURIComponent(userId) : '');
+  }
+
   // ── Page header ──────────────────────────────────────────────
   // Same #333 bar as order placement (initHeader() in its app.js): the
   // Fairbank mark left, a user menu right (the rep's name with a caret;
@@ -93,6 +102,7 @@
         '<div class="fom-umenu__panel" hidden>' +
           (user.email ? '<div class="fom-umenu__row"><span class="fom-umenu__lbl">Email</span>' + escHtml(user.email) + '</div>' : '') +
           '<div class="fom-umenu__row"><span class="fom-umenu__lbl">Eclipse ID</span>' + escHtml(user.e_user_id || '') + '</div>' +
+          '<a class="fom-umenu__link" target="_blank" rel="noopener" href="' + escHtml(feedbackUrl(user)) + '">Feedback</a>' +
           '<button type="button" class="fom-umenu__out">Sign out</button>' +
         '</div>' +
       '</div>';

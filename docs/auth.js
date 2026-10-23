@@ -29,6 +29,14 @@
    whose e_user_id was cleared) is signed out on their next open. A
    session left unopened for 48 hours ends and needs HubSpot sign-in.
 
+   Acting as another rep: only the admin logins (ACT_AS_EMAILS or
+   ACT_AS_HS_USER_ID) may add ?e_user_id=XXX to a page's URL. The page
+   then works as that rep: window.FB_USER holds their e_user_id and the
+   rest of their HubSpot user (user-lookup flow), with the real login in
+   FB_USER.acting_for. window.FB_USER_READY resolves once that lookup is
+   done (at once otherwise); pages boot after it. The session token stays
+   the admin's own; n8n does not check the writer against it.
+
    Setup: CLIENT_ID below is the HubSpot app's client id (public, safe
    here). The client secret lives only in n8n. See README.md.
    ============================================================ */
@@ -56,6 +64,17 @@
   // Webhook path prefixes that need the session token. Add a prefix
   // only once that webhook uses the same JWT credential in n8n.
   var PROTECTED = ['e-order-placement/'];
+
+  // The only logins that may act as another rep with ?e_user_id=
+  // (lower case emails; the HubSpot user id is Chris Becher's).
+  var ACT_AS_EMAILS = [
+    'chris.becher@profitpad.com',
+    'ali.ismail@profitpad.com',
+    'treyj@fairbankequipment.com',
+    'darrinc@fairbankequipment.com',
+  ];
+  var ACT_AS_HS_USER_ID = '62490421';
+  var USER_LOOKUP_URL = N8N + 'e-order-placement/user';
 
   var KEY_SESSION = 'fb_session';
   var KEY_NONCE = 'fb_nonce';
@@ -109,6 +128,7 @@
       // before 2026-10-22 has none until its next refresh.
       territories: Array.isArray(c.territories) ? c.territories.map(String) : [],
       default_territory: c.default_territory || '',  // HubSpot e_user_default_territory
+      branch_region: c.branch_region || '',          // HubSpot branch_region (minimum markup)
       hs_user_id: c.hs_user_id || '',
       hs_owner_id: c.hs_owner_id || '',
     };
@@ -140,9 +160,41 @@
   var token = lsGet(KEY_SESSION);
   var claims = token ? claimsOf(token) : null;
   if (!claims) { lsDel(KEY_SESSION); token = null; }
-  var user = claims ? userOf(claims) : null;
+
+  // ?e_user_id=XXX on an admin login: the rep to act as (upper case), or
+  // '' when there is none, it is the admin's own id or this is not an admin.
+  function actAsIdFor(c) {
+    var mine = ACT_AS_EMAILS.indexOf(String(c.email || '').trim().toLowerCase()) >= 0 ||
+      String(c.hs_user_id || '') === ACT_AS_HS_USER_ID || String(c.sub || '') === ACT_AS_HS_USER_ID;
+    if (!mine) return '';
+    var q = new URLSearchParams(window.location.search.replace(/^\?/, '').replace(/\?/g, '&'));
+    var id = String(q.get('e_user_id') || '').trim().toUpperCase();
+    return id && id !== String(c.e_user_id || '').toUpperCase() ? id : '';
+  }
+
+  // The rep acted as: their id until user-lookup answers, then their
+  // HubSpot user. Null when not acting as anyone.
+  var actAs = null;
+  if (claims && actAsIdFor(claims)) {
+    actAs = {
+      e_user_id: actAsIdFor(claims), name: actAsIdFor(claims), email: '', default_branch: '',
+      territories: [], default_territory: '', branch_region: '', hs_user_id: '', hs_owner_id: '',
+    };
+  }
+
+  // The page's user: the login's own, or the rep acted as (with the real
+  // login kept in acting_for).
+  function pageUser(c) {
+    var u = userOf(c);
+    if (!actAs) return u;
+    var real = { e_user_id: u.e_user_id, name: u.name, email: u.email };
+    return Object.assign(u, actAs, { acting_for: real });
+  }
+
+  var user = claims ? pageUser(claims) : null;
 
   window.FB_USER = user;
+  window.FB_USER_READY = Promise.resolve();
   window.fbSignOut = function () {
     lsDel(KEY_SESSION);
     window.location.reload();
@@ -202,7 +254,7 @@
     claims = c;
     lsSet(KEY_SESSION, next);
     // Same object, so pages that kept a reference see the new values.
-    Object.assign(window.FB_USER, userOf(c));
+    Object.assign(window.FB_USER, pageUser(c));
     scheduleExpiry();
     return true;
   }
@@ -224,7 +276,34 @@
       .catch(function () { /* offline: keep the current session */ });
   }
 
+  // Acting as a rep: read their HubSpot user (name, email, branch,
+  // territories, branch_region) before the page boots. A failed lookup
+  // keeps their id only.
+  function loadActAs() {
+    var url = USER_LOOKUP_URL + '?e_user_id=' + encodeURIComponent(actAs.e_user_id);
+    return nativeFetch(url, { headers: { Authorization: 'Bearer ' + token } })
+      .then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (d) {
+          if (!res.ok || !d || d.error) return;
+          actAs = {
+            e_user_id: String(d.e_user_id || actAs.e_user_id).toUpperCase(),
+            name: d.name || actAs.e_user_id,
+            email: d.email || '',
+            default_branch: d.default_branch || '',
+            territories: Array.isArray(d.territories) ? d.territories.map(String) : [],
+            default_territory: d.default_territory || '',
+            branch_region: d.branch_region || '',
+            hs_user_id: String(d.hs_user_id || ''),
+            hs_owner_id: String(d.hs_owner_id || ''),
+          };
+          Object.assign(window.FB_USER, pageUser(claims));
+        });
+      })
+      .catch(function () { /* keep the id only */ });
+  }
+
   if (user) {
+    if (actAs) window.FB_USER_READY = loadActAs();
     scheduleExpiry();
     refreshSession();
     window.addEventListener('storage', function (e) {
