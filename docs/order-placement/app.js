@@ -570,6 +570,9 @@
         urlProducts.forEach(function (p) { fetchQuote(p.id); lookupDescription(p.id); });
         urlProducts = [];
       }
+      // Phones and touch screens: no field focused on open, so the keyboard
+      // stays down until the rep taps a box.
+      if (phoneDates()) state.focus = { r: -1, c: 0 };
       state.placeError = null;
       state.result = null;
       state.view = "order";
