@@ -838,10 +838,34 @@
       return q && q.data ? parseFloat(q.data.unit_cost) : NaN;
     }
 
-    // Floor for any unit price: unit cost + $0.01. Null when cost is unknown.
+    // Lowest quantity break price in the product's pricing lookup. Null
+    // when it has no breaks.
+    function lowestBreak(line) {
+      var q = quoteOf(line);
+      var breaks = q && q.data && Array.isArray(q.data.quantity_breaks) ? q.data.quantity_breaks : [];
+      var low = null;
+      breaks.forEach(function (b) {
+        var p = parseFloat(b.unitPrice);
+        if (isFinite(p) && (low == null || p < low)) low = p;
+      });
+      return low;
+    }
+
+    // Floor for any unit price: unit cost + $0.01, unless the lowest
+    // quantity break is under that, then the lowest break (breaks win over
+    // the cost floor, 2026-10-22). Null when cost is unknown.
     function minPrice(line) {
       var cost = lineCost(line);
-      return isFinite(cost) ? Math.round((cost + 0.01) * 1000) / 1000 : null;
+      if (!isFinite(cost)) return null;
+      var m = Math.round((cost + 0.01) * 1000) / 1000;
+      var low = lowestBreak(line);
+      return low != null && low < m ? low : m;
+    }
+
+    // True when minPrice() is the lowest quantity break, not cost + $0.01.
+    function floorIsBreak(line) {
+      var low = lowestBreak(line), m = minPrice(line);
+      return low != null && m != null && low === m && low < Math.round((lineCost(line) + 0.01) * 1000) / 1000;
     }
 
     // Eclipse's own price for the qty (quantity breaks), before the floor.
@@ -860,7 +884,7 @@
     }
 
     // True when the order must send an explicit unitPrice: the rep typed
-    // one, or Eclipse's price is under the cost + $0.01 floor.
+    // one, or Eclipse's price is under the floor (minPrice()).
     function sendsPrice(line) {
       if (line.priceOverride) return true;
       var a = autoPrice(line), m = minPrice(line);
@@ -2392,7 +2416,7 @@
       var a = autoPrice(line);
       var autoLow = !line.priceOverride && a != null && m != null && a < m;
       var raised = (line.priceRaised || autoLow) && m != null
-        ? '<span class="fop-warn-text fop-block">Price raised to the minimum, cost + $0.01 (' + unitMoney(m) + ")</span>" : "";
+        ? '<span class="fop-warn-text fop-block">Price raised to the minimum, ' + (floorIsBreak(line) ? "the lowest quantity break" : "cost + $0.01") + " (" + unitMoney(m) + ")</span>" : "";
       var mx = maxPrice(line);
       var capped = line.priceCapped && mx != null
         ? '<span class="fop-warn-text fop-block">Price capped at the original unit price (' + unitMoney(mx) + ")</span>" : "";
