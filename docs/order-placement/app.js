@@ -1594,7 +1594,9 @@
         '<div class="fop-ac__list" id="fop-customer-list" role="listbox"></div>' +
         "</div>" +
         '<div class="fop-hint">↑ ↓ to move, Enter to pick. Prefix with a dot (.12345) to search by ID.</div>' +
-        "</div></div>"
+        "</div>" +
+        '<a class="fop-xlink" href="../product-lookup/">Find an order by product</a>' +
+        "</div>"
       );
     }
 
@@ -5074,9 +5076,10 @@
     var header = document.createElement("header");
     header.className = "fop-header";
     header.innerHTML =
+      '<div class="fop-header__start">' +
       '<div class="fop-header__logo">' +
       '<img src="fairbank-mark.png" alt="Fairbank" width="32" height="24">' +
-      "</div>" +
+      "</div>" + toolsMenuHtml("order-placement") + "</div>" +
       '<div class="fop-header__end">' +
       '<span class="fop-header__links" data-cell="hdr-links"></span>' +
       '<div class="fop-umenu">' +
@@ -5086,6 +5089,7 @@
       '<span class="fop-umenu__name fop-umenu__name--first">' + esc(name.split(/\s+/)[0]) + "</span>" +
       '<svg class="fop-umenu__caret" viewBox="0 0 10 6" aria-hidden="true"><path d="M0 0h10L5 6z" fill="currentColor"/></svg></button>' +
       '<div class="fop-umenu__panel" hidden>' +
+      '<div class="fop-umenu__tools"><span class="fop-umenu__lbl">Tools</span>' + toolsItemsHtml("order-placement") + "</div>" +
       (user.email ? '<div class="fop-umenu__row"><span class="fop-umenu__lbl">Email</span>' + esc(user.email) + "</div>" : "") +
       '<div class="fop-umenu__row"><span class="fop-umenu__lbl">Eclipse ID</span>' + esc(user.e_user_id || "") + "</div>" +
       '<button type="button" class="fop-umenu__theme"></button>' +
@@ -5096,21 +5100,11 @@
     bindThemeBtn(header.querySelector(".fop-umenu__theme"));
     header.querySelector(".fop-umenu__out").addEventListener("click", function () { window.fbSignOut(); });
 
-    // User menu: the name button toggles it; a click outside or Escape
-    // closes it (Escape puts focus back on the button).
-    var menuBtn = header.querySelector(".fop-umenu__btn");
-    var menu = header.querySelector(".fop-umenu__panel");
-    function setMenu(open) {
-      menu.hidden = !open;
-      menuBtn.setAttribute("aria-expanded", open ? "true" : "false");
-    }
-    menuBtn.addEventListener("click", function () { setMenu(menu.hidden); });
-    document.addEventListener("click", function (e) {
-      if (!menu.hidden && !header.querySelector(".fop-umenu").contains(e.target)) setMenu(false);
-    });
-    document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && !menu.hidden) { setMenu(false); menuBtn.focus(); }
-    });
+    // User menu and Tools menu: the button toggles its panel (opening one
+    // closes the other); a click outside or Escape closes it (Escape puts
+    // focus back on the button).
+    bindHeaderMenu(header, ".fop-umenu");
+    bindHeaderMenu(header, ".fop-tools");
 
     // Phones only (the class does nothing on desktop, see styles.css): hide
     // on a scroll down past the header, show again on a scroll up. Moves
@@ -5125,6 +5119,49 @@
       lastY = y;
     }, { passive: true });
     return header;
+  }
+
+  // Tools menu (2026-10-23), left of the bar beside the mark: links to the
+  // site's pages, the current one marked. Same markup in
+  // ../product-lookup/app.js.
+  var TOOLS = [
+    ["order-placement", "Order placement", "../order-placement/"],
+    ["product-lookup", "Find order by product", "../product-lookup/"],
+  ];
+
+  function toolsMenuHtml(current) {
+    return '<div class="fop-tools">' +
+      '<button type="button" class="fop-tools__btn" aria-haspopup="true" aria-expanded="false">Tools' +
+      '<svg class="fop-umenu__caret" viewBox="0 0 10 6" aria-hidden="true"><path d="M0 0h10L5 6z" fill="currentColor"/></svg></button>' +
+      '<div class="fop-tools__panel" hidden>' + toolsItemsHtml(current) + "</div></div>";
+  }
+
+  // The page links, also at the top of the user menu on phones, where the
+  // Tools button is hidden (styles.css).
+  function toolsItemsHtml(current) {
+    return TOOLS.map(function (t) {
+      var on = t[0] === current;
+      return '<a class="fop-tools__item' + (on ? " fop-tools__item--on" : "") + '" href="' + t[2] + '"' + (on ? ' aria-current="page"' : "") + ">" + esc(t[1]) + "</a>";
+    }).join("");
+  }
+
+  // One header dropdown (wrap = ".fop-umenu" or ".fop-tools"): its first
+  // button toggles its panel.
+  function bindHeaderMenu(header, wrap) {
+    var box = header.querySelector(wrap);
+    var btn = box.querySelector("button");
+    var panel = box.querySelector(wrap + "__panel");
+    function setOpen(open) {
+      panel.hidden = !open;
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+    btn.addEventListener("click", function () { setOpen(panel.hidden); });
+    document.addEventListener("click", function (e) {
+      if (!panel.hidden && !box.contains(e.target)) setOpen(false);
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !panel.hidden) { setOpen(false); btn.focus(); }
+    });
   }
 
   function boot() {

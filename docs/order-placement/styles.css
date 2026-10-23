@@ -1562,7 +1562,32 @@ html[data-theme="light"] .fop-modal__box { border-radius: 12px; box-shadow: 0 10
   font-size: 14px; font-weight: 500; color: #f2f2f2; background: #333333;
   transition: transform .2s ease;
 }
+.fop-header__start { display: flex; align-items: center; gap: 14px; flex: none; }
 .fop-header__logo { display: flex; align-items: center; flex: none; }
+/* Tools menu (2026-10-23), right of the mark: a plain "Tools" button with a
+   caret and a panel of page links in the bar's gray, the current page in
+   bold with a white bar on its left. */
+.fop-tools { position: relative; }
+.fop-tools__btn {
+  display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px;
+  font: inherit; color: #ffffff; background: none; border: 0; border-radius: 999px; cursor: pointer;
+}
+.fop-tools__btn:hover, .fop-tools__btn[aria-expanded="true"] { background: rgba(255, 255, 255, .12); }
+.fop-tools__panel {
+  position: absolute; left: 0; top: calc(100% + 6px); z-index: 70; width: max-content; min-width: 200px;
+  color: #f2f2f2; background: #333333; border: 1px solid #555555; border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .35); overflow: hidden;
+}
+.fop-tools__panel[hidden] { display: none; }
+.fop-tools__item { display: block; padding: 12px 16px 12px 13px; color: #ffffff; text-decoration: none; white-space: nowrap; border-left: 3px solid transparent; }
+.fop-tools__item + .fop-tools__item { border-top: 1px solid #555555; }
+.fop-tools__item:hover { background: rgba(255, 255, 255, .08); }
+.fop-tools__item--on { font-weight: 600; border-left-color: #ffffff; }
+/* The same links at the top of the user menu, phones only (below). */
+.fop-umenu__tools { display: none; }
+/* Cross-link to the other page, under the search card. */
+.fop-xlink { align-self: flex-start; font-size: 14px; color: var(--gold-lt); text-decoration: none; }
+.fop-xlink:hover { text-decoration: underline; text-underline-offset: 3px; }
 .fop-header__logo img { display: block; height: 24px; width: auto; }
 .fop-header__end { display: flex; align-items: center; gap: 18px; min-width: 0; }
 .fop-header__links { display: flex; align-items: center; gap: 18px; }
@@ -1606,6 +1631,11 @@ html[data-theme="light"] .fop-modal__box { border-radius: 12px; box-shadow: 0 10
   /* Narrow screens: first name only, still shortened with an ellipsis if
      it does not fit. */
   .fop-header__end, .fop-header__links { gap: 12px; }
+  /* Phones: no Tools button in the bar; its links head the user menu. */
+  .fop-tools { display: none; }
+  .fop-umenu__tools { display: block; border-bottom: 1px solid #555555; }
+  .fop-umenu__tools .fop-umenu__lbl { margin: 0; padding: 12px 16px 2px; }
+  .fop-umenu__tools .fop-tools__item + .fop-tools__item { border-top: 0; }
   .fop-header__links:not(:empty) { padding-right: 12px; }
   .fop-header__link { gap: 4px; }
   .fop-umenu__btn { padding: 0 10px 0 12px; gap: 6px; }

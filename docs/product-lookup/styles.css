@@ -1,0 +1,56 @@
+/* Product lookup: only what ../order-placement/styles.css does not cover. */
+
+/* Order and customer rows are links (so Cmd/Ctrl+click opens a new tab). */
+a.fop-order { text-decoration: none; }
+.pl-row--plain { cursor: default; }
+.pl-row--plain:hover { border-color: var(--line); background: var(--surface); }
+
+/* Search results: product names are long (catalog number + description). */
+.pl-ac__list { width: 100%; max-width: none; }
+
+/* Id tile left of the product name, which wraps beside it. */
+.pl-title { display: flex; align-items: flex-start; gap: 10px; line-height: 1.2; }
+.pl-title .fop-badge { flex: none; margin-top: .3em; font-size: 14px; }
+
+/* Orders / Customers tabs with the list search beside them. */
+.pl-bar { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; border-bottom: 1px solid var(--steel); }
+.pl-bar .fop-tabs { flex: none; }
+.pl-filter { flex: 1; min-width: 220px; max-width: 360px; margin: 0 0 8px auto; }
+.pl-count { margin-left: 4px; color: var(--muted); font-weight: 500; }
+
+/* Status filter chips: off (outline), included (accent, ✓), excluded
+   (red, ✕, struck through). A click cycles off → include → exclude → off. */
+.pl-statuses { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pl-statuses__lbl { margin-right: 4px; font-size: 13px; color: var(--muted); }
+.pl-st {
+  display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px;
+  font: inherit; font-size: 13px; color: var(--text); white-space: nowrap; cursor: pointer;
+  background: transparent; border: 1px solid var(--steel); border-radius: 999px;
+}
+.pl-st:hover { border-color: var(--gold); }
+.pl-st:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
+.pl-st__n { color: var(--muted); font-variant-numeric: tabular-nums; }
+.pl-st__mark { font-weight: 600; }
+.pl-st--in { color: var(--gold-lt); border-color: var(--gold); background: rgba(200, 150, 42, .14); }
+.pl-st--out { color: var(--err-text); border-color: rgba(255, 95, 95, .45); background: rgba(255, 95, 95, .1); text-decoration: line-through; }
+.pl-st--out .pl-st__mark { text-decoration: none; }
+html[data-theme="light"] .pl-st--in { background: rgba(0, 145, 174, .1); }
+.pl-st__clear { padding: 3px 6px; font: inherit; font-size: 13px; color: var(--muted); background: none; border: 0; cursor: pointer; text-decoration: underline; }
+.pl-st__clear:hover { color: var(--text); }
+
+/* Customer rows: id tile then the name (wrapping beside the tile, not
+   under it); the facts line wraps on its own and the qty stays right. */
+.pl-cust__top { display: flex; align-items: flex-start; gap: 8px; }
+.pl-cust__top .fop-badge { flex: none; margin-top: 1px; }
+.pl-cust__top b { min-width: 0; }
+.pl-cust__facts { min-width: 0; }
+.pl-cust__qty { flex: none; white-space: nowrap; align-self: flex-end; }
+
+/* The product's quantity on an order, right of the generation tiles. */
+.pl-qty { margin-left: auto; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+@media (max-width: 767px) {
+  .pl-bar { border-bottom: 0; }
+  .pl-bar .fop-tabs { width: 100%; border-bottom: 1px solid var(--steel); }
+  .pl-filter { max-width: none; width: 100%; margin: 0; }
+}
