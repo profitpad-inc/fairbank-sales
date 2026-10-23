@@ -351,6 +351,17 @@ textarea.fop-notes { display: block; min-height: calc(2.1em + 18px); line-height
   position: absolute; width: 1px; height: 1px; overflow: hidden;
   clip-path: inset(50%); white-space: nowrap;
 }
+/* Read-only lines on desktop: the product id is a tile too (2026-10-22),
+   same size and spot as the editable tile. The read-only box stays
+   focusable but out of sight, so arrows still move through the row. */
+@media (min-width: 768px) {
+  .fop-line--ro .fop-line__id { display: inline-block; margin: 4px 0 4px 7px; font-size: 14px; }
+  .fop-line--ro .fop-cell--product { position: relative; }
+  .fop-line--ro .fop-cell--product .fop-ac {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip-path: inset(50%); white-space: nowrap;
+  }
+}
 /* "No lines on this order." on a locked order with no lines (every width). */
 .fop-grid .fop-line--empty { display: block; }
 .fop-line--empty .fop-cell { padding: 14px 12px; }
