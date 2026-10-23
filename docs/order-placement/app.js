@@ -400,7 +400,7 @@
     // bill-to's, else blank.
     function recentEmail(shipTo) {
       var bt = (state.customer && state.customer.bill_to) || {};
-      return String((shipTo && shipTo.recent_order_email) || bt.recent_order_email || "").trim();
+      return String((shipTo && shipTo.recent_order_email) || bt.recent_order_email || "").trim().toLowerCase();
     }
 
     function defaultHeader() {
@@ -4246,7 +4246,7 @@
         freight_in: freightInValue(),
         writer: user.e_user_id,
         outside_sales: h.outsideSales || "",
-        email: String(h.email || "").trim(),
+        email: String(h.email || "").trim().toLowerCase(),
         // ship_branch per line: lines on another branch than the header's
         // become their own generation (one per branch) in create-order.
         lines: filledLines().map(function (l) {
@@ -4643,6 +4643,8 @@
       if (key) {
         state.header[key] = t.value;
         if (key === "email") {
+          // Lowercase on leaving the box.
+          state.header.email = t.value = t.value.trim().toLowerCase();
           var en = root.querySelector('[data-cell="email-note"]');
           if (en) en.textContent = emailNote();
         }
