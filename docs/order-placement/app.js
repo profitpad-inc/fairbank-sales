@@ -395,6 +395,14 @@
       return branchIdOf(shipTo && shipTo.home_branch) || branchIdOf(bt.home_branch) || branchIdOf(user.default_branch) || "";
     }
 
+    // Email a new order starts with: the ship-to's HubSpot
+    // e_recent_order_email (customer-lookup recent_order_email), else the
+    // bill-to's, else blank.
+    function recentEmail(shipTo) {
+      var bt = (state.customer && state.customer.bill_to) || {};
+      return String((shipTo && shipTo.recent_order_email) || bt.recent_order_email || "").trim();
+    }
+
     function defaultHeader() {
       // Ship via starts blank (required for orders, optional for bids).
       // Customer release # is pre-filled from the bill-to's Eclipse default
@@ -413,7 +421,7 @@
         shippingInstructions: "",
         freightIn: "",           // totals box; sent to create-order as freight_in
         outsideSales: String(user.default_territory || "").trim(),  // outsideSalesOptions()
-        email: "",               // contactFields(); starts blank, sent as email
+        email: recentEmail(state.shipTo),  // contactFields(); sent as email
       };
     }
 
@@ -532,6 +540,8 @@
         if (state.header.shipBranch === defaultShipBranch(state.shipTo)) {
           state.header.shipBranch = defaultShipBranch(shipTo);
         }
+        // Same for the email, unless the rep changed it.
+        if (state.header.email === recentEmail(state.shipTo)) state.header.email = recentEmail(shipTo);
         state.shipTo = shipTo;
         if (newDraft) newDraft.shipTo = shipTo;
         state.view = "order";
@@ -1836,16 +1846,23 @@
     }
 
     // Email and phone, on their own row above writer / outside sales. A new
-    // order: Customer P/O # then email (editable, starts blank, sent to
-    // create-order as email), no phone. An existing order: both
+    // order: Customer P/O # then email (editable, starts from the last
+    // order, recentEmail(); sent to create-order as email), no phone. An existing order: both
     // read-only, the order's own (order-lookup email / phone).
     function contactFields() {
       var ex = state.existing;
       if (!ex) {
-        return poField("fop-field--row") + field("Email", '<input class="fop-input" type="email" data-head="email" autocomplete="off" spellcheck="false" value="' + esc(state.header.email) + '">');
+        return poField("fop-field--row") + field("Email", '<input class="fop-input" type="email" data-head="email" autocomplete="off" spellcheck="false" value="' + esc(state.header.email) + '">' +
+          '<span class="fop-branch-hint" data-cell="email-note">' + emailNote() + "</span>");
       }
       return field("Email", '<input class="fop-input" value="' + esc(ex.email || "") + '" disabled>', "fop-field--row") +
         field("Phone", '<input class="fop-input" value="' + esc(ex.phone || "") + '" disabled>');
+    }
+
+    // Under a new order's Email while it still holds the pre-filled address.
+    function emailNote() {
+      var h = state.header;
+      return h.email && h.email === recentEmail(state.shipTo) ? "From the last order." : "";
     }
 
     function poField(cls) {
@@ -4625,6 +4642,10 @@
       }
       if (key) {
         state.header[key] = t.value;
+        if (key === "email") {
+          var en = root.querySelector('[data-cell="email-note"]');
+          if (en) en.textContent = emailNote();
+        }
         // A ship branch picked in the header: every line ships from it again.
         if (key === "shipBranch") {
           state.lines.forEach(function (l) { l.branch = ""; });
