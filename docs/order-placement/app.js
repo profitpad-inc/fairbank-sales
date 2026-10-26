@@ -192,11 +192,13 @@
   // Bill-to terms that pay up front, so a credit limit never blocks them.
   var COD_TERMS = ["COD.CO.CHECK", "COD.CC"];
 
-  // Eclipse user ids (upper case) with no markup floor: their prices only
-  // have to stay above unit cost, cost + $0.01 (markupFloor()).
-  var NO_MARKUP_FLOOR = [
-    "FERERO",  // Eron Ferguson
-  ];
+  // HubSpot user property maximum_price_decrease → minimum markup on unit
+  // cost (markupFloor()). 0 means cost + $0.01. Blank or anything else: 15%.
+  var MARKUP_FLOORS = {
+    "15pct_over_cost": 0.15,
+    "12pct_over_cost": 0.12,
+    "1cent_over_cost": 0,
+  };
 
   // Grid columns that hold an input, in keyboard order.
   var COLS = ["product", "qty", "price"];
@@ -920,12 +922,11 @@
       return low;
     }
 
-    // Minimum markup on unit cost for the rep (2026-10-23): HubSpot user
-    // property branch_region "AG Plains" / "AG West" 12%, "LP" (propane)
-    // and anyone else 15%. Reps in NO_MARKUP_FLOOR only stay above cost.
+    // Minimum markup on unit cost for the rep (2026-10-26): HubSpot user
+    // property maximum_price_decrease (MARKUP_FLOORS), 15% when blank.
     function markupFloor() {
-      if (NO_MARKUP_FLOOR.indexOf(String(user.e_user_id || "").toUpperCase()) >= 0) return 0;
-      return /^AG\b/i.test(String(user.branch_region || "").trim()) ? 0.12 : 0.15;
+      var f = MARKUP_FLOORS[String(user.maximum_price_decrease || "").trim().toLowerCase()];
+      return f == null ? 0.15 : f;
     }
 
     // The cost floor alone: cost + the rep's markup, rounded up to the cent,
@@ -1850,8 +1851,20 @@
       return html + "</select>";
     }
 
-    function field(label, inner, cls) {
-      return '<div class="fop-field ' + (cls || "") + '"><label class="fop-label">' + esc(label) + "</label>" + inner + "</div>";
+    // req: the header key of a required field. Its label gets a red
+    // asterisk while the field can be edited; Shipping instructions only
+    // while ship via is "SEE INSTRUCTION" (refreshRequiredMarks()).
+    function field(label, inner, cls, req) {
+      return '<div class="fop-field ' + (cls || "") + '"><label class="fop-label">' + esc(label) +
+        (req ? '<span class="fop-req" data-req="' + req + '" aria-hidden="true"' + (requiredMark(req) ? "" : " hidden") + ">*</span>" : "") +
+        "</label>" + inner + "</div>";
+    }
+    function requiredMark(key) {
+      if (headLocked(key)) return false;
+      return key !== "shippingInstructions" || state.header.shipVia === "SEE INSTRUCTION";
+    }
+    function refreshRequiredMarks() {
+      root.querySelectorAll("[data-req]").forEach(function (el) { el.hidden = !requiredMark(el.getAttribute("data-req")); });
     }
 
     // Miles from the ship-to to branch id, or null (no ship-to coordinates,
@@ -2115,15 +2128,15 @@
         // print status only on an existing order that is not a bid.
         '<div class="fop-head__grid">' +
         // Phones: ship via and ship branch each take a full row (--mfull).
-        field("Ship via", selectHtml("shipVia", SHIP_VIAS, h.shipVia, "Select…", COMMON_SHIP_VIAS), "fop-field--row fop-field--mfull") +
+        field("Ship via", selectHtml("shipVia", SHIP_VIAS, h.shipVia, "Select…", COMMON_SHIP_VIAS), "fop-field--row fop-field--mfull", "shipVia") +
         // Lines on several branches: the hint under it says so (it is the
         // branch of the lines that follow the header).
         field("Ship branch", selectHtml("shipBranch", branches, h.shipBranch, "Select…") +
           '<span class="fop-branch-hint" data-cell="branch-hint">' + branchHintHtml() + "</span>", "fop-field--mfull") +
         priceBranchField() +
         // Flatpickr calendars (initDatePickers) replace these plain inputs.
-        field("Ship date", '<input class="fop-input fop-date" data-date="shipDate" value="' + esc(h.shipDate) + '"' + lockAttr("shipDate") + ">", "fop-field--row") +
-        field("Required date", '<input class="fop-input fop-date" data-date="requiredDate" value="' + esc(h.requiredDate) + '"' + lockAttr("requiredDate") + ">") +
+        field("Ship date", '<input class="fop-input fop-date" data-date="shipDate" value="' + esc(h.shipDate) + '"' + lockAttr("shipDate") + ">", "fop-field--row", "shipDate") +
+        field("Required date", '<input class="fop-input fop-date" data-date="requiredDate" value="' + esc(h.requiredDate) + '"' + lockAttr("requiredDate") + ">", "", "requiredDate") +
         // Order date is never editable: the order's own, or today on a new
         // order (Eclipse dates it when it is created).
         field("Order date", '<input class="fop-input" value="' + esc(dateText(state.existing ? state.existing.order_date : isoDate(0))) + '" disabled>') +
@@ -2138,7 +2151,7 @@
         orderInfoField("printStatus") +
         // Bottom row: shipping instructions left, internal notes right.
         // Multi-line notes; textareas grow with their content (autosize()).
-        field("Shipping instructions", '<textarea class="fop-input fop-notes" rows="1" data-head="shippingInstructions"' + lockAttr("shippingInstructions") + ">" + esc(h.shippingInstructions) + "</textarea>", "fop-field--half") +
+        field("Shipping instructions", '<textarea class="fop-input fop-notes" rows="1" data-head="shippingInstructions"' + lockAttr("shippingInstructions") + ">" + esc(h.shippingInstructions) + "</textarea>", "fop-field--half", "shippingInstructions") +
         field("Internal notes (no credit cards)", '<textarea class="fop-input fop-notes" rows="1" data-head="internalNotes"' + lockAttr("internalNotes") + ">" + esc(h.internalNotes) + "</textarea>", "fop-field--half") +
         trackingHtml() +
         "</div></section>"
@@ -5023,7 +5036,7 @@
           state.lines.forEach(function (l) { l.branch = ""; });
           refreshAllRows();
         }
-        if (key === "shipVia") refreshAllRows();
+        if (key === "shipVia") { refreshAllRows(); refreshRequiredMarks(); }
         if (key === "orderStatus") {
           // Place Order and Convert to Order redraw: Pick Up Now shows the
           // printer box and turns the button into Print Now.
@@ -5405,6 +5418,7 @@
         e.preventDefault();
         state.header.shipVia = t.value = "";
         refreshAllRows();
+        refreshRequiredMarks();
         refreshTotals();
         return;
       }

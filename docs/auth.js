@@ -128,7 +128,8 @@
       // before 2026-10-22 has none until its next refresh.
       territories: Array.isArray(c.territories) ? c.territories.map(String) : [],
       default_territory: c.default_territory || '',  // HubSpot e_user_default_territory
-      branch_region: c.branch_region || '',          // HubSpot branch_region (minimum markup)
+      branch_region: c.branch_region || '',          // HubSpot branch_region
+      maximum_price_decrease: c.maximum_price_decrease || '',  // HubSpot maximum_price_decrease (minimum markup)
       hs_user_id: c.hs_user_id || '',
       hs_owner_id: c.hs_owner_id || '',
     };
@@ -178,7 +179,7 @@
   if (claims && actAsIdFor(claims)) {
     actAs = {
       e_user_id: actAsIdFor(claims), name: actAsIdFor(claims), email: '', default_branch: '',
-      territories: [], default_territory: '', branch_region: '', hs_user_id: '', hs_owner_id: '',
+      territories: [], default_territory: '', branch_region: '', maximum_price_decrease: '', hs_user_id: '', hs_owner_id: '',
     };
   }
 
@@ -277,7 +278,7 @@
   }
 
   // Acting as a rep: read their HubSpot user (name, email, branch,
-  // territories, branch_region) before the page boots. A failed lookup
+  // territories, branch_region, maximum_price_decrease) before the page boots. A failed lookup
   // keeps their id only.
   function loadActAs() {
     var url = USER_LOOKUP_URL + '?e_user_id=' + encodeURIComponent(actAs.e_user_id);
@@ -293,6 +294,7 @@
             territories: Array.isArray(d.territories) ? d.territories.map(String) : [],
             default_territory: d.default_territory || '',
             branch_region: d.branch_region || '',
+            maximum_price_decrease: d.maximum_price_decrease || '',
             hs_user_id: String(d.hs_user_id || ''),
             hs_owner_id: String(d.hs_owner_id || ''),
           };
