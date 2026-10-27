@@ -46,7 +46,7 @@ n8n-flows/
   eclipse_n8n_node.md, hs_n8n_node.md   custom node references
 ```
 
-`product-inquiry` and `archive/order-placement-v1` use the HubSpot-module layout: an `index.html` loader fetches `module.html`, strips HubSpot template tags, then loads `module.js`, with styles in `module.css`. The `hide-header` snippet hides their "LocalHost" header on `profitpad-inc.github.io`.
+`product-inquiry` and `archive/order-placement-v1` use the HubSpot-module layout: an `index.html` loader fetches `module.html`, strips HubSpot template tags, then loads `module.js`, with styles in `module.css`. The `hide-header` snippet hides their "LocalHost" header on `profitpad-inc.github.io`. In `product-inquiry` (2026-10-27, on request, after the header showed on `sales.fairbankequipment.com`) the check is inverted: the header shows only when the hostname is `localhost` or `127.0.0.1` and is hidden everywhere else. `archive/order-placement-v1` is unchanged.
 
 `order-placement` is a normal web page: `index.html` holds the markup and loads `../auth.js`, `styles.css`, and `app.js` (deferred, mounts on `#app`). Do not convert it to the module layout.
 
