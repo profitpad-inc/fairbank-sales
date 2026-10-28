@@ -900,7 +900,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// One change log comment per generation this placement made: who placed it\n// and from where (2026-10-23, on request).\nconst writer = $('Validate').first().json.input.writer;\nconst comment = 'Created by ' + writer + ' from the HubSpot Order Placement Card';\nreturn $('Sync list').first().json.e_sorder_ids.map((id) => ({ json: { orderId: id, comment } }));\n"
+        "jsCode": "// One change log comment per generation this placement made: who placed it\n// and from where (2026-10-23, on request).\nconst writer = $('Validate').first().json.input.writer;\nconst comment = 'Created by ' + writer + ' from the HubSpot Order Placement Webtool';\nreturn $('Sync list').first().json.e_sorder_ids.map((id) => ({ json: { orderId: id, comment } }));\n"
       },
       "id": "25ab9ee5-61b7-4369-9c07-39fd4487e3d5",
       "name": "Emit changelog",

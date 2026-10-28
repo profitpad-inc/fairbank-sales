@@ -1485,7 +1485,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// One change log comment per generation this update touched (the deal sync\n// list): who saved it and from where (2026-10-23, on request).\nconst writer = $('Validate').first().json.writer;\nconst comment = 'Updated by ' + writer + ' from the HubSpot Order Placement Card';\nreturn $('Resolve').first().json.syncIds.map((id) => ({ json: { orderId: id, comment } }));\n"
+        "jsCode": "// One change log comment per generation this update touched (the deal sync\n// list): who saved it and from where (2026-10-23, on request).\nconst writer = $('Validate').first().json.writer;\nconst comment = 'Updated by ' + writer + ' from the HubSpot Order Placement Webtool';\nreturn $('Resolve').first().json.syncIds.map((id) => ({ json: { orderId: id, comment } }));\n"
       },
       "id": "2fa8911e-737c-429a-8be5-e58f27324966",
       "name": "Emit changelog",

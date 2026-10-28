@@ -266,7 +266,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// A change log comment on the cancelled generation: who cancelled it and\n// from where (2026-10-23, on request).\nconst writer = $('Validate').first().json.writer;\nconst comment = 'Cancelled by ' + writer + ' from the HubSpot Order Placement Card';\nreturn $('Check cancel').first().json.e_sorder_ids.map((id) => ({ json: { orderId: id, comment } }));\n"
+        "jsCode": "// A change log comment on the cancelled generation: who cancelled it and\n// from where (2026-10-23, on request).\nconst writer = $('Validate').first().json.writer;\nconst comment = 'Cancelled by ' + writer + ' from the HubSpot Order Placement Webtool';\nreturn $('Check cancel').first().json.e_sorder_ids.map((id) => ({ json: { orderId: id, comment } }));\n"
       },
       "id": "e418ec3b-5747-47b2-bee9-4738ea7ed66f",
       "name": "Emit changelog",
