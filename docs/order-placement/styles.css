@@ -261,6 +261,31 @@ textarea.fop-notes { display: block; min-height: calc(2.1em + 18px); line-height
    grid column headers only. */
 .fop-party__lbl2 { font-size: 13px; font-weight: 500; color: var(--muted); }
 .fop-party__amt { font-family: 'Barlow Condensed', sans-serif; font-size: 20px; font-weight: 700; color: var(--white); line-height: 1.1; font-variant-numeric: tabular-nums; }
+/* Credit available (2026-10-27, on request): hover, or focus (a tap on
+   phones), opens a popup under it with credit available, credit limit and
+   terms from the Eclipse AR inquiry. */
+.fop-credit { position: relative; cursor: pointer; border-radius: 4px; }
+/* Hint that it opens (2026-10-27, on request): dotted underline on the
+   label and an info icon after it; both brighten on hover / focus. */
+.fop-credit .fop-party__lbl2 {
+  display: inline-flex; align-items: center; gap: 4px;
+  text-decoration: underline dotted; text-underline-offset: 3px;
+}
+.fop-credit__icon { width: 14px; height: 14px; flex: none; }
+.fop-credit:hover .fop-party__lbl2, .fop-credit:focus .fop-party__lbl2 { color: var(--text); }
+html[data-theme="light"] .fop-credit:hover .fop-party__lbl2,
+html[data-theme="light"] .fop-credit:focus .fop-party__lbl2 { color: var(--white); }
+.fop-credit:focus { outline: none; }
+.fop-credit:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+.fop-credit__pop {
+  display: none; position: absolute; right: 0; top: calc(100% + 8px); z-index: 60; width: max-content;
+  padding: 6px 0; text-align: left; background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 14px 40px var(--shadow);
+}
+.fop-credit:hover .fop-credit__pop, .fop-credit:focus .fop-credit__pop { display: block; }
+.fop-credit__row { display: flex; justify-content: space-between; align-items: baseline; gap: 24px; padding: 6px 14px; }
+.fop-credit__lbl { font-size: 13px; font-weight: 500; color: var(--muted); }
+.fop-credit__val { font-size: 14px; font-weight: 600; color: var(--white); font-variant-numeric: tabular-nums; }
 .fop-linkbtn {
   padding: 0; font: 600 13px 'Barlow', sans-serif; color: var(--gold-lt);
   background: none; border: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
@@ -738,6 +763,10 @@ span.flatpickr-weekday {
 /* Delivered / Paid tiles follow the status with no space between them, so
    only this margin separates them. */
 .fop-h1 .fop-status + .fop-status { margin-left: 6px; }
+/* Change log tiles (Credit Hold, Printed … Ticket): buttons that open the
+   change log, otherwise the plain grey tile. */
+.fop-status--log { line-height: inherit; cursor: pointer; }
+.fop-status--log:hover, .fop-status--log:focus-visible { border-color: var(--text); }
 .fop-status--invoice { color: var(--ok-text); border-color: rgba(62, 207, 142, .45); background: rgba(62, 207, 142, .1); }
 .fop-status--cancel  { color: var(--err-text); border-color: rgba(255, 95, 95, .45); background: rgba(255, 95, 95, .12); }
 /* Partially Paid tile (paymentHtml in app.js): orange, kept apart from the gold accents. */
@@ -1081,9 +1110,11 @@ html[data-theme="light"] .fop-status--partial { color: #a14d00; border-color: rg
   /* Bill-to / ship-to cards. */
   /* Bill-to and ship-to read as one card: one border and background on
      the pair, a thin divider between them. */
+  /* No overflow: hidden here (2026-10-27): it clipped the Credit available
+     popup; the cards inside have no background to clip. */
   .fop-parties {
     gap: 0; background: var(--card-bg);
-    border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+    border: 1px solid var(--border); border-radius: 10px;
   }
   .fop-party { padding: 10px 12px 12px; background: none; border: 0; border-radius: 0; }
   .fop-party + .fop-party { border-top: 1px solid var(--line); }

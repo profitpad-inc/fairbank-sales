@@ -215,15 +215,74 @@
     },
     {
       "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "5d1f7a2e-8c4b-4f39-a6e0-3b9d2c71e845",
+              "leftValue": "={{ /^NET\\d+D$/i.test(String((($('Eclipse: get customers').all().flatMap((i) => i.json.results || []).find((c) => String(c.id) === $('Resolve').first().json.plan.billToId)) || {}).defaultTerms || '').trim()) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e3a9c5b1-7f24-4d8e-b061-9c2f4a7d3e58",
+      "name": "Net terms?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "customer",
+        "operation": "arInquiry",
+        "arInquiryCustomerId": "={{ $('Resolve').first().json.plan.billToId }}",
+        "arInquiryCurrency": "USD",
+        "arInquiryPageSize": 1,
+        "arInquiryOptions": {}
+      },
+      "id": "b7e2c1d4-5a3f-4e8b-9c61-2f0d7a4e3b19",
+      "name": "Eclipse: AR inquiry",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        2160,
+        0
+      ],
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Eclipse field names here are confirmed against live responses\n// (2026-10-17). HubSpot only adds the record id, coordinates and the\n// recent order email; it is best-effort, so a failure leaves hs_id /\n// latitude / longitude / recent_order_email empty.\nconst plan = $('Resolve').first().json.plan;\nconst s = (v) => (v == null ? '' : (typeof v === 'object' ? String(v.id || v.code || v.name || '') : String(v)).trim());\n\nconst eclipse = {};\nlet eclipseError = '';\nfor (const it of $('Eclipse: get customers').all()) {\n  const r = it.json;\n  if (r.error) { eclipseError = String(r.error); continue; }\n  for (const c of (Array.isArray(r.results) ? r.results : [])) eclipse[s(c.id)] = c;\n}\nif (!eclipse[plan.id]) {\n  return [{ json: { statusCode: 502, body: { error: 'Eclipse customer details failed' + (eclipseError ? ': ' + eclipseError : '') } } }];\n}\n\nconst hs = {};\nconst hsResp = $input.first().json;\nfor (const row of (Array.isArray(hsResp.results) ? hsResp.results : [])) {\n  const p = row.properties || {};\n  if (p.e_customer_id) hs[String(p.e_customer_id)] = row;\n}\n\nconst party = (id) => {\n  const c = eclipse[id] || {};\n  const row = hs[id];\n  const p = (row && row.properties) || {};\n  const lat = parseFloat(p.latitude), lng = parseFloat(p.longitude);\n  return {\n    e_customer_id: id,\n    name: s(c.name) || ('Customer ' + id),\n    hs_id: (row && row.id) || '',\n    address_line1: s(c.addressLine1),\n    address_line2: s(c.addressLine2),\n    city: s(c.city),\n    state: s(c.state),\n    postal_code: s(c.postalCode),\n    country: s(c.countryCode),\n    is_bill_to: c.isBillTo === true,\n    is_ship_to: c.isShipTo === true,\n    home_branch: s(c.homeBranch),\n    price_class: s(c.defaultPriceClass),\n    release_number: s(c.defaultReleaseNumber),\n    terms_code: s(c.defaultTerms),\n    credit_limit: c.creditLimit && c.creditLimit.value != null && isFinite(Number(c.creditLimit.value))\n      ? { value: Number(c.creditLimit.value), currency: s(c.creditLimit.currency) || 'USD' } : null,\n    latitude: isFinite(lat) ? lat : null,\n    longitude: isFinite(lng) ? lng : null,\n    // HubSpot e_recent_order_email: the email on this customer's last order\n    // (pre-fills a new order's Email, 2026-10-22).\n    recent_order_email: s(p.e_recent_order_email),\n    missing: !eclipse[id],\n  };\n};\n\nconst shipTos = plan.shipToIds.map(party);\nconst needsChoice = plan.isBillTo && (shipTos.length > 1 || (shipTos.length === 1 && shipTos[0].e_customer_id !== plan.id));\nreturn [{ json: { statusCode: 200, body: {\n  customer: party(plan.id),\n  bill_to: party(plan.billToId),\n  ship_tos: shipTos,\n  ship_to: needsChoice ? null : (shipTos[0] || null),\n  needs_ship_to_choice: needsChoice,\n} } }];\n"
+        "jsCode": "// Eclipse field names here are confirmed against live responses\n// (2026-10-17). HubSpot only adds the record id, coordinates and the\n// recent order email; it is best-effort, so a failure leaves hs_id /\n// latitude / longitude / recent_order_email empty.\n// The bill-to's AR inquiry (credit available, credit limit, terms text such\n// as \"NET 30 DAYS\") only runs for net terms (defaultTerms NETxxD, the\n// \"Net terms?\" gate) and is best-effort too: skipped or failed leaves\n// credit_available null and terms '' (2026-10-27, field names from a live\n// probe on 63877).\nconst plan = $('Resolve').first().json.plan;\nconst s = (v) => (v == null ? '' : (typeof v === 'object' ? String(v.id || v.code || v.name || '') : String(v)).trim());\n\nconst eclipse = {};\nlet eclipseError = '';\nfor (const it of $('Eclipse: get customers').all()) {\n  const r = it.json;\n  if (r.error) { eclipseError = String(r.error); continue; }\n  for (const c of (Array.isArray(r.results) ? r.results : [])) eclipse[s(c.id)] = c;\n}\nif (!eclipse[plan.id]) {\n  return [{ json: { statusCode: 502, body: { error: 'Eclipse customer details failed' + (eclipseError ? ': ' + eclipseError : '') } } }];\n}\n\nconst hs = {};\nconst hsResp = $('HubSpot: get companies').first().json;\nfor (const row of (Array.isArray(hsResp.results) ? hsResp.results : [])) {\n  const p = row.properties || {};\n  if (p.e_customer_id) hs[String(p.e_customer_id)] = row;\n}\n\nconst party = (id) => {\n  const c = eclipse[id] || {};\n  const row = hs[id];\n  const p = (row && row.properties) || {};\n  const lat = parseFloat(p.latitude), lng = parseFloat(p.longitude);\n  return {\n    e_customer_id: id,\n    name: s(c.name) || ('Customer ' + id),\n    hs_id: (row && row.id) || '',\n    address_line1: s(c.addressLine1),\n    address_line2: s(c.addressLine2),\n    city: s(c.city),\n    state: s(c.state),\n    postal_code: s(c.postalCode),\n    country: s(c.countryCode),\n    is_bill_to: c.isBillTo === true,\n    is_ship_to: c.isShipTo === true,\n    home_branch: s(c.homeBranch),\n    price_class: s(c.defaultPriceClass),\n    release_number: s(c.defaultReleaseNumber),\n    terms_code: s(c.defaultTerms),\n    credit_limit: c.creditLimit && c.creditLimit.value != null && isFinite(Number(c.creditLimit.value))\n      ? { value: Number(c.creditLimit.value), currency: s(c.creditLimit.currency) || 'USD' } : null,\n    latitude: isFinite(lat) ? lat : null,\n    longitude: isFinite(lng) ? lng : null,\n    // HubSpot e_recent_order_email: the email on this customer's last order\n    // (pre-fills a new order's Email, 2026-10-22).\n    recent_order_email: s(p.e_recent_order_email),\n    missing: !eclipse[id],\n  };\n};\n\nconst shipTos = plan.shipToIds.map(party);\nconst needsChoice = plan.isBillTo && (shipTos.length > 1 || (shipTos.length === 1 && shipTos[0].e_customer_id !== plan.id));\nconst money = (m) => (m && m.value != null && isFinite(Number(m.value)))\n  ? { value: Number(m.value), currency: s(m.currency) || 'USD' } : null;\nconst arResp = $('Eclipse: AR inquiry').isExecuted ? $('Eclipse: AR inquiry').first().json : {};\nconst ar = (Array.isArray(arResp.results) ? arResp.results : []).find((r) => s(r.customerId) === plan.billToId) || null;\nconst billTo = party(plan.billToId);\nbillTo.credit_available = ar ? money(ar.creditAvailable) : null;\nbillTo.terms = ar ? s(ar.terms) : '';\nif (ar && money(ar.creditLimit)) billTo.credit_limit = money(ar.creditLimit);\n\nreturn [{ json: { statusCode: 200, body: {\n  customer: party(plan.id),\n  bill_to: billTo,\n  ship_tos: shipTos,\n  ship_to: needsChoice ? null : (shipTos[0] || null),\n  needs_ship_to_choice: needsChoice,\n} } }];\n"
       },
       "id": "8fbe3090-8c4f-57f8-a422-e23d87927f0f",
       "name": "Shape",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1920,
+        2400,
         0
       ]
     },
@@ -341,7 +400,7 @@
       "main": [
         [
           {
-            "node": "Shape",
+            "node": "Net terms?",
             "type": "main",
             "index": 0
           }
@@ -353,6 +412,35 @@
         [
           {
             "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: AR inquiry": {
+      "main": [
+        [
+          {
+            "node": "Shape",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Net terms?": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: AR inquiry",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Shape",
             "type": "main",
             "index": 0
           }

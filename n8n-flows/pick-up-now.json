@@ -287,6 +287,7 @@
         "printerId": "={{ $json.printerId }}",
         "printAdditionalFields": {
           "printTicketFlag": true,
+          "printerFormat": "T",
           "skipPrinterFormValidation": false
         }
       },

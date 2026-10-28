@@ -122,7 +122,7 @@
     ["MIDWEST TRANSFER", "MIDWEST TRANSFER"], ["OLD DOMINION", "OLD DOMINION"], ["PANAMA", "PANAMA"],
     ["PPI", "PPI"], ["PREPAID", "PREPAID"], ["PRICE", "PRICE"], ["QUOTE / BID", "QUOTE / BID"],
     ["R&L CARRIERS", "R&L CARRIERS"], ["RAC TRANSPORT", "RAC TRANSPORT"], ["SAIA", "SAIA"],
-    ["SALESMAN DELI CC", "SALESMAN DELI CC"], ["SERVICE CALL", "SERVICE CALL"], ["SPEE-DEE", "SPEE-DEE"],
+    ["SALESMAN DELIVERY CC", "SALESMAN DELI CC"], ["SERVICE CALL", "SERVICE CALL"], ["SPEE-DEE", "SPEE-DEE"],
     ["SPEE-DEE CC", "SPEE-DEE CC"], ["UPS CC", "UPS CC"], ["UPS COLLECT", "UPS COLLECT"],
     ["UPS FREIGHT", "UPS FREIGHT"], ["UPS RED SAVER", "UPS RED SAVER"], ["UPS RESIDENTIAL", "UPS RESIDENTIAL"],
     ["UPS.BLUE", "UPS.BLUE"], ["UPS.RED", "UPS.RED"], ["US ROAD", "US ROAD"],
@@ -131,6 +131,23 @@
     ["WC WILL CALL", "WC WILL CALL"], ["SHOP ASSEMBLY", "SHOP ASSEMBLY"],
   ];
   var COMMON_SHIP_VIAS = 9;
+
+  // Recommended ship vias (values) by the bill-to's terms, shown first in
+  // a "Recommended" group (2026-10-28): credit card terms (CC_TERMS) and
+  // credit customers (NET_TERMS). Any other terms keep the Common group.
+  var CC_SHIP_VIAS = [
+    "SEE INSTRUCTION", "SALESMAN DELIVR", "SALESMAN DELI CC", "CPU PICK UP", "CPU PICK UP CC",
+    "UPS", "UPS CC", "BW BEST WAY", "BW BEST WAY CC", "OT OUR TRUCK",
+  ];
+  var CREDIT_SHIP_VIAS = [
+    "SEE INSTRUCTION", "SALESMAN DELIVR", "CPU PICK UP", "UPS", "BW BEST WAY", "OT OUR TRUCK", "WC WILL CALL",
+  ];
+
+  // A ship via whose last 2 characters are "CC" adds a 3% credit card
+  // surcharge to the subtotal area (display only; nothing extra is sent
+  // to Eclipse).
+  var CC_SHIP_VIA = /CC$/;
+  var CC_SURCHARGE = 0.03;
 
   // Order statuses, in the order reps asked for: the common ones first,
   // then the rest alphabetically. Values are the Eclipse orderStatus enum.
@@ -170,27 +187,32 @@
   // Ship Ticket on printer "15-Shipping" using "Automatically Select".'
   var PRINTED_RE = /^Printed .*Ticket on printer/i;
 
-  // Printers by ship branch id: [printerId, printerName]. Static for now
-  // (the list the user gave on 2026-10-22).
+  // Printers by ship branch id: [printerId, printerName, show], from the
+  // user's 2026-10-28 table. show: omitted = "yes"; "default" = picked when
+  // the printer box opens; "hidden" = "no", listed only with
+  // ?showAllPrinters=true.
   var PRINTERS = {
-    "1": [[17, "01-CanonOFC-LP1"], [23, "01-CFO-LP8"], [29, "01-Sales1-LP15"], [33, "01-Purchasing-LP44"], [38, "01-ReceivingLaser-LP46"], [48, "01-WHSEOffice1-LP45"], [55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [86, "01-Starship"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
-    "2": [[55, "09-Laser1-LP36"], [57, "02-GI Laser-LP6"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [84, "02-Office-HP"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
-    "3": [[49, "03-Laser1-LP12"], [55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [81, "03-Counter"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
-    "4": [[3, "04-Laser1-LP19"], [50, "04-CTR"], [55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
-    "5": [[51, "05-Laser1-LP21"], [55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
-    "6": [[52, "06-Laser1-LP27"], [55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
-    "7": [[53, "07-Office1-LP24"], [55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [92, "07-Counter"], [94, "04- Shipping"], [97, "17-Shipping"]],
-    "8": [[55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [89, "08-Shipping"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
-    "9": [[55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
-    "12": [[55, "09-Laser1-LP36"], [58, "12-Reports1-Lp34"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
-    "14": [[55, "09-Laser1-LP36"], [59, "06-Shipping"], [61, "14-Counter"], [65, "12-Shipping"], [67, "14-Shipping"], [68, "14-BudOffice"], [69, "14-Accounting2"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [82, "14-EdOffice"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [95, "Brothers Model HL-L6200DW"], [97, "17-Shipping"]],
-    "15": [[55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [71, "15-ManagerOffice"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [83, "Fresno Counter"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
-    "16": [[55, "09-Laser1-LP36"], [59, "06-Shipping"], [62, "16-Warehouse"], [63, "16-Marlon"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [76, "16-Counter"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
-    "17": [[55, "09-Laser1-LP36"], [59, "06-Shipping"], [62, "16-Warehouse"], [65, "12-Shipping"], [66, "17-Counter"], [67, "14-Shipping"], [72, "15-Shipping"], [73, "17-IP50-HPColorLaserJetProMFPM479"], [74, "17-IP42-HPPageWidePro"], [75, "17-IP114"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "1": [[17, "01-CanonOFC-LP1", "hidden"], [23, "01-CFO-LP8", "hidden"], [29, "01-Sales1-LP15"], [33, "01-Purchasing-LP44", "hidden"], [38, "01-ReceivingLaser-LP46", "hidden"], [48, "01-WHSEOffice1-LP45", "hidden"], [55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16", "default"], [86, "01-Starship", "hidden"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "2": [[55, "09-Laser1-LP36"], [57, "02-GI Laser-LP6"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping", "default"], [78, "05-Shipping"], [79, "03-Shipping"], [84, "02-Office-HP", "hidden"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "3": [[49, "03-Laser1-LP12", "hidden"], [55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping", "default"], [81, "03-Counter"], [85, "01-Warehouse1-LP16", "hidden"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "4": [[3, "04-Laser1-LP19", "hidden"], [50, "04-CTR", "hidden"], [55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping", "default"], [97, "17-Shipping"]],
+    "5": [[51, "05-Laser1-LP21"], [55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping", "default"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "6": [[52, "06-Laser1-LP27"], [55, "09-Laser1-LP36"], [59, "06-Shipping", "default"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "7": [[53, "07-Office1-LP24"], [55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping", "default"], [92, "07-Counter"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "8": [[55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [89, "08-Shipping"], [90, "08-Counter", "default"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "9": [[55, "09-Laser1-LP36", "default"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "12": [[55, "09-Laser1-LP36"], [58, "12-Reports1-Lp34", "hidden"], [59, "06-Shipping"], [65, "12-Shipping", "default"], [67, "14-Shipping"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "14": [[55, "09-Laser1-LP36"], [59, "06-Shipping"], [61, "14-Counter"], [65, "12-Shipping"], [67, "14-Shipping", "default"], [68, "14-BudOffice", "hidden"], [69, "14-Accounting2", "hidden"], [72, "15-Shipping"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [82, "14-EdOffice", "hidden"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [95, "Brothers Model HL-L6200DW", "hidden"], [97, "17-Shipping"]],
+    "15": [[55, "09-Laser1-LP36"], [59, "06-Shipping"], [65, "12-Shipping"], [67, "14-Shipping"], [71, "15-ManagerOffice", "hidden"], [72, "15-Shipping", "default"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [83, "Fresno Counter"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "16": [[55, "09-Laser1-LP36"], [59, "06-Shipping"], [62, "16-Warehouse"], [63, "16-Marlon", "hidden"], [65, "12-Shipping"], [67, "14-Shipping"], [72, "15-Shipping"], [76, "16-Counter", "default"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping"]],
+    "17": [[55, "09-Laser1-LP36"], [59, "06-Shipping"], [62, "16-Warehouse"], [65, "12-Shipping"], [66, "17-Counter"], [67, "14-Shipping"], [72, "15-Shipping"], [73, "17-IP50-HPColorLaserJetProMFPM479", "hidden"], [74, "17-IP42-HPPageWidePro", "hidden"], [75, "17-IP114", "hidden"], [77, "02-Shipping"], [78, "05-Shipping"], [79, "03-Shipping"], [85, "01-Warehouse1-LP16"], [90, "08-Counter"], [91, "07-Shipping"], [94, "04- Shipping"], [97, "17-Shipping", "default"]],
   };
 
-  // Bill-to terms that pay up front, so a credit limit never blocks them.
-  var COD_TERMS = ["COD.CO.CHECK", "COD.CC"];
+  // Net terms (NET15D, NET30D, ...): the only bill-tos customer-lookup runs
+  // an AR inquiry for, and the only ones whose card shows credit available.
+  var NET_TERMS = /^NET\d+D$/i;
+  // Credit card terms: COD.CC and COD.CO.CHECK (the user, 2026-10-28).
+  var CC_TERMS = /^COD\.(CC|CO\.CHECK)$/i;
 
   // HubSpot user property maximum_price_decrease → minimum markup on unit
   // cost (markupFloor()). 0 means cost + $0.01. Blank or anything else: 15%.
@@ -390,6 +412,9 @@
     // ?e_sorder_id with showChangelog=true opens the change log once the
     // order has loaded (render keeps the param in step with the dialog).
     var urlShowLog = params.get("showChangelog") === "true" && !!params.get("e_sorder_id");
+    // ?showAllPrinters=true: the Pick Up Now printer box also lists the ship
+    // branch's "hidden" printers (show "no" in the user's table).
+    var urlAllPrinters = params.get("showAllPrinters") === "true";
 
     var state = {
       view: "customer",          // customer | loading | orders | shipto | order | done | error
@@ -717,6 +742,7 @@
           order_id: o.order_id, last_modified: o.last_modified, last_modified_by: o.last_modified_by,
         }), res.shipTo, state.genEdits[gen.generation_id]);
         if (urlShowLog) { urlShowLog = false; openChangeLog(); }
+        else loadChangeLog();
       });
     }
 
@@ -1302,25 +1328,28 @@
       return String(l.comment || "").trim();
     }
 
-    // Over the bill-to's credit limit: blocks an order (and Convert to
-    // Order), not a bid, unless the bill-to pays COD (cash, check or card
-    // up front at order time, so there is nothing to extend credit for).
+    // Over the bill-to's credit available (Eclipse AR inquiry). A bid goes
+    // through as usual; an order (and Convert to Order) can still be placed
+    // but goes into the credit review queue, so Pick Up Now is not offered
+    // and the confirm dialog says so (2026-10-28). Only net terms
+    // (NET_TERMS) are checked; COD and other terms pay up front or have no
+    // AR figure.
     function creditLimitReason() {
       var bt = state.customer && state.customer.bill_to;
-      var cl = bt && bt.credit_limit;
-      if (!bt || !cl || cl.value == null || !isFinite(cl.value)) return null;
-      if (COD_TERMS.indexOf(bt.terms_code) !== -1) return null;
-      if (orderTotal().total <= cl.value) return null;
-      return "Over the credit limit (" + money(cl.value) + "); it can only be placed as a bid.";
+      var ca = bt && bt.credit_available;
+      if (!bt || !ca || ca.value == null || !isFinite(ca.value)) return null;
+      if (!NET_TERMS.test(String(bt.terms_code || "").trim())) return null;
+      if (orderTotal().total <= ca.value) return null;
+      return "Over the available credit (" + money(ca.value) + "); an order goes into the credit review queue.";
     }
 
     // Ship via "SEE INSTRUCTION" is not useful on its own: require real
-    // shipping instructions (at least 5 characters) before a bid, order,
+    // shipping instructions (at least 1 character, 2026-10-28; 5 before) before a bid, order,
     // update or convert, in every mode.
     function seeInstructionReason() {
       if (state.header.shipVia !== "SEE INSTRUCTION") return null;
-      if (String(state.header.shippingInstructions || "").trim().length >= 5) return null;
-      return 'Ship via is "SEE INSTRUCTION": add at least 5 characters to Shipping instructions.';
+      if (String(state.header.shippingInstructions || "").trim().length >= 1) return null;
+      return 'Ship via is "SEE INSTRUCTION": add Shipping instructions.';
     }
 
     function placeBlockedReason(mode) {
@@ -1339,7 +1368,6 @@
         if (!h.shipVia) return "Pick a ship via.";
         if (!h.shipDate) return "Pick a ship date.";
         if (!h.requiredDate) return "Pick a required date.";
-        if (mode === "convert" && creditLimitReason()) return creditLimitReason();
         if (h.requiredDate && h.shipDate && h.requiredDate < h.shipDate) return "Required date cannot be before ship date.";
         if (!user.e_user_id) return "Sign in again: no Eclipse user on this session.";
         if (mode === "convert") return null;
@@ -1355,7 +1383,6 @@
       if (!h.shipDate) return "Pick a ship date.";
       if (!h.requiredDate) return "Pick a required date.";
       if (String(h.email || "").trim() && !EMAIL_RE.test(String(h.email).trim().toLowerCase())) return "Enter a valid email.";
-      if (mode === "order" && creditLimitReason()) return creditLimitReason();
       if (h.requiredDate && h.shipDate && h.requiredDate < h.shipDate) return "Required date cannot be before ship date.";
       if (!user.e_user_id) return "Sign in again: no Eclipse user on this session.";
       return null;
@@ -1554,6 +1581,13 @@
             parseDate: typedDateParser(function () { return fp; }),
             onChange: function (_dates, dateStr) {
               state.header[key] = dateStr;
+              // The same date in another box (the dialog's Ship date and the
+              // header's) follows it; false = no onChange loop.
+              datePickers.forEach(function (p) {
+                if (p !== fp && p.input.getAttribute("data-date") === key && p.input.value !== dateStr) {
+                  if (dateStr) p.setDate(dateStr, false); else p.clear(false);
+                }
+              });
               if (key === "shipDate" && !headLocked("requiredDate")) {
                 datePickers.forEach(function (p) {
                   if (p.input.getAttribute("data-date") === "requiredDate") p.set("minDate", dateStr || "today");
@@ -1561,6 +1595,8 @@
               }
               refreshDateError();
               refreshTotals();
+              var cd = root.querySelector('[data-cell="confirm-dates"]');
+              if (cd) cd.innerHTML = "<span>Ship / Req</span> " + esc(state.header.shipDate) + " / " + esc(state.header.requiredDate);
             },
             // Opening Required date while it is before Ship date moves it to
             // the ship date (selected, so closing keeps it).
@@ -1732,22 +1768,39 @@
         '<span class="fop-party__amt">' + esc(id + (known ? " - " + known[1] : "")) + "</span></div>";
     }
 
-    // Bottom-right of the Bill to card: Eclipse defaultTerms (terms_code)
-    // left of creditLimit ({ value, currency }), bottoms aligned.
+    // A { value, currency } amount: whole dollars without cents.
+    function creditAmt(m) {
+      if (!m || m.value == null || !isFinite(m.value)) return "";
+      var whole = Math.round(m.value) === m.value;
+      var amt = whole ? "$" + String(m.value).replace(/\B(?=(\d{3})+(?!\d))/g, ",") : money(m.value);
+      return amt + (m.currency && m.currency !== "USD" ? " " + m.currency : "");
+    }
+
+    // Bottom-right of the Bill to card. Net terms (NET_TERMS): credit
+    // available from the Eclipse AR inquiry; hover (or focus, for taps)
+    // shows a popup with credit available, credit limit and the AR terms
+    // text ("NET 30 DAYS"). Any other terms, or no AR figure: just the
+    // Eclipse defaultTerms (terms_code), no popup.
     function creditHtml(bt) {
-      var items = [];
-      if (bt && bt.terms_code) {
-        items.push('<div class="fop-party__corner"><span class="fop-party__lbl2">Terms</span>' +
-          '<span class="fop-party__amt">' + esc(bt.terms_code) + "</span></div>");
+      var code = String((bt && bt.terms_code) || "").trim();
+      var avail = NET_TERMS.test(code) ? creditAmt(bt.credit_available) : "";
+      if (!avail) {
+        return code ? '<div class="fop-party__corner"><span class="fop-party__lbl2">Terms</span>' +
+          '<span class="fop-party__amt">' + esc(code) + "</span></div>" : "";
       }
-      var cl = bt && bt.credit_limit;
-      if (cl && cl.value != null && isFinite(cl.value)) {
-        var whole = Math.round(cl.value) === cl.value;
-        var amt = whole ? "$" + String(cl.value).replace(/\B(?=(\d{3})+(?!\d))/g, ",") : money(cl.value);
-        items.push('<div class="fop-party__corner"><span class="fop-party__lbl2">Credit limit</span>' +
-          '<span class="fop-party__amt">' + amt + (cl.currency && cl.currency !== "USD" ? " " + esc(cl.currency) : "") + "</span></div>");
-      }
-      return items.length > 1 ? '<div class="fop-party__corners">' + items.join("") + "</div>" : items.join("");
+      var terms = (bt.terms || code).trim();
+      var rows = [["Credit available", avail], ["Credit limit", creditAmt(bt.credit_limit)], ["Terms", terms]]
+        .filter(function (r) { return r[1]; })
+        .map(function (r) {
+          return '<div class="fop-credit__row"><span class="fop-credit__lbl">' + esc(r[0]) + "</span>" +
+            '<span class="fop-credit__val">' + esc(r[1]) + "</span></div>";
+        }).join("");
+      return '<div class="fop-party__corner fop-credit" tabindex="0">' +
+        '<span class="fop-party__lbl2">Credit available' +
+        '<svg class="fop-credit__icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/>' +
+        '<path d="M8 7.2v4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="4.9" r="1" fill="currentColor"/></svg></span>' +
+        '<span class="fop-party__amt">' + esc(avail) + "</span>" +
+        '<div class="fop-credit__pop" role="tooltip">' + rows + "</div></div>";
     }
 
     function customerSummaryHtml() {
@@ -1831,7 +1884,7 @@
     // shipping fields (headLocked(key)).
     function lockAttr(key) { return headLocked(key) ? " disabled" : ""; }
 
-    function selectHtml(field, options, value, placeholder, groups) {
+    function selectHtml(field, options, value, placeholder, groups, groupLabel) {
       var html = '<select class="fop-input" data-head="' + field + '" id="fop-h-' + field + '"' + lockAttr(field) + ">";
       // Placeholder only while nothing is picked (both selects are required).
       // A locked field (existing order) shows a blank box, not "Select…".
@@ -1840,7 +1893,7 @@
         return '<option value="' + esc(o[1]) + '"' + (String(o[1]) === String(value) ? " selected" : "") + ">" + esc(o[0]) + "</option>";
       };
       if (groups) {
-        html += '<optgroup label="Common">' + options.slice(0, groups).map(opt).join("") + "</optgroup>";
+        html += '<optgroup label="' + esc(groupLabel || "Common") + '">' + options.slice(0, groups).map(opt).join("") + "</optgroup>";
         html += '<optgroup label="All">' + options.slice(groups).map(opt).join("") + "</optgroup>";
       } else {
         html += options.map(opt).join("");
@@ -1849,6 +1902,19 @@
       var known = options.some(function (o) { return String(o[1]) === String(value); });
       if (value && !known) html += '<option value="' + esc(value) + '" selected>' + esc(value) + "</option>";
       return html + "</select>";
+    }
+
+    // Ship via: the bill-to's recommended ship vias first (by terms), else
+    // the usual Common group.
+    function shipViaSelectHtml(value) {
+      var code = String((state.customer && state.customer.bill_to && state.customer.bill_to.terms_code) || "").trim();
+      var rec = CC_TERMS.test(code) ? CC_SHIP_VIAS : NET_TERMS.test(code) ? CREDIT_SHIP_VIAS : null;
+      if (!rec) return selectHtml("shipVia", SHIP_VIAS, value, "Select…", COMMON_SHIP_VIAS);
+      var byVal = {};
+      SHIP_VIAS.forEach(function (o) { byVal[o[1]] = o; });
+      var first = rec.map(function (v) { return byVal[v]; });
+      var rest = SHIP_VIAS.filter(function (o) { return rec.indexOf(o[1]) < 0; });
+      return selectHtml("shipVia", first.concat(rest), value, "Select…", first.length, "Recommended");
     }
 
     // req: the header key of a required field. Its label gets a red
@@ -2128,7 +2194,7 @@
         // print status only on an existing order that is not a bid.
         '<div class="fop-head__grid">' +
         // Phones: ship via and ship branch each take a full row (--mfull).
-        field("Ship via", selectHtml("shipVia", SHIP_VIAS, h.shipVia, "Select…", COMMON_SHIP_VIAS), "fop-field--row fop-field--mfull", "shipVia") +
+        field("Ship via", shipViaSelectHtml(h.shipVia), "fop-field--row fop-field--mfull", "shipVia") +
         // Lines on several branches: the hint under it says so (it is the
         // branch of the lines that follow the header).
         field("Ship branch", selectHtml("shipBranch", branches, h.shipBranch, "Select…") +
@@ -2635,6 +2701,12 @@
     // (order-lookup); a new order has none until Eclipse creates it.
     // Total is Eclipse's own total while an existing order's lines are
     // unchanged, otherwise subtotal + freight + handling + tax.
+    // 3% of the lines' subtotal while the ship via ends in "CC"; null otherwise.
+    function ccSurcharge(subtotal) {
+      if (!CC_SHIP_VIA.test(String(state.header.shipVia || "").trim())) return null;
+      return Math.round(subtotal * CC_SURCHARGE * 100) / 100;
+    }
+
     function summary() {
       var t = orderTotal();
       var ex = state.existing;
@@ -2645,22 +2717,22 @@
       var s = {
         subtotal: t.total, unknown: t.unknown, cost: t.cost, costUnknown: t.costUnknown,
         freightIn: amt("freight_in"), freightOut: amt("freight_out"),
-        handling: amt("handling"), tax: amt("tax_total"),
+        handling: amt("handling"), tax: amt("tax_total"), surcharge: ccSurcharge(t.total),
       };
       var unchanged = ex && (!ex.editable || !bidChanges().any);
       s.total = unchanged && num(ex.order_total) != null ? num(ex.order_total)
-        : s.subtotal + (s.freightIn || 0) + (s.freightOut || 0) + (s.handling || 0) + (s.tax || 0);
+        : s.subtotal + (s.surcharge || 0) + (s.freightIn || 0) + (s.freightOut || 0) + (s.handling || 0) + (s.tax || 0);
       return s;
     }
 
-    // A new order or an editable bid over the bill-to's credit limit: a red
-    // "Over credit limit" tag, title = the full reason. Shown below the
+    // A new order or an editable bid over the bill-to's available credit: a red
+    // "Over available credit" tag, title = the full reason. Shown below the
     // subtotal box on desktop (.fop-credit-tag--sum) and next to the Total
     // in the action bar on phones (.fop-credit-tag--bar); CSS picks one.
     function creditTagHtml() {
       var ex = state.existing;
       var overLimit = (!ex || ex.editable) && creditLimitReason();
-      return overLimit ? '<span class="fop-status fop-status--cancel" title="' + esc(overLimit) + '">Over credit limit</span>' : "";
+      return overLimit ? '<span class="fop-status fop-status--cancel" title="' + esc(overLimit) + '">Over available credit</span>' : "";
     }
 
     // Bottom bar: the order total only (cost is in the summary box).
@@ -2678,20 +2750,24 @@
     function summaryHtml() {
       var s = summary();
       if (!state.existing) {
-        return '<div class="fop-sum__row fop-sum__row--total"><span class="fop-sum__lbl">Total</span><span class="fop-sum__val" data-cell="sum-total">' +
+        return (s.surcharge != null ? sumRowHtml("Subtotal", s.subtotal) + sumRowHtml("CC surcharge (3%)", s.surcharge) : "") +
+          '<div class="fop-sum__row fop-sum__row--total"><span class="fop-sum__lbl">Total</span><span class="fop-sum__val" data-cell="sum-total">' +
           sumTotalHtml(s) + "</span></div>";
       }
-      var row = function (label, v) {
-        return '<div class="fop-sum__row"><span class="fop-sum__lbl">' + esc(label) + "</span>" +
-          '<span class="fop-sum__val">' + (v == null ? "-" : money(v)) + "</span></div>";
-      };
+      var row = sumRowHtml;
       return (state.existing ? row("Subtotal", s.subtotal) +
+        (s.surcharge != null ? row("CC surcharge (3%)", s.surcharge) : "") +
         row("Freight in", s.freightIn) + row("Freight out", s.freightOut) +
         // Handling only when Eclipse has some, so the rows add up to the total.
         (s.handling ? row("Handling", s.handling) : "") +
         row("Sales tax", s.tax) : "") +
         '<div class="fop-sum__row fop-sum__row--total"><span class="fop-sum__lbl">Total</span><span class="fop-sum__val" data-cell="sum-total">' +
         sumTotalHtml(s) + "</span></div>";
+    }
+
+    function sumRowHtml(label, v) {
+      return '<div class="fop-sum__row"><span class="fop-sum__lbl">' + esc(label) + "</span>" +
+        '<span class="fop-sum__val">' + (v == null ? "-" : money(v)) + "</span></div>";
     }
 
     function sumTotalHtml(s) {
@@ -2850,7 +2926,50 @@
       return '<div class="fop-kicker">Order Placement</div><h1 class="fop-h1">' +
         esc(ex.e_sorder_id) +
         ' <span class="fop-status fop-status--' + esc(String(ex.status).toLowerCase()) + '">' + esc(statusLabel(ex.status)) + "</span>" +
-        deliveredHtml() + paymentHtml() + "</h1>";
+        creditHoldHtml() + printedHtml() + deliveredHtml() + paymentHtml() + "</h1>";
+    }
+
+    // This generation's change log entries (and ALL ones), once loaded; null
+    // before that.
+    function genLogEntries() {
+      var ex = state.existing;
+      var cl = state.changeLog;
+      if (!ex || !cl || cl.orderId !== ex.order_id || !cl.data) return null;
+      var gid = String(ex.generation_id);
+      return (cl.data.entries || []).filter(function (e) {
+        return (e.gens || []).some(function (g) { return g === "ALL" || String(Number(g)) === gid; });
+      });
+    }
+
+    // A plain grey "Credit Hold" tile (like the printed ticket tiles) after the status when the change log mentions
+    // "Credit Hold" (any case, anywhere in the comment), whatever the
+    // status (2026-10-28, on request; e.g. S2740335.0001).
+    // Tooltip: the newest such entry and its time. A click opens the change
+    // log, as on the printed ticket tiles.
+    function creditHoldHtml() {
+      var entries = genLogEntries();
+      if (!entries) return "";
+      var hits = entries.filter(function (e) { return /credit hold/i.test(String(e.comment || "")); });
+      if (!hits.length) return "";
+      var last = hits.reduce(function (a, b) { return new Date(b.at) > new Date(a.at) ? b : a; });
+      return '<button type="button" class="fop-status fop-status--log" data-action="change-log" title="' + esc(logTimeText(last.at) + ": " + String(last.comment).trim()) + '">Credit Hold</button>';
+    }
+
+    // "Printed Pick Ticket" / "Printed Ship Ticket" tiles after the status
+    // when this generation's change log (or an ALL entry) has a "Printed
+    // Pick Ticket …" / "Printed Ship Ticket …" entry (2026-10-28, on
+    // request). A click opens the change log. Tooltip: the latest such
+    // entry and its time. Nothing until the change log has loaded.
+    function printedHtml() {
+      var entries = genLogEntries();
+      if (!entries) return "";
+      return ["Pick", "Ship"].map(function (kind) {
+        var re = new RegExp("^Printed " + kind + " Ticket", "i");
+        var hits = entries.filter(function (e) { return re.test(String(e.comment || "").trim()); });
+        if (!hits.length) return "";
+        var last = hits.reduce(function (a, b) { return new Date(b.at) > new Date(a.at) ? b : a; });
+        return '<button type="button" class="fop-status fop-status--log" data-action="change-log" title="' + esc(logTimeText(last.at) + ": " + String(last.comment).trim()) + '">Printed ' + kind + " Ticket</button>";
+      }).join("");
     }
 
     // Payment tile after Delivered: order-lookup's payment_status (Eclipse
@@ -3104,16 +3223,29 @@
       var ex = state.existing;
       if (!ex) return;
       state.logModal = true;
-      var id = ex.order_id;
-      // Cached per order for the session (reloading the order refetches).
-      if (!state.changeLog || state.changeLog.orderId !== id || state.changeLog.error) {
-        state.changeLog = { orderId: id, loading: true };
-        getJson(API.orderChangelog, { e_sorder_id: id })
-          .then(function (d) { if (state.changeLog.orderId === id) state.changeLog = { orderId: id, data: d }; })
-          .catch(function (err) { if (state.changeLog.orderId === id) state.changeLog = { orderId: id, error: err.message }; })
-          .then(function () { if (state.logModal) render(); });
-      }
+      loadChangeLog();
       render();
+    }
+
+    // Fetch the open order's change log unless it is cached or loading.
+    // Cached per order for the session (reloading the order refetches). Also
+    // run when an order opens, for the printed ticket tiles in the title
+    // (printedHtml); when it answers, the dialog (if open) or only the
+    // title is redrawn.
+    function loadChangeLog() {
+      var ex = state.existing;
+      if (!ex) return;
+      var id = ex.order_id;
+      if (state.changeLog && state.changeLog.orderId === id && !state.changeLog.error) return;
+      state.changeLog = { orderId: id, loading: true };
+      getJson(API.orderChangelog, { e_sorder_id: id })
+        .then(function (d) { if (state.changeLog && state.changeLog.orderId === id) state.changeLog = { orderId: id, data: d }; })
+        .catch(function (err) { if (state.changeLog && state.changeLog.orderId === id) state.changeLog = { orderId: id, error: err.message }; })
+        .then(function () {
+          if (state.logModal) { render(); return; }
+          var t = root.querySelector('[data-cell="order-title"]');
+          if (t) t.innerHTML = orderTitleHtml();
+        });
     }
 
     // ── View Quote (2026-10-19; live check 2026-10-21) ──────────────────
@@ -3565,7 +3697,7 @@
         // is the same centred width as the regular page.
         '<div class="fop-wrap fop-wrap--wide' + (sideLayout && stockShown() ? " fop-wrap--sideopen" : "") + '">' +
         '<div class="fop-top">' +
-        '<div>' + orderTitleHtml() + "</div>" +
+        '<div data-cell="order-title">' + orderTitleHtml() + "</div>" +
         // Existing orders: Exit sits right of Change log in the switcher row
         // (2026-10-19, on request); new orders keep it here.
         (state.existing ? "" : '<div class="fop-row">' + exitBtnHtml() + "</div>") +
@@ -3636,13 +3768,16 @@
       return !!state.confirm && (state.confirm.mode === "order" || state.confirm.mode === "convert");
     }
 
-    // The statuses the dialog offers: "1. Pick Up Now" first when it is
-    // available (any ship via), then the usual five.
+    // The statuses the dialog lists: "1. Pick Up Now" first (any ship via),
+    // then the usual five. When Pick Up Now is not available it is still
+    // listed but disabled (2026-10-28, on request), with the reason under
+    // the box.
     function confirmStatuses() {
-      return confirmIsOrder() && !pickUpReason() ? [PICK_UP_NOW].concat(ORDER_STATUSES) : ORDER_STATUSES;
+      return confirmIsOrder() ? [PICK_UP_NOW].concat(ORDER_STATUSES) : ORDER_STATUSES;
     }
 
-    // Why Pick Up Now is not offered ("" when it is): every product line of
+    // Why Pick Up Now is not offered ("" when it is): never over the
+    // available credit (the order waits in credit review); every product line of
     // the generation must ship from the header's branch and be in stock
     // there. A bid with other Bid generations is left out, since Convert to
     // Order converts them all at once.
@@ -3651,6 +3786,7 @@
       var h = state.header;
       var br = branchIdOf(h.shipBranch);
       var no = "Pick Up Now isn't an option: ";
+      if (creditLimitReason()) return no + "the order is over the available credit and goes into the credit review queue.";
       if (state.confirm.mode === "convert") {
         var others = ((state.order && state.order.generations) || []).filter(function (g) {
           return g.status === "Bid" && g.e_sorder_id !== state.existing.e_sorder_id;
@@ -3671,37 +3807,58 @@
       return confirmIsOrder() && state.header.orderStatus === PICK_UP_NOW[1];
     }
 
-    // Printers at the order's ship branch (location is ignored).
+    // Printers at the order's ship branch (location is ignored): the
+    // "hidden" ones only with ?showAllPrinters=true.
     function branchPrinters() {
-      return PRINTERS[branchIdOf(state.header.shipBranch)] || [];
+      return (PRINTERS[branchIdOf(state.header.shipBranch)] || []).filter(function (p) {
+        return urlAllPrinters || p[2] !== "hidden";
+      });
+    }
+
+    // The picked printer, else the branch's default (status "default").
+    function confirmPrinterId() {
+      if (state.confirm.printerId) return String(state.confirm.printerId);
+      var def = branchPrinters().filter(function (p) { return p[2] === "default"; })[0];
+      return def ? String(def[0]) : "";
     }
 
     function statusPickerHtml() {
       var h = state.header;
       var list = confirmStatuses();
+      var noPickUp = pickUpReason();
       return '<div class="fop-field fop-confirm-status"><label class="fop-label" for="fop-confirm-status">Order status ' +
-        '<span class="fop-muted">(↑↓ or 1–' + list.length + ")</span></label>" +
+        '<span class="fop-muted">(↑↓ or ' + (noPickUp ? 2 : 1) + "–" + list.length + ")</span></label>" +
         '<select class="fop-input" id="fop-confirm-status" data-head="orderStatus">' +
         // Starts on "Select…"; placing with it blank flashes the box.
         '<option value="" disabled' + (h.orderStatus ? "" : " selected") + ">Select…</option>" +
         list.map(function (o, i) {
-          return '<option value="' + esc(o[1]) + '"' + (o[1] === h.orderStatus ? " selected" : "") + ">" + (i + 1) + ". " + esc(o[0]) + "</option>";
+          return '<option value="' + esc(o[1]) + '"' + (o[1] === h.orderStatus ? " selected" : "") + (o === PICK_UP_NOW && noPickUp ? " disabled" : "") + ">" + (i + 1) + ". " + esc(o[0]) + "</option>";
         }).join("") + "</select></div>" +
         (pickUpReason() ? '<div class="fop-muted fop-confirm-gens">' + esc(pickUpReason()) + "</div>" : "") +
-        (isPickUpNow() ? printerPickerHtml() : "");
+        (isPickUpNow() ? printerPickerHtml() : "") +
+        (h.orderStatus === "ShipWhenSpecified" ? confirmShipDateHtml() : "");
+    }
+
+    // Ship When Specified: the header's Ship date box again, in the dialog
+    // (2026-10-28, on request), since that status ships on that date. It is
+    // a second flatpickr on state.header.shipDate (initDatePickers); the
+    // header's box shows the new date once the dialog closes.
+    function confirmShipDateHtml() {
+      return '<div class="fop-field fop-confirm-status"><label class="fop-label">Ship date</label>' +
+        '<input class="fop-input fop-date" data-date="shipDate" data-confirm-date value="' + esc(state.header.shipDate) + '"></div>';
     }
 
     // Pick Up Now: the printer at the ship branch that prints the order.
     function printerPickerHtml() {
-      var pid = state.confirm.printerId || "";
+      var pid = confirmPrinterId();
       var list = branchPrinters();
       var br = branchIdOf(state.header.shipBranch);
       return '<div class="fop-field fop-confirm-status"><label class="fop-label" for="fop-confirm-printer">Printer ' +
-        '<span class="fop-muted">(branch ' + esc(br || "--") + ")</span></label>" +
+        '<span class="fop-muted">(' + "branch " + esc(br || "--") + (urlAllPrinters ? ", all printers" : "") + ")</span></label>" +
         '<select class="fop-input" id="fop-confirm-printer">' +
         '<option value="" disabled' + (pid ? "" : " selected") + ">" + (list.length ? "Select…" : "No printers for this branch") + "</option>" +
         list.map(function (p) {
-          return '<option value="' + p[0] + '"' + (String(p[0]) === pid ? " selected" : "") + ">" + esc(p[1]) + " (" + p[0] + ")</option>";
+          return '<option value="' + p[0] + '"' + (String(p[0]) === pid ? " selected" : "") + ">" + esc(p[1]) + " (" + p[0] + ")" + (p[2] === "default" ? " · default" : "") + "</option>";
         }).join("") + "</select></div>";
     }
 
@@ -3728,7 +3885,7 @@
 
     // Pick Up Now with no printer picked yet: Print Now is grayed out the same way.
     function needsPrinter() {
-      return isPickUpNow() && !state.confirm.printerId;
+      return isPickUpNow() && !confirmPrinterId();
     }
 
     // A line's comment under its description in the confirm dialogs.
@@ -3744,6 +3901,23 @@
       if (bs.length < 2) return "";
       return '<div class="fop-alert fop-alert--info">The lines ship from ' + bs.length + " branches (" + esc(bs.join(", ")) +
         "), so this " + what + " one generation per branch.</div>";
+    }
+
+    // Place Order / Convert to Order over the available credit: Eclipse puts
+    // the order into the credit review queue.
+    function creditReviewHtml() {
+      if (!creditLimitReason()) return "";
+      var ca = state.customer.bill_to.credit_available;
+      return '<div class="fop-alert fop-alert--warning">This order is over the available credit (' + esc(money(ca.value)) +
+        "), so it's going into the credit review queue. That's why Pick Up Now isn't available.</div>";
+    }
+
+    // The confirm dialogs' total, plus the CC surcharge when the ship via
+    // ends in "CC".
+    function confirmTotalHtml(t) {
+      var sc = ccSurcharge(t.total);
+      return '<div class="fop-confirm-total">Total ' + money(t.total + (sc || 0)) + (t.unknown ? " + Eclipse pricing" : "") +
+        (sc != null ? ' <span class="fop-muted">(incl. ' + money(sc) + " CC surcharge)</span>" : "") + "</div>";
     }
 
     function brCellHtml(l, on) {
@@ -3775,18 +3949,19 @@
         (nCustom ? '<div class="fop-alert fop-alert--info">' + nCustom + " custom line" +
           (nCustom > 1 ? "s" : "") + " included, so this can only be placed as a bid.</div>" : "") +
         branchesNoteHtml("places") +
+        (isBid ? "" : creditReviewHtml()) +
         '<div class="fop-confirm-meta">' +
         "<div><span>Ship-to</span> " + esc(state.shipTo.name) + " (" + esc(state.shipTo.e_customer_id) + ")</div>" +
         "<div><span>Price level</span> " + esc(state.customer.bill_to.price_class || "Unknown") + "</div>" +
         "<div><span>Branch</span> " + esc(multi ? orderBranches().join(", ") : h.shipBranch) + "</div>" +
         "<div><span>Ship via</span> " + esc(h.shipVia || "None") + "</div>" +
-        "<div><span>Ship / Req</span> " + esc(h.shipDate) + " / " + esc(h.requiredDate) + "</div>" +
+        '<div data-cell="confirm-dates"><span>Ship / Req</span> ' + esc(h.shipDate) + " / " + esc(h.requiredDate) + "</div>" +
         (h.po ? "<div><span>PO</span> " + esc(h.po) + "</div>" : "") +
         "</div>" +
         (state.confirm.mode === "order" ? statusPickerHtml() : "") +
         '<div class="fop-table-wrap"><table class="fop-table"><thead><tr><th>Product</th><th>Description</th>' + (multi ? '<th class="fop-num">Br</th>' : "") +
         '<th class="fop-num">Qty</th><th class="fop-num">Ext.</th></tr></thead><tbody>' + rows + "</tbody></table></div>" +
-        '<div class="fop-confirm-total">Total ' + money(t.total) + (t.unknown ? " + Eclipse pricing" : "") + "</div>" +
+        confirmTotalHtml(t) +
         placeErrorHtml(state.placeError) +
         '<div class="fop-row fop-row--end">' +
         '<button class="fop-btn fop-btn--ghost" data-action="cancel-place"' + (state.placing ? " disabled" : "") + ">Back <span class=\"fop-key\">Esc</span></button>" +
@@ -3842,7 +4017,7 @@
         '<div class="fop-modal" role="dialog" aria-modal="true" aria-labelledby="fop-confirm-title">' +
         '<div class="fop-modal__box">' +
         '<h2 class="fop-h2" id="fop-confirm-title">' + (convert ? "Convert bid " + esc(ex.e_sorder_id) + " to an order?" : "Update bid " + esc(ex.e_sorder_id) + "?") + "</h2>" +
-        (convert ? statusPickerHtml() +
+        (convert ? creditReviewHtml() + statusPickerHtml() +
           '<div class="fop-muted fop-confirm-gens">Converts ' + (gens.length > 1 ? "every bid generation: " : "") + esc(gens.join(", ") || ex.e_sorder_id) + "." +
           (ch.any ? " The changes below are saved first." : "") + "</div>" : "") +
         (ch.any ? '<div class="fop-muted">' + esc(summary) + ".</div>" : "") +
@@ -3855,7 +4030,7 @@
         (ch.commented ? '<div class="fop-muted">A line that gets a comment is re-created in Eclipse with the same product, qty and price (Eclipse can\'t edit the comments of a line).</div>' : "") +
         '<div class="fop-table-wrap"><table class="fop-table"><thead><tr><th>Product</th><th>Description</th>' + (multi ? '<th class="fop-num">Br</th>' : "") +
         '<th class="fop-num">Qty</th><th class="fop-num">Ext.</th><th></th></tr></thead><tbody>' + rows + "</tbody></table></div>" +
-        '<div class="fop-confirm-total">Total ' + money(t.total) + (t.unknown ? " + Eclipse pricing" : "") + "</div>" +
+        confirmTotalHtml(t) +
         placeErrorHtml(state.placeError) +
         '<div class="fop-row fop-row--end">' +
         '<button class="fop-btn fop-btn--ghost" data-action="cancel-place"' + (state.placing ? " disabled" : "") + ">Back <span class=\"fop-key\">Esc</span></button>" +
@@ -3994,11 +4169,11 @@
     function refreshTotals() {
       var t = root.querySelector('[data-cell="totals"]');
       if (t) t.innerHTML = totalsHtml();
-      // New order: only the total cell.
+      // The whole box: a new order gains Subtotal and CC surcharge rows
+      // when the ship via ends in "CC" (nothing in it takes focus since the
+      // Freight in box went, 2026-10-23).
       var sm = root.querySelector('[data-cell="summary"]');
-      var st = sm && sm.querySelector('[data-cell="sum-total"]');
-      if (sm && !state.existing && st) st.innerHTML = sumTotalHtml(summary());
-      else if (sm) sm.innerHTML = summaryHtml();
+      if (sm) sm.innerHTML = summaryHtml();
       var ct = root.querySelector('[data-cell="credit-tag"]');
       if (ct) ct.innerHTML = creditTagHtml();
       var bid = root.querySelector("[data-action=place-bid]");
@@ -4265,8 +4440,8 @@
     // flashes that field (so Alt+B / Alt+O, or a soft-disabled click on
     // Place Order / Convert to Order, always shows the rep exactly what to
     // fix, not just a tooltip on the button). A reason with no single field
-    // to blame (no lines, a product not found, custom lines, over the
-    // credit limit, no Eclipse user, no changes to save) flashes nothing.
+    // to blame (no lines, a product not found, custom lines, no Eclipse
+    // user, no changes to save) flashes nothing.
     function flashBlockedField(blocked) {
       var field =
         blocked === "Pick a ship branch." ? "shipBranch" :
@@ -4477,7 +4652,7 @@
     // dialog; once the order exists, a failed step shows on the order.
     function pickUpNow() {
       var mode = state.confirm.mode;
-      var printer = branchPrinters().filter(function (p) { return String(p[0]) === String(state.confirm.printerId); })[0];
+      var printer = branchPrinters().filter(function (p) { return String(p[0]) === confirmPrinterId(); })[0];
       var ex = state.existing;
       var id = "";
       state.placing = true;
@@ -4556,6 +4731,7 @@
             if (fresh) {
               state.changeLog = null;   // the Change log dialog refetches
               tell("Order " + id + " invoiced. " + now[fresh]);
+              loadChangeLog();          // and the printed ticket tiles show
               return true;
             }
           }, function () { return false; })
@@ -4634,6 +4810,21 @@
         flashField(pr);
         if (pr) pr.focus();
         return;
+      }
+      // Ship When Specified: the ship date can change in the dialog, so check
+      // it again (blank, or after the required date) and flash its box.
+      if (h.orderStatus === "ShipWhenSpecified" && (mode === "order" || mode === "convert")) {
+        var dateWhy = !h.shipDate ? "Pick a ship date." :
+          h.requiredDate && h.requiredDate < h.shipDate ? "Required date cannot be before ship date." : "";
+        if (dateWhy) {
+          state.placeError = dateWhy;
+          render();
+          var sd = root.querySelector(".fop-modal [data-confirm-date]");
+          var sdBox = sd && sd._flatpickr && sd._flatpickr.altInput ? sd._flatpickr.altInput : sd;
+          flashField(sdBox);
+          if (sdBox) sdBox.focus();
+          return;
+        }
       }
       if (isPickUpNow()) { pickUpNow(); return; }
       if (mode === "convert") { updateBid(h.orderStatus); return; }
@@ -5297,14 +5488,20 @@
       // Confirm dialog owns the keyboard.
       if (state.view === "order" && state.confirm) {
         if (e.key === "Escape" && !state.placing) { e.preventDefault(); state.confirm = null; state.placeError = null; render(); }
-        else if (e.key === "Enter" && !state.placing && !(t.getAttribute && t.getAttribute("data-action") === "cancel-place")) {
+        // Enter in the dialog's Ship date box sets the typed date, not place.
+        else if (e.key === "Enter" && !state.placing && !(t.getAttribute && t.getAttribute("data-action") === "cancel-place") &&
+          !(t.classList && t.classList.contains("fop-date-alt"))) {
           e.preventDefault(); place();
         } else if (t.id === "fop-confirm-status" && (e.key === "ArrowDown" || e.key === "ArrowUp" || /^[1-9]$/.test(e.key))) {
           // Pick the status without opening the native list. Option 0 is the
-          // blank "Select…", so status k is option k and ↑ stops at status 1.
+          // blank "Select…", so status k is option k and ↑ stops at the first
+          // enabled status. A disabled Pick Up Now is skipped.
           var n = confirmStatuses().length;
-          var next = /^[1-9]$/.test(e.key) ? Number(e.key) : t.selectedIndex + (e.key === "ArrowDown" ? 1 : -1);
-          if (next >= 1 && next <= n) {
+          var step = e.key === "ArrowDown" ? 1 : -1;
+          var next = /^[1-9]$/.test(e.key) ? Number(e.key) : t.selectedIndex + step;
+          if (!/^[1-9]$/.test(e.key) && t.options[next] && t.options[next].disabled) next += step;
+          if (/^[1-9]$/.test(e.key)) e.preventDefault();
+          if (next >= 1 && next <= n && !t.options[next].disabled) {
             e.preventDefault();
             t.selectedIndex = next;
             t.dispatchEvent(new Event("change", { bubbles: true }));
