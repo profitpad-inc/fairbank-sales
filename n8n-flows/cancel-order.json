@@ -30,7 +30,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Body: { e_sorder_id, writer }. Sets that generation's status to Cancel.\nconst parseId = (raw) => {\n  const m = String(raw || '').trim().toUpperCase().match(/^S?(\\d+)(?:\\.(\\d{1,4}))?$/);\n  if (!m) return null;\n  const oid = 'S' + m[1];\n  const genId = String(Number(m[2] || 1));\n  return { oid, genId, eSorderId: oid + '.' + genId.padStart(4, '0') };\n};\nconst b = $input.first().json.body || {};\nconst fail = (msg) => [{ json: { ok: false, statusCode: 400, body: { success: false, error: msg, step: 'validate' } } }];\nconst id = parseId(b.e_sorder_id);\nif (!id) return fail('Missing or invalid e_sorder_id (expected S1234567.0001).');\nif (!b.writer) return fail('Missing writer (e_user_id)');\nreturn [{ json: { ok: true, ...id, writer: String(b.writer).toUpperCase() } }];\n"
+        "jsCode": "// Body: { e_sorder_id, writer, lost_reason, closed_lost_reason }. Sets that\n// generation's status to Cancel. lost_reason (one of LOST_REASONS) and\n// closed_lost_reason (5 characters at least) go on the HubSpot deal after\n// the deal sync (2026-10-29, on request).\nconst LOST_REASONS = ['Competitor had Better Solution', 'Competitor had Relationship', 'Decision Timeline', 'Duplicate',\n  'Price', 'Missed Deadline', 'Availability', 'Project Cancelled', 'Shipping Cost too High', 'Unresponsive'];\nconst parseId = (raw) => {\n  const m = String(raw || '').trim().toUpperCase().match(/^S?(\\d+)(?:\\.(\\d{1,4}))?$/);\n  if (!m) return null;\n  const oid = 'S' + m[1];\n  const genId = String(Number(m[2] || 1));\n  return { oid, genId, eSorderId: oid + '.' + genId.padStart(4, '0') };\n};\nconst b = $input.first().json.body || {};\nconst fail = (msg) => [{ json: { ok: false, statusCode: 400, body: { success: false, error: msg, step: 'validate' } } }];\nconst id = parseId(b.e_sorder_id);\nif (!id) return fail('Missing or invalid e_sorder_id (expected S1234567.0001).');\nif (!b.writer) return fail('Missing writer (e_user_id)');\nconst lostReason = String(b.lost_reason || '').trim();\nif (!LOST_REASONS.includes(lostReason)) return fail('Pick a lost reason.');\nconst lostDetails = String(b.closed_lost_reason || '').trim();\nif (lostDetails.length < 5) return fail('Lost reason details need at least 5 characters.');\nreturn [{ json: { ok: true, ...id, writer: String(b.writer).toUpperCase(), lostReason, lostDetails } }];\n"
       },
       "id": "f1f29090-3702-5e4d-8d3a-69de61858f48",
       "name": "Validate",
@@ -236,14 +236,14 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const c = $('Check status').first().json;\nconst v = { eSorderId: c.eSorderId };\nlet r = $input.first().json || {};\n// A non-JSON content type lands the body in `data` as text; parse it.\nif (!r.orders && typeof r.data === 'string') { try { r = JSON.parse(r.data); } catch (e) {} }\n// update-hs-deal answers { message, source, orders: [{ <hs_deal_id>: <e_sorder_id> }] }.\nconst pairs = [];\nfor (const o of (Array.isArray(r.orders) ? r.orders : [])) {\n  for (const [dealId, soId] of Object.entries(o || {})) pairs.push([String(dealId), String(soId)]);\n}\nconst base = (id) => String(id || '').split('.')[0].toUpperCase();\nconst hit = pairs.find((p) => p[1] === v.eSorderId) || pairs.find((p) => base(p[1]) === base(v.eSorderId)) || (pairs.length === 1 ? pairs[0] : null);\nconst hubspotSync = r.error ? { ok: false, error: String(r.error) } : { ok: true, orders: r.orders || null };\nreturn [{ json: { statusCode: 200, body: {\n  success: true,\n  e_sorder_id: v.eSorderId,\n  order_id: v.eSorderId.split('.')[0],\n  previous_status: c.previousStatus,\n  status: 'Cancel',\n  hs_deal_id: hit ? hit[0] : '',\n  hubspot_sync: hubspotSync,\n} } }];\n"
+        "jsCode": "const c = $('Check status').first().json;\nconst v = { eSorderId: c.eSorderId };\nlet r = $('Trigger HubSpot deal sync').first().json || {};\n// A non-JSON content type lands the body in `data` as text; parse it.\nif (!r.orders && typeof r.data === 'string') { try { r = JSON.parse(r.data); } catch (e) {} }\n// update-hs-deal answers { message, source, orders: [{ <hs_deal_id>: <e_sorder_id> }] }.\nconst pairs = [];\nfor (const o of (Array.isArray(r.orders) ? r.orders : [])) {\n  for (const [dealId, soId] of Object.entries(o || {})) pairs.push([String(dealId), String(soId)]);\n}\nconst base = (id) => String(id || '').split('.')[0].toUpperCase();\nconst hit = pairs.find((p) => p[1] === v.eSorderId) || pairs.find((p) => base(p[1]) === base(v.eSorderId)) || (pairs.length === 1 ? pairs[0] : null);\nconst hubspotSync = r.error ? { ok: false, error: String(r.error) } : { ok: true, orders: r.orders || null };\n// The lost reason on the deal (HubSpot: closed lost). A failure never fails\n// the cancel; the page shows it as a warning.\nconst lost = $('HubSpot: closed lost').first().json || {};\nconst lostSaved = lost.error ? { ok: false, error: String(lost.error) + ' ' + JSON.stringify(lost.message || '').substring(0, 300) } : { ok: true };\nreturn [{ json: { statusCode: 200, body: {\n  success: true,\n  e_sorder_id: v.eSorderId,\n  order_id: v.eSorderId.split('.')[0],\n  previous_status: c.previousStatus,\n  status: 'Cancel',\n  hs_deal_id: hit ? hit[0] : '',\n  hubspot_sync: hubspotSync,\n  lost_reason_saved: lostSaved,\n} } }];\n"
       },
       "id": "4f18d16c-342a-5d08-8ba0-d51ce77164f5",
       "name": "Final",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2400,
+        2640,
         0
       ]
     },
@@ -312,6 +312,32 @@
         2040,
         640
       ]
+    },
+    {
+      "parameters": {
+        "resource": "objects",
+        "objectType": "0-3",
+        "operation": "batchUpdate",
+        "batchUpdateBody": "={{ { inputs: [{ id: $('Check status').first().json.eSorderId, idProperty: 'e_sorder_id', properties: { lost_reason: $('Validate').first().json.lostReason, closed_lost_reason: $('Validate').first().json.lostDetails } }] } }}"
+      },
+      "name": "HubSpot: closed lost",
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "id": "06f83373-c603-4fc1-b566-843c19738a9a",
+      "position": [
+        2400,
+        0
+      ],
+      "credentials": {
+        "hubspotApi": {
+          "id": "4HKK5aFFmTGesa3H",
+          "name": "HubSpot account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     }
   ],
   "connections": {
@@ -439,7 +465,7 @@
       "main": [
         [
           {
-            "node": "Final",
+            "node": "HubSpot: closed lost",
             "type": "main",
             "index": 0
           }
@@ -484,6 +510,17 @@
         [
           {
             "node": "Trigger HubSpot deal sync",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: closed lost": {
+      "main": [
+        [
+          {
+            "node": "Final",
             "type": "main",
             "index": 0
           }

@@ -38,7 +38,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Expected body:\n// { bill_to_id, ship_to_id, ship_branch, price_branch, order_status,\n//   ship_via, ship_date, required_date, po, release, internal_notes,\n//   shipping_instructions, freight_in, writer, outside_sales, email,\n//   lines: [{ productId, quantity, um?, umQuantity?, unitPrice?, comments?, ship_branch? }],\n//   custom_lines: [{ line_number, name, ideal_sku, quantity, unit_price, est_cogs,\n//                    variation_of: { product_id, description, serial_number } | null,\n//                    customizations: [string], ship_branch? }] }\n// ship_branch on a line (2026-10-19): the branch that line ships from. Lines\n// on other branches than the header's go on their own generation, one per\n// branch (Build order / Plan splits). Blank → the header's ship_branch.\n// Custom lines (2026-10-19, on request) go to Eclipse as product 15680, the\n// free-text \"ITEM:\" product, with their text in the line comment (Eclipse\n// names every 15680 line \"ITEM:\", so the name goes in the comment too).\nconst CUSTOM_PRODUCT_ID = 15680;\nconst b = $input.first().json.body || {};\nconst branchOf = (v) => { const m = String(v == null ? '' : v).trim().match(/^(\\d+)/); return m ? m[1] : ''; };\nconst headBranch = branchOf(b.ship_branch);\nconst regular = (Array.isArray(b.lines) ? b.lines : [])\n  .map((l) => ({\n    productId: Number(l.productId),\n    quantity: Math.round(Number(l.quantity) || 0),\n    um: l.um || 'ea',\n    umQuantity: Number(l.umQuantity) || 1,\n    unitPrice: l.unitPrice != null && l.unitPrice !== '' ? Number(l.unitPrice) : null,\n    // Line comment, sent to Eclipse as lineItemProduct.comments.\n    comments: String(l.comments == null ? '' : l.comments).trim(),\n    branch: branchOf(l.ship_branch) || headBranch,\n  }))\n  .filter((l) => l.productId && l.quantity > 0);\n// A custom line's comment (2026-10-22, on request): Suggested name: '<name>',\n// Variation of product: '.<id>', then SKU, serial number and one\n// customization per line.\nconst customComment = (c) => {\n  const out = [\"Suggested name: '\" + String(c.name || '').trim() + \"'\"];\n  const v = c.variation_of;\n  if (v && v.product_id) out.push(\"Variation of product: '.\" + String(v.product_id).trim() + \"'\");\n  if (String(c.ideal_sku || '').trim()) out.push('SKU: ' + String(c.ideal_sku).trim());\n  if (v && v.product_id && v.serial_number) out.push('SN: ' + String(v.serial_number).trim());\n  for (const x of (Array.isArray(c.customizations) ? c.customizations : [])) if (String(x).trim()) out.push(String(x).trim());\n  return out.filter(Boolean).join('\\n');\n};\nconst custom = (Array.isArray(b.custom_lines) ? b.custom_lines : [])\n  .filter((c) => String(c.name || '').trim())\n  .map((c) => ({\n    productId: CUSTOM_PRODUCT_ID,\n    quantity: Math.round(Number(c.quantity) || 0),\n    um: 'ea',\n    umQuantity: 1,\n    unitPrice: isFinite(Number(c.unit_price)) && c.unit_price !== '' && c.unit_price != null ? Number(c.unit_price) : 0,\n    comments: customComment(c),\n    branch: branchOf(c.ship_branch) || headBranch,\n    lineNumber: Math.round(Number(c.line_number) || 0),\n  }))\n  .filter((c) => c.quantity > 0);\n// Page order: each custom line at its line_number (1-based among all sent\n// lines), the regular lines filling the other places in their own order.\nconst total = regular.length + custom.length;\nconst slots = new Array(total).fill(null);\nconst late = [];\nfor (const c of custom) {\n  const i = c.lineNumber - 1;\n  if (i >= 0 && i < total && !slots[i]) slots[i] = c; else late.push(c);\n}\nlet ri = 0;\nfor (let i = 0; i < total; i++) if (!slots[i]) slots[i] = ri < regular.length ? regular[ri++] : late.shift();\nconst lines = slots.filter(Boolean).map(({ lineNumber, ...l }) => l);\nconst fail = (msg) => [{ json: { ok: false, statusCode: 400, body: { success: false, error: msg, step: 'validate' } } }];\nif (!b.bill_to_id) return fail('Missing bill_to_id');\nif (!b.ship_to_id) return fail('Missing ship_to_id');\nif (!b.writer) return fail('Missing writer (e_user_id)');\nif (!lines.length) return fail('Add at least one line with a quantity.');\n// Freight in, dollars; blank, invalid or negative → 0 (not sent).\nconst freight = Number(b.freight_in);\nconst isoDate = (v) => /^\\d{4}-\\d{2}-\\d{2}$/.test(String(v || '')) ? String(v) : '';\nreturn [{ json: { ok: true, input: {\n  billToId: String(b.bill_to_id), shipToId: String(b.ship_to_id),\n  shipBranch: headBranch, priceBranch: String(b.price_branch || ''),\n  orderStatus: String(b.order_status || 'Bid'), shipVia: String(b.ship_via || ''),\n  shipDate: isoDate(b.ship_date), requiredDate: isoDate(b.required_date),\n  po: String(b.po || ''), release: String(b.release || ''),\n  internalNotes: String(b.internal_notes || ''), shippingInstructions: String(b.shipping_instructions || ''),\n  writer: String(b.writer).toUpperCase(), outsideSales: String(b.outside_sales || ''),\n  email: String(b.email || ''), lines,\n  freightIn: isFinite(freight) && freight > 0 ? Math.round(freight * 100) / 100 : 0,\n} } }];\n"
+        "jsCode": "// Expected body:\n// { bill_to_id, ship_to_id, ship_branch, price_branch, order_status,\n//   ship_via, ship_date, required_date, po, release, internal_notes,\n//   shipping_instructions, freight_in, writer, outside_sales, email,\n//   lines: [{ productId, quantity, um?, umQuantity?, unitPrice?, original_price?, comments?, ship_branch? }],\n//   custom_lines: [{ line_number, name, ideal_sku, quantity, unit_price, est_cogs,\n//                    variation_of: { product_id, description, serial_number } | null,\n//                    customizations: [string], ship_branch? }] }\n// ship_branch on a line (2026-10-19): the branch that line ships from. Lines\n// on other branches than the header's go on their own generation, one per\n// branch (Build order / Plan splits). Blank → the header's ship_branch.\n// original_price (2026-10-29): the price before the rep changed it, for\n// price_change_record on the HubSpot line item (Price records).\n// Custom lines (2026-10-19, on request) go to Eclipse as product 15680, the\n// free-text \"ITEM:\" product, with their text in the line comment (Eclipse\n// names every 15680 line \"ITEM:\", so the name goes in the comment too).\nconst CUSTOM_PRODUCT_ID = 15680;\nconst b = $input.first().json.body || {};\nconst branchOf = (v) => { const m = String(v == null ? '' : v).trim().match(/^(\\d+)/); return m ? m[1] : ''; };\nconst headBranch = branchOf(b.ship_branch);\nconst regular = (Array.isArray(b.lines) ? b.lines : [])\n  .map((l) => ({\n    productId: Number(l.productId),\n    quantity: Math.round(Number(l.quantity) || 0),\n    um: l.um || 'ea',\n    umQuantity: Number(l.umQuantity) || 1,\n    unitPrice: l.unitPrice != null && l.unitPrice !== '' ? Number(l.unitPrice) : null,\n    originalPrice: l.original_price != null && l.original_price !== '' && isFinite(Number(l.original_price)) ? Number(l.original_price) : null,\n    // Line comment, sent to Eclipse as lineItemProduct.comments.\n    comments: String(l.comments == null ? '' : l.comments).trim(),\n    branch: branchOf(l.ship_branch) || headBranch,\n  }))\n  .filter((l) => l.productId && l.quantity > 0);\n// A custom line's comment (2026-10-22, on request): Suggested name: '<name>',\n// Variation of product: '.<id>', then SKU, serial number and one\n// customization per line.\nconst customComment = (c) => {\n  const out = [\"Suggested name: '\" + String(c.name || '').trim() + \"'\"];\n  const v = c.variation_of;\n  if (v && v.product_id) out.push(\"Variation of product: '.\" + String(v.product_id).trim() + \"'\");\n  if (String(c.ideal_sku || '').trim()) out.push('SKU: ' + String(c.ideal_sku).trim());\n  if (v && v.product_id && v.serial_number) out.push('SN: ' + String(v.serial_number).trim());\n  for (const x of (Array.isArray(c.customizations) ? c.customizations : [])) if (String(x).trim()) out.push(String(x).trim());\n  return out.filter(Boolean).join('\\n');\n};\nconst custom = (Array.isArray(b.custom_lines) ? b.custom_lines : [])\n  .filter((c) => String(c.name || '').trim())\n  .map((c) => ({\n    productId: CUSTOM_PRODUCT_ID,\n    quantity: Math.round(Number(c.quantity) || 0),\n    um: 'ea',\n    umQuantity: 1,\n    unitPrice: isFinite(Number(c.unit_price)) && c.unit_price !== '' && c.unit_price != null ? Number(c.unit_price) : 0,\n    comments: customComment(c),\n    branch: branchOf(c.ship_branch) || headBranch,\n    lineNumber: Math.round(Number(c.line_number) || 0),\n  }))\n  .filter((c) => c.quantity > 0);\n// Page order: each custom line at its line_number (1-based among all sent\n// lines), the regular lines filling the other places in their own order.\nconst total = regular.length + custom.length;\nconst slots = new Array(total).fill(null);\nconst late = [];\nfor (const c of custom) {\n  const i = c.lineNumber - 1;\n  if (i >= 0 && i < total && !slots[i]) slots[i] = c; else late.push(c);\n}\nlet ri = 0;\nfor (let i = 0; i < total; i++) if (!slots[i]) slots[i] = ri < regular.length ? regular[ri++] : late.shift();\nconst lines = slots.filter(Boolean).map(({ lineNumber, ...l }) => l);\nconst fail = (msg) => [{ json: { ok: false, statusCode: 400, body: { success: false, error: msg, step: 'validate' } } }];\nif (!b.bill_to_id) return fail('Missing bill_to_id');\nif (!b.ship_to_id) return fail('Missing ship_to_id');\nif (!b.writer) return fail('Missing writer (e_user_id)');\nif (!lines.length) return fail('Add at least one line with a quantity.');\n// Freight in, dollars; blank, invalid or negative → 0 (not sent).\nconst freight = Number(b.freight_in);\nconst isoDate = (v) => /^\\d{4}-\\d{2}-\\d{2}$/.test(String(v || '')) ? String(v) : '';\nreturn [{ json: { ok: true, input: {\n  billToId: String(b.bill_to_id), shipToId: String(b.ship_to_id),\n  shipBranch: headBranch, priceBranch: String(b.price_branch || ''),\n  orderStatus: String(b.order_status || 'Bid'), shipVia: String(b.ship_via || ''),\n  shipDate: isoDate(b.ship_date), requiredDate: isoDate(b.required_date),\n  po: String(b.po || ''), release: String(b.release || ''),\n  internalNotes: String(b.internal_notes || ''), shippingInstructions: String(b.shipping_instructions || ''),\n  writer: String(b.writer).toUpperCase(), outsideSales: String(b.outside_sales || ''),\n  email: String(b.email || ''), lines,\n  freightIn: isFinite(freight) && freight > 0 ? Math.round(freight * 100) / 100 : 0,\n} } }];\n"
       },
       "id": "c0d1c297-0732-565b-9d02-4d365e4b14ac",
       "name": "Validate",
@@ -129,7 +129,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Field names follow the post_sorder() reference script. Rep-entered\n// values win; customer defaults fill the gaps.\nconst inp = $('Validate').first().json.input;\nconst billEnv = $('Eclipse: get bill-to').first().json;\nconst shipEnv = $input.first().json;\nconst fail = (msg, step) => [{ json: { ok: false, statusCode: 502, body: { success: false, error: msg, step } } }];\nif (billEnv.error) return fail('Eclipse bill-to lookup failed: ' + billEnv.error + ' ' + JSON.stringify(billEnv.message || ''), 'getBillTo');\nif (shipEnv.error) return fail('Eclipse ship-to lookup failed: ' + shipEnv.error + ' ' + JSON.stringify(shipEnv.message || ''), 'getShipTo');\nconst bill = (Array.isArray(billEnv.results) ? billEnv.results[0] : billEnv) || {};\nconst ship = (Array.isArray(shipEnv.results) ? shipEnv.results[0] : shipEnv) || {};\nif (!bill.id) return fail('Eclipse customer ' + inp.billToId + ' not found.', 'getBillTo');\nif (!ship.id) return fail('Eclipse customer ' + inp.shipToId + ' not found.', 'getShipTo');\nif (bill.isBillTo === false) return fail('Customer ' + bill.id + ' is not a Bill-To customer.', 'validate');\nif (ship.isShipTo === false) return fail('Customer ' + ship.id + ' is not a Ship-To customer.', 'validate');\n\nconst val = (v) => (v && typeof v === 'object') ? (v.id || v.code || v.name || '') : (v == null ? '' : String(v));\n// Defaults when the page sends blank dates: ship today, required 7 days\n// out, pushed to Monday if that lands on a weekend.\nconst ymd = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');\nconst today = new Date();\nconst req = new Date(); req.setDate(req.getDate() + 7);\nif (req.getDay() === 6) req.setDate(req.getDate() + 2);\nelse if (req.getDay() === 0) req.setDate(req.getDate() + 1);\nconst homeBranch = val(bill.homeBranch);\nconst headBranch = inp.shipBranch || homeBranch;\n\nconst lineItem = (l) => {\n  const p = { productId: l.productId, quantity: l.quantity, um: l.um, umQuantity: l.umQuantity };\n  if (l.unitPrice != null && isFinite(l.unitPrice)) p.unitPrice = l.unitPrice;\n  // Line comment, with commentsId '1' as in the user's lineItemProduct\n  // sample (UNVERIFIED what other ids mean; exports show commentTypeId '1').\n  if (l.comments) { p.comments = l.comments; p.commentsId = '1'; }\n  return { lineItemProduct: p };\n};\n// One generation per ship branch (2026-10-19): the order is created with\n// the header branch's lines (or, when no line ships from it, the first\n// line's branch); every other branch becomes its own generation after the\n// create (Plan splits → Create Shipment → POST /LineItems).\nconst groups = [];\nfor (const l of inp.lines) {\n  const br = l.branch || headBranch;\n  let g = groups.find((x) => x.branch === br);\n  if (!g) { g = { branch: br, lines: [] }; groups.push(g); }\n  g.lines.push(l);\n}\nconst first = groups.find((g) => g.branch === headBranch) || groups[0];\nconst extras = groups.filter((g) => g !== first).map((g) => ({ branch: g.branch, items: g.lines.map(lineItem) }));\n\nconst order = {\n  priceBranch: inp.priceBranch || homeBranch,\n  shipBranch: first.branch,\n  billToCustomer: bill.id,\n  shipToCustomer: ship.id,\n  orderStatus: inp.orderStatus,\n  salesSource: val(bill.salesSourceOverride) || 'Default Sales', // bill-to's, else 'Default Sales'\n  shipDate: inp.shipDate || ymd(today),\n  requiredDate: inp.requiredDate || ymd(req),\n  customerPONumber: inp.po || val(bill.defaultPoNumber),\n  customerReleaseNumber: inp.release,\n  insideSalesPerson: '',\n  outsideSalesPerson: inp.outsideSales || val(bill.outsideSalesperson) || 'WIHOUSE',\n  writer: inp.writer,\n  orderType: 'MOE',\n  email: inp.email,\n  street1: ship.addressLine1 || '',\n  street2: ship.addressLine2 || '',\n  city: ship.city || '',\n  state: ship.state || '',\n  postalCode: ship.postalCode || '',\n  country: ship.countryCode || '',\n  internalNotes: inp.internalNotes,\n  shippingInstructions: inp.shippingInstructions,\n  shipIds: [ship.id],\n  lines: first.lines.map(lineItem),\n};\n// Ship via only when the rep picked one (a bid may leave it blank); no\n// customer-default fallback, Eclipse decides what a missing shipVia means.\nif (inp.shipVia) order.shipVia = inp.shipVia;\n// Freight in from the page's totals box, as Eclipse's freightCharges (the\n// only freight field in the post_sorder() reference body). UNVERIFIED that\n// Eclipse books it as freight in (freightInBillable) and not freight out.\nif (inp.freightIn > 0) order.freightCharges = inp.freightIn;\n// Terms from the bill-to; left out when the bill-to has none.\nif (val(bill.defaultTerms)) order.termsCode = val(bill.defaultTerms);\nreturn [{ json: { ok: true, order, extras } }];\n"
+        "jsCode": "// Field names follow the post_sorder() reference script. Rep-entered\n// values win; customer defaults fill the gaps.\nconst inp = $('Validate').first().json.input;\nconst billEnv = $('Eclipse: get bill-to').first().json;\nconst shipEnv = $input.first().json;\nconst fail = (msg, step) => [{ json: { ok: false, statusCode: 502, body: { success: false, error: msg, step } } }];\nif (billEnv.error) return fail('Eclipse bill-to lookup failed: ' + billEnv.error + ' ' + JSON.stringify(billEnv.message || ''), 'getBillTo');\nif (shipEnv.error) return fail('Eclipse ship-to lookup failed: ' + shipEnv.error + ' ' + JSON.stringify(shipEnv.message || ''), 'getShipTo');\nconst bill = (Array.isArray(billEnv.results) ? billEnv.results[0] : billEnv) || {};\nconst ship = (Array.isArray(shipEnv.results) ? shipEnv.results[0] : shipEnv) || {};\nif (!bill.id) return fail('Eclipse customer ' + inp.billToId + ' not found.', 'getBillTo');\nif (!ship.id) return fail('Eclipse customer ' + inp.shipToId + ' not found.', 'getShipTo');\nif (bill.isBillTo === false) return fail('Customer ' + bill.id + ' is not a Bill-To customer.', 'validate');\nif (ship.isShipTo === false) return fail('Customer ' + ship.id + ' is not a Ship-To customer.', 'validate');\n\nconst val = (v) => (v && typeof v === 'object') ? (v.id || v.code || v.name || '') : (v == null ? '' : String(v));\n// Defaults when the page sends blank dates: ship today, required 7 days\n// out, pushed to Monday if that lands on a weekend.\nconst ymd = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');\nconst today = new Date();\nconst req = new Date(); req.setDate(req.getDate() + 7);\nif (req.getDay() === 6) req.setDate(req.getDate() + 2);\nelse if (req.getDay() === 0) req.setDate(req.getDate() + 1);\nconst homeBranch = val(bill.homeBranch);\nconst headBranch = inp.shipBranch || homeBranch;\n\nconst lineItem = (l) => {\n  const p = { productId: l.productId, quantity: l.quantity, um: l.um, umQuantity: l.umQuantity };\n  if (l.unitPrice != null && isFinite(l.unitPrice)) p.unitPrice = l.unitPrice;\n  // Line comment, with commentsId '1' as in the user's lineItemProduct\n  // sample (UNVERIFIED what other ids mean; exports show commentTypeId '1').\n  if (l.comments) { p.comments = l.comments; p.commentsId = '1'; }\n  return { lineItemProduct: p };\n};\n// One generation per ship branch (2026-10-19): the order is created with\n// the header branch's lines (or, when no line ships from it, the first\n// line's branch); every other branch becomes its own generation after the\n// create (Plan splits → Create Shipment → POST /LineItems).\nconst groups = [];\nfor (const l of inp.lines) {\n  const br = l.branch || headBranch;\n  let g = groups.find((x) => x.branch === br);\n  if (!g) { g = { branch: br, lines: [] }; groups.push(g); }\n  g.lines.push(l);\n}\nconst first = groups.find((g) => g.branch === headBranch) || groups[0];\n// Price changes for price_change_record, one per line (null when the rep\n// did not change the price), in the same order as the line items.\nconst record = (l) => (l.originalPrice != null && l.unitPrice != null && isFinite(l.unitPrice) &&\n  Math.abs(l.originalPrice - l.unitPrice) >= 0.0005 ? { from: l.originalPrice, to: l.unitPrice } : null);\nconst extras = groups.filter((g) => g !== first).map((g) => ({ branch: g.branch, items: g.lines.map(lineItem), records: g.lines.map(record) }));\n\nconst order = {\n  priceBranch: inp.priceBranch || homeBranch,\n  shipBranch: first.branch,\n  billToCustomer: bill.id,\n  shipToCustomer: ship.id,\n  orderStatus: inp.orderStatus,\n  salesSource: val(bill.salesSourceOverride) || 'Default Sales', // bill-to's, else 'Default Sales'\n  shipDate: inp.shipDate || ymd(today),\n  requiredDate: inp.requiredDate || ymd(req),\n  customerPONumber: inp.po || val(bill.defaultPoNumber),\n  customerReleaseNumber: inp.release,\n  insideSalesPerson: '',\n  outsideSalesPerson: inp.outsideSales || val(bill.outsideSalesperson) || 'WIHOUSE',\n  writer: inp.writer,\n  orderType: 'MOE',\n  email: inp.email,\n  street1: ship.addressLine1 || '',\n  street2: ship.addressLine2 || '',\n  city: ship.city || '',\n  state: ship.state || '',\n  postalCode: ship.postalCode || '',\n  country: ship.countryCode || '',\n  internalNotes: inp.internalNotes,\n  shippingInstructions: inp.shippingInstructions,\n  shipIds: [ship.id],\n  lines: first.lines.map(lineItem),\n};\n// Ship via only when the rep picked one (a bid may leave it blank); no\n// customer-default fallback, Eclipse decides what a missing shipVia means.\nif (inp.shipVia) order.shipVia = inp.shipVia;\n// Freight in from the page's totals box, as Eclipse's freightCharges (the\n// only freight field in the post_sorder() reference body). UNVERIFIED that\n// Eclipse books it as freight in (freightInBillable) and not freight out.\nif (inp.freightIn > 0) order.freightCharges = inp.freightIn;\n// Terms from the bill-to; left out when the bill-to has none.\nif (val(bill.defaultTerms)) order.termsCode = val(bill.defaultTerms);\nreturn [{ json: { ok: true, order, extras, records: first.lines.map(record) } }];\n"
       },
       "id": "3e3d9774-309c-5c82-bcb7-5c7dc949d848",
       "name": "Build order",
@@ -320,7 +320,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// The generations Create Shipment made, one per extra ship branch, and the\n// calls that fill them: their lines, plus ship via, shipping instructions\n// and internal notes copied from the order (UNVERIFIED whether Create\n// Shipment copies these itself; setting them again is harmless).\nconst c = $('Check order').first().json;\nconst b = $('Build order').first().json;\nconst o = b.order;\nconst pad = (g) => String(g).padStart(4, '0');\n// The new generation's id from a Create Shipment answer. v1 read\n// generationId at the top level; a { results: [order] } answer (the shape of\n// SO Create) is handled too, taking the highest generation on that branch.\nconst shipmentGenId = (res, branch) => {\n  if (!res || typeof res !== 'object') return '';\n  const direct = res.generationId || res.generationID;\n  if (direct) return String(Number(direct));\n  const r0 = Array.isArray(res.results) ? res.results[0] : null;\n  if (!r0) return '';\n  if (r0.generationId) return String(Number(r0.generationId));\n  const gens = (Array.isArray(r0.generations) ? r0.generations : [])\n    .filter((g) => String(g.shipBranch) === String(branch) && String(g.status) !== 'Cancel');\n  const ids = gens.map((g) => Number(g.generationId)).filter((n) => n > 0).sort((a, b) => b - a);\n  return ids.length ? String(ids[0]) : '';\n};\nconst shipments = $input.all();\nconst gens = [];\nconst empty = { posts: [], qty: [], prices: [], deletes: [], shipVia: [], shipDate: [], instructions: [], notes: [], status: [], cancels: [] };\nfor (let i = 0; i < b.extras.length; i++) {\n  const g = b.extras[i];\n  const res = shipments[i] ? shipments[i].json : null;\n  const gid = res && !res.error ? shipmentGenId(res, g.branch) : '';\n  if (!gid) {\n    const why = !res ? 'no response' : res.error ? res.error + ' ' + JSON.stringify(res.message || '').substring(0, 500)\n      : 'no generation id in ' + JSON.stringify(res).substring(0, 300);\n    return [{ json: { ok: false, gens, step: 'createShipment',\n      error: 'The lines for branch ' + b.extras.slice(i).map((x) => x.branch).join(', ') + ' could not be added: Eclipse Create Shipment failed (' + why + ').' } }];\n  }\n  gens.push({ branch: g.branch, generationId: gid, orderId: c.orderId + '.' + pad(gid), items: g.items });\n}\nconst each = (value) => (value ? gens.map((g) => ({ orderId: g.orderId, value })) : []);\nconst ops = Object.assign({}, empty, {\n  posts: gens.map((g) => ({ orderId: g.orderId, items: g.items })),\n  shipVia: each(o.shipVia || ''),\n  instructions: each(String(o.shippingInstructions || '').trim()),\n  notes: each(String(o.internalNotes || '').trim()),\n});\nconst has = {};\nfor (const k of Object.keys(ops)) has[k] = ops[k].length > 0;\nreturn [{ json: { ok: true, gens, ops, has, changes: { generations: gens.map((g) => ({ e_sorder_id: g.orderId, ship_branch: g.branch, lines: g.items.length })) } } }];\n"
+        "jsCode": "// The generations Create Shipment made, one per extra ship branch, and the\n// calls that fill them: their lines, plus ship via, shipping instructions\n// and internal notes copied from the order (UNVERIFIED whether Create\n// Shipment copies these itself; setting them again is harmless).\nconst c = $('Check order').first().json;\nconst b = $('Build order').first().json;\nconst o = b.order;\nconst pad = (g) => String(g).padStart(4, '0');\n// The new generation's id from a Create Shipment answer. v1 read\n// generationId at the top level; a { results: [order] } answer (the shape of\n// SO Create) is handled too, taking the highest generation on that branch.\nconst shipmentGenId = (res, branch) => {\n  if (!res || typeof res !== 'object') return '';\n  const direct = res.generationId || res.generationID;\n  if (direct) return String(Number(direct));\n  const r0 = Array.isArray(res.results) ? res.results[0] : null;\n  if (!r0) return '';\n  if (r0.generationId) return String(Number(r0.generationId));\n  const gens = (Array.isArray(r0.generations) ? r0.generations : [])\n    .filter((g) => String(g.shipBranch) === String(branch) && String(g.status) !== 'Cancel');\n  const ids = gens.map((g) => Number(g.generationId)).filter((n) => n > 0).sort((a, b) => b - a);\n  return ids.length ? String(ids[0]) : '';\n};\nconst shipments = $input.all();\nconst gens = [];\nconst empty = { posts: [], qty: [], prices: [], deletes: [], shipVia: [], shipDate: [], instructions: [], notes: [], status: [], cancels: [] };\nfor (let i = 0; i < b.extras.length; i++) {\n  const g = b.extras[i];\n  const res = shipments[i] ? shipments[i].json : null;\n  const gid = res && !res.error ? shipmentGenId(res, g.branch) : '';\n  if (!gid) {\n    const why = !res ? 'no response' : res.error ? res.error + ' ' + JSON.stringify(res.message || '').substring(0, 500)\n      : 'no generation id in ' + JSON.stringify(res).substring(0, 300);\n    return [{ json: { ok: false, gens, step: 'createShipment',\n      error: 'The lines for branch ' + b.extras.slice(i).map((x) => x.branch).join(', ') + ' could not be added: Eclipse Create Shipment failed (' + why + ').' } }];\n  }\n  gens.push({ branch: g.branch, generationId: gid, orderId: c.orderId + '.' + pad(gid), items: g.items, records: g.records || [] });\n}\nconst each = (value) => (value ? gens.map((g) => ({ orderId: g.orderId, value })) : []);\nconst ops = Object.assign({}, empty, {\n  posts: gens.map((g) => ({ orderId: g.orderId, items: g.items })),\n  shipVia: each(o.shipVia || ''),\n  instructions: each(String(o.shippingInstructions || '').trim()),\n  notes: each(String(o.internalNotes || '').trim()),\n});\nconst has = {};\nfor (const k of Object.keys(ops)) has[k] = ops[k].length > 0;\nreturn [{ json: { ok: true, gens, ops, has, changes: { generations: gens.map((g) => ({ e_sorder_id: g.orderId, ship_branch: g.branch, lines: g.items.length })) } } }];\n"
       },
       "name": "Resolve",
       "type": "n8n-nodes-base.code",
@@ -401,14 +401,14 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const c = $('Check order').first().json;\nconst s = $('Sync list').first().json;\nconst b = $('Build order').first().json;\nlet r = $input.first().json || {};\n// A non-JSON content type lands the body in `data` as text; parse it.\nif (!r.orders && typeof r.data === 'string') { try { r = JSON.parse(r.data); } catch (e) {} }\n// update-hs-deal answers { message, source, orders: [{ <hs_deal_id>: <e_sorder_id> }] }\n// (verified 2026-10-17); pick the deal whose order id is the one just created\n// (exact, or same order ignoring the gen suffix), else the only deal returned.\nconst pairs = [];\nfor (const o of (Array.isArray(r.orders) ? r.orders : [])) {\n  for (const [dealId, soId] of Object.entries(o || {})) pairs.push([String(dealId), String(soId)]);\n}\nconst base = (id) => String(id || '').split('.')[0].toUpperCase();\nconst hit = pairs.find((p) => p[1] === c.e_sorder_id) || pairs.find((p) => base(p[1]) === base(c.e_sorder_id)) || (pairs.length === 1 ? pairs[0] : null);\nconst hsDealId = hit ? hit[0] : '';\nreturn [{ json: { statusCode: 200, body: {\n  success: true,\n  e_sorder_id: c.e_sorder_id,\n  order_id: c.orderId,\n  // Every generation placed (one per ship branch), first one first.\n  e_sorder_ids: s.e_sorder_ids,\n  generations: [{ e_sorder_id: c.e_sorder_id, ship_branch: b.order.shipBranch }]\n    .concat((s.gens || []).map((g) => ({ e_sorder_id: g.orderId, ship_branch: g.branch }))),\n  // Set when a generation for another ship branch could not be finished.\n  warning: s.warning || '',\n  hs_deal_id: hsDealId,\n  // orders: what update-hs-deal returned, kept for troubleshooting a missing deal link.\n  hubspot_sync: r.error ? { ok: false, error: String(r.error) } : { ok: true, orders: r.orders || null },\n} } }];\n"
+        "jsCode": "const c = $('Check order').first().json;\nconst s = $('Sync list').first().json;\nconst b = $('Build order').first().json;\nlet r = $('Trigger HubSpot deal sync').first().json || {};\n// A non-JSON content type lands the body in `data` as text; parse it.\nif (!r.orders && typeof r.data === 'string') { try { r = JSON.parse(r.data); } catch (e) {} }\n// update-hs-deal answers { message, source, orders: [{ <hs_deal_id>: <e_sorder_id> }] }\n// (verified 2026-10-17); pick the deal whose order id is the one just created\n// (exact, or same order ignoring the gen suffix), else the only deal returned.\nconst pairs = [];\nfor (const o of (Array.isArray(r.orders) ? r.orders : [])) {\n  for (const [dealId, soId] of Object.entries(o || {})) pairs.push([String(dealId), String(soId)]);\n}\nconst base = (id) => String(id || '').split('.')[0].toUpperCase();\nconst hit = pairs.find((p) => p[1] === c.e_sorder_id) || pairs.find((p) => base(p[1]) === base(c.e_sorder_id)) || (pairs.length === 1 ? pairs[0] : null);\nconst hsDealId = hit ? hit[0] : '';\n// price_change_record on the HubSpot line items (Price records).\nconst pr = $('Price records').first().json;\nlet priceRecords = { ok: true, sent: pr.count };\nif (pr.count) {\n  const h = $('HubSpot: price change records').first().json || {};\n  if (h.error) priceRecords = { ok: false, sent: pr.count, error: String(h.error) + ' ' + JSON.stringify(h.message || '').substring(0, 300) };\n}\nreturn [{ json: { statusCode: 200, body: {\n  success: true,\n  e_sorder_id: c.e_sorder_id,\n  order_id: c.orderId,\n  // Every generation placed (one per ship branch), first one first.\n  e_sorder_ids: s.e_sorder_ids,\n  generations: [{ e_sorder_id: c.e_sorder_id, ship_branch: b.order.shipBranch }]\n    .concat((s.gens || []).map((g) => ({ e_sorder_id: g.orderId, ship_branch: g.branch }))),\n  // Set when a generation for another ship branch could not be finished.\n  warning: s.warning || '',\n  hs_deal_id: hsDealId,\n  // orders: what update-hs-deal returned, kept for troubleshooting a missing deal link.\n  hubspot_sync: r.error ? { ok: false, error: String(r.error) } : { ok: true, orders: r.orders || null },\n  price_records: priceRecords,\n} } }];\n"
       },
       "id": "535e130b-7e4b-5fa2-aed7-7aede20a885b",
       "name": "Final",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        5040,
+        5760,
         0
       ]
     },
@@ -425,7 +425,7 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        5280,
+        6000,
         0
       ]
     },
@@ -946,6 +946,78 @@
         4560,
         624
       ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// price_change_record on the HubSpot line items whose price the rep changed\n// (2026-10-29): \"<WRITER>|<old price>|<new price>\", e.g. BECCHR|15.00|12.00.\n// Runs after the deal sync, which makes the line items; each is found by its\n// e_sorder_line_id, \"<generation>.<Eclipse line id>\" (e.g. S2740887.0001.3).\n// The line ids come from Eclipse's answers: SO Create for the first\n// generation, POST /LineItems (the whole order) for each other branch's.\nconst writer = $('Validate').first().json.input.writer;\nconst b = $('Build order').first().json;\nconst c = $('Check order').first().json;\nconst fmt = (n) => {\n  const r = Math.round(Number(n) * 10000) / 10000;\n  return r.toFixed(Math.max(2, (String(r).split('.')[1] || '').length));\n};\nconst inputs = [];\nconst add = (orderId, lineId, x) => inputs.push({\n  id: orderId + '.' + lineId, idProperty: 'e_sorder_line_id',\n  properties: { price_change_record: writer + '|' + fmt(x.from) + '|' + fmt(x.to) },\n});\n// The lines an add-lines answer (the whole order) has on a generation that\n// were not on the order before, in line id order, matched to the posted\n// items in turn by product. A posted item with no match is skipped.\nconst matchPosted = (answer, orderId, items, records, before) => {\n  if (!records.some(Boolean)) return;\n  const so = answer && !answer.error ? (Array.isArray(answer.results) ? answer.results[0] : answer) : null;\n  if (!so || !Array.isArray(so.lines)) return;\n  const genId = String(Number(orderId.split('.')[1]));\n  const fresh = so.lines\n    .filter((l) => !before.has(String(l.lineId)) &&\n      (Array.isArray(l.generations) ? l.generations : []).some((g) => String(Number(g.generationId)) === genId))\n    .sort((a, b) => Number(a.lineId) - Number(b.lineId));\n  let k = 0;\n  items.forEach((it, j) => {\n    const pid = String(it.lineItemProduct.productId);\n    let at = -1;\n    for (let i = k; i < fresh.length; i++) if (String(fresh[i].productId) === pid) { at = i; break; }\n    if (at < 0) return;\n    k = at + 1;\n    if (records[j]) add(orderId, fresh[at].lineId, records[j]);\n  });\n};\nconst none = new Set();\nmatchPosted(c.eclipse, c.e_sorder_id, b.order.lines, b.records || [], none);\nconst ran = (n) => { try { return $(n).isExecuted; } catch (e) { return false; } };\nconst gens = ran('Resolve') ? ($('Resolve').first().json.gens || []) : [];\nconst answers = ran('Eclipse: POST /LineItems') ? $('Eclipse: POST /LineItems').all() : [];\ngens.forEach((g, i) => matchPosted(answers[i] ? answers[i].json : null, g.orderId, g.items, g.records || [], none));\nreturn [{ json: { count: inputs.length, body: { inputs } } }];\n"
+      },
+      "name": "Price records",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "e08bf82a-8fe5-474f-a254-4e12429c99bd",
+      "position": [
+        5040,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "9336d1c7-378b-411e-a46d-089fcdf620a7",
+              "leftValue": "={{ $json.count > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Has price records?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "e612913e-6c0d-4601-8ae3-c63263c1029e",
+      "position": [
+        5280,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "objects",
+        "objectType": "0-8",
+        "operation": "batchUpdate",
+        "batchUpdateBody": "={{ $json.body }}"
+      },
+      "name": "HubSpot: price change records",
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "id": "ba4f0115-58e5-480e-a29b-392761c20ba1",
+      "position": [
+        5520,
+        208
+      ],
+      "credentials": {
+        "hubspotApi": {
+          "id": "4HKK5aFFmTGesa3H",
+          "name": "HubSpot account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     }
   ],
   "connections": {
@@ -1440,7 +1512,7 @@
       "main": [
         [
           {
-            "node": "Final",
+            "node": "Price records",
             "type": "main",
             "index": 0
           }
@@ -1485,6 +1557,46 @@
         [
           {
             "node": "Trigger HubSpot deal sync",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Price records": {
+      "main": [
+        [
+          {
+            "node": "Has price records?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has price records?": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: price change records",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: price change records": {
+      "main": [
+        [
+          {
+            "node": "Final",
             "type": "main",
             "index": 0
           }

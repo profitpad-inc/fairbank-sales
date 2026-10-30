@@ -214,6 +214,24 @@
   // Credit card terms: COD.CC and COD.CO.CHECK (the user, 2026-10-28).
   var CC_TERMS = /^COD\.(CC|CO\.CHECK)$/i;
 
+  // Lost reasons for the Cancel dialog (the user, 2026-10-29), sent as
+  // lost_reason; cancel-order saves it on the HubSpot deal property
+  // lost_reason, with the details (CANCEL_DETAILS_MIN characters at least)
+  // as closed_lost_reason.
+  var LOST_REASONS = [
+    "Competitor had Better Solution",
+    "Competitor had Relationship",
+    "Decision Timeline",
+    "Duplicate",
+    "Price",
+    "Missed Deadline",
+    "Availability",
+    "Project Cancelled",
+    "Shipping Cost too High",
+    "Unresponsive",
+  ];
+  var CANCEL_DETAILS_MIN = 5;
+
   // HubSpot user property maximum_price_decrease → minimum markup on unit
   // cost (markupFloor()). 0 means cost + $0.01. Blank or anything else: 15%.
   var MARKUP_FLOORS = {
@@ -442,6 +460,7 @@
       changeLog: null,           // { orderId, loading, error, data } from order-changelog
       logNote: { text: "", busy: false, error: "" },   // change log comment box (order-changelog-comment)
       cancelAsk: false,          // "Cancel this order?" dialog open
+      cancelLost: { reason: "", details: "", tried: false },   // the Cancel dialog's lost reason and details
       sidePanel: true,           // side layout only: stock / breaks box open
       detailsModal: null,        // details layout only: { r, comment } "Line details" dialog
       notice: null,              // { text, hubspotError }: "Bid / Order placed" note after a save
@@ -1004,6 +1023,18 @@
       return a != null && m != null && a < m;
     }
 
+    // A new line's price before the rep typed one: Eclipse's price for the
+    // qty (autoPrice()), sent as original_price so create-order / update-bid
+    // can save price_change_record on the HubSpot line item (2026-10-29).
+    // Null when the rep did not change it, the price only rose to the floor
+    // on its own, or Eclipse's price is unknown. Loaded bid lines need none:
+    // update-bid takes the old price from Eclipse.
+    function originalPrice(line) {
+      if (!line.priceOverride || line.keepPrice || line.orig) return null;
+      var a = autoPrice(line), p = linePrice(line);
+      return a != null && p != null && Math.abs(a - p) >= 0.0005 ? a : null;
+    }
+
     function linePrice(line) {
       // A loaded line's own Eclipse price, untouched: no floor (bids often
       // carry $0 kit components) and no re-pricing on a qty change.
@@ -1307,6 +1338,7 @@
         added++;
         var line = { productId: l.productId, quantity: qty, ship_branch: br };
         if (sendsPrice(l)) line.unitPrice = linePrice(l);
+        if (originalPrice(l) != null) line.original_price = originalPrice(l);
         if (cmt) line.comments = cmt;
         return line;
       });
@@ -1675,9 +1707,13 @@
           if (ln) ln.focus({ preventScroll: true });
           else if (lc) lc.focus({ preventScroll: true });
         } else if (state.cancelAsk) {
-          // Default to the safe choice.
+          // The lost reason first (Esc still keeps the order); while
+          // cancelling, the safe choice. cancelOrder() moves focus to a
+          // field that needs fixing itself.
+          var cr = !state.placing && !state.cancelLost.tried && root.querySelector("#fop-cancel-reason");
           var keep = root.querySelector("[data-action=keep-order]");
-          if (keep) keep.focus();
+          if (cr) cr.focus();
+          else if (keep && !root.querySelector(".fop-modal").contains(document.activeElement)) keep.focus();
         } else if (state.confirm) {
           var ok = root.querySelector("#fop-confirm-status") || root.querySelector("[data-action=confirm-place]");
           if (ok) ok.focus();
@@ -3662,15 +3698,42 @@
       loadExistingOrder(orderId);
     }
 
+    // What is wrong with the Cancel dialog's lost reason and details: { reason, details }, "" when fine.
+    function cancelLostErrors() {
+      var c = state.cancelLost;
+      var n = c.details.trim().length;
+      return {
+        reason: c.reason ? "" : "Pick a lost reason.",
+        details: n >= CANCEL_DETAILS_MIN ? "" : "Add at least " + CANCEL_DETAILS_MIN + " characters" + (n ? " (" + n + " so far)." : "."),
+      };
+    }
+
+    // The error under a lost reason field: shown once Yes, cancel was tried.
+    function cancelErrHtml(key, er) {
+      return '<span class="fop-warn-text fop-block" data-cell="cancel-err-' + key + '">' + (state.cancelLost.tried ? esc(er[key]) : "") + "</span>";
+    }
+
     function cancelHtml() {
       var ex = state.existing;
       var what = ex.editable ? "bid" : "order";
+      var c = state.cancelLost, er = cancelLostErrors();
+      var bad = function (key) { return c.tried && er[key] ? " fop-input--err" : ""; };
       return (
         '<div class="fop-modal" role="alertdialog" aria-modal="true" aria-labelledby="fop-cancel-title" aria-describedby="fop-cancel-desc">' +
         '<div class="fop-modal__box fop-modal__box--sm">' +
         '<h2 class="fop-h2" id="fop-cancel-title">Cancel ' + what + " " + esc(ex.e_sorder_id) + "?</h2>" +
-        '<p class="fop-cancel-desc" id="fop-cancel-desc">Are you sure? This sets the ' + what + "'s status to Cancel in Eclipse. " +
-        "It can't be undone from this page.</p>" +
+        '<p class="fop-cancel-desc" id="fop-cancel-desc">Are you sure? This sets the ' + what + "'s status to Cancel in Eclipse " +
+        "and saves the lost reason on the HubSpot deal. It can't be undone from this page.</p>" +
+        '<div class="fop-field"><label class="fop-label" for="fop-cancel-reason">Lost reason</label>' +
+        '<select class="fop-input' + bad("reason") + '" id="fop-cancel-reason" data-lost="reason"' + (state.placing ? " disabled" : "") + ">" +
+        '<option value="" disabled' + (c.reason ? "" : " selected") + ">Select…</option>" +
+        LOST_REASONS.map(function (x) {
+          return '<option value="' + esc(x) + '"' + (x === c.reason ? " selected" : "") + ">" + esc(x) + "</option>";
+        }).join("") + "</select>" + cancelErrHtml("reason", er) + "</div>" +
+        '<div class="fop-field"><label class="fop-label" for="fop-cancel-details">Lost reason details ' +
+        '<span class="fop-muted">(at least ' + CANCEL_DETAILS_MIN + " characters)</span></label>" +
+        '<textarea class="fop-input fop-notes' + bad("details") + '" id="fop-cancel-details" data-lost="details" rows="3" maxlength="1000"' +
+        (state.placing ? " disabled" : "") + ">" + esc(c.details) + "</textarea>" + cancelErrHtml("details", er) + "</div>" +
         placeErrorHtml(state.placeError) +
         '<div class="fop-row fop-row--end">' +
         '<button class="fop-btn fop-btn--ghost" data-action="keep-order"' + (state.placing ? " disabled" : "") + ">Keep " + what + ' <span class="fop-key">Esc</span></button>' +
@@ -4513,8 +4576,9 @@
               : placed ? (data.mode === "bid" ? "Bid " : "Order ") + (data.e_sorder_id || id) + " placed." + splitNote(data)
               : data.mode === "convert" ? "Bid converted to an order (" + statusLabel(data.status) + ")" + savedAt(o) + "." + movedNote(data)
               : data.unchanged ? "Nothing to update; the bid already matched Eclipse." : "Bid updated" + savedAt(o) + "." + movedNote(data),
-            // create-order: a generation for another branch could not be finished.
-            warning: data.warning || "",
+            // create-order: a generation for another branch could not be
+            // finished; or a HubSpot write after the save failed.
+            warning: [data.warning || "", hubspotWriteWarning(data)].filter(Boolean).join(" "),
             hubspotError: data.hubspot_sync && data.hubspot_sync.ok === false ? String(data.hubspot_sync.error || "") : "",
           };
           state.orderId = String(id).toUpperCase();
@@ -4603,12 +4667,38 @@
         });
     }
 
+    // The HubSpot writes the flows make after the deal sync (2026-10-29):
+    // cancel-order's lost reason (lost_reason_saved) and create-order /
+    // update-bid's price_change_record (price_records). "" when fine or not sent.
+    function hubspotWriteWarning(data) {
+      var out = [];
+      if (data.lost_reason_saved && data.lost_reason_saved.ok === false) {
+        out.push("The lost reason was not saved on the HubSpot deal (" + (data.lost_reason_saved.error || "unknown error") + ").");
+      }
+      if (data.price_records && data.price_records.ok === false) {
+        out.push("The price change record was not saved on the HubSpot line items (" + (data.price_records.error || "unknown error") + ").");
+      }
+      return out.join(" ");
+    }
+
     function cancelOrder() {
       var ex = state.existing;
+      var c = state.cancelLost, er = cancelLostErrors();
+      if (er.reason || er.details) {
+        // Show what is missing and go to the first field to fix.
+        c.tried = true;
+        render();
+        var bad = root.querySelector(er.reason ? "#fop-cancel-reason" : "#fop-cancel-details");
+        if (bad) bad.focus();
+        return;
+      }
       state.placing = true;
       state.placeError = null;
       render();
-      postJson(API.cancelOrder, { e_sorder_id: ex.e_sorder_id, writer: user.e_user_id })
+      postJson(API.cancelOrder, {
+        e_sorder_id: ex.e_sorder_id, writer: user.e_user_id,
+        lost_reason: c.reason, closed_lost_reason: c.details.trim(),
+      })
         .then(function (data) {
           data.mode = "cancel";
           data.what = ex.editable ? "bid" : "order";
@@ -4630,8 +4720,22 @@
     function askCancel() {
       if (state.placing || !state.existing || !state.existing.cancellable) return;
       state.cancelAsk = true;
+      state.cancelLost = { reason: "", details: "", tried: false };
       state.placeError = null;
       render();
+    }
+
+    // Typing in the Cancel dialog: keep the value, and once Yes, cancel was
+    // tried, refresh that field's error in place (no re-render, so the caret
+    // stays put).
+    function onCancelLostField(t) {
+      var key = t.getAttribute("data-lost");
+      state.cancelLost[key] = t.value;
+      if (!state.cancelLost.tried) return;
+      var msg = cancelLostErrors()[key];
+      t.classList.toggle("fop-input--err", !!msg);
+      var span = root.querySelector('[data-cell="cancel-err-' + key + '"]');
+      if (span) span.textContent = msg;
     }
 
     function closeCancel() {
@@ -4785,6 +4889,8 @@
         lines: filledLines().map(function (l) {
           var line = { productId: l.productId, quantity: Number(l.qty), ship_branch: lineBranch(l) };
           if (sendsPrice(l)) line.unitPrice = linePrice(l);
+          // The price before the rep changed it (price_change_record).
+          if (originalPrice(l) != null) line.original_price = originalPrice(l);
           if (lineComment(l)) line.comments = lineComment(l);
           return line;
         }),
@@ -5145,6 +5251,7 @@
       var t = e.target;
       if (state.quoteModal && t.id === "fop-quote-email") { onEmailInput(t); return; }
       if (state.customModal && t.hasAttribute("data-cf")) { onCustomField(t); return; }
+      if (state.cancelAsk && t.hasAttribute("data-lost")) { onCancelLostField(t); return; }
       if (state.logModal && t.hasAttribute("data-log-note")) {
         state.logNote.text = t.value;
         autosize(t);
@@ -5207,6 +5314,7 @@
     root.addEventListener("change", function (e) {
       var t = e.target;
       if (state.customModal && t.hasAttribute("data-cf")) { onCustomField(t, true); return; }
+      if (state.cancelAsk && t.hasAttribute("data-lost")) { onCancelLostField(t); return; }
       if (state.detailsModal && t.hasAttribute("data-dm")) {
         var dr = state.detailsModal.r;
         if (t.getAttribute("data-dm") === "qty") { setQty(dr, t.value); t.value = state.lines[dr].qty; }
@@ -5430,11 +5538,12 @@
       }
 
       // Cancel dialog: Esc keeps the order; Enter and Space act on the
-      // focused button (focus starts on "Keep"); Tab stays in the dialog.
+      // focused button (focus starts on the lost reason); Tab stays in the
+      // dialog.
       if (state.view === "order" && state.cancelAsk) {
         if (e.key === "Escape") { e.preventDefault(); closeCancel(); }
         else if (e.key === "Tab") {
-          var cbtns = root.querySelectorAll(".fop-modal button:not([disabled])");
+          var cbtns = root.querySelectorAll(".fop-modal select:not([disabled]), .fop-modal textarea:not([disabled]), .fop-modal button:not([disabled])");
           if (cbtns.length) {
             var ci = Array.prototype.indexOf.call(cbtns, document.activeElement);
             e.preventDefault();
