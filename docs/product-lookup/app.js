@@ -618,9 +618,11 @@
   }
 
   // Tools menu: same list and markup as order placement's (its styles.css).
+  // [key, label, link, only these logins (e_user_id; none = everyone)].
   var TOOLS = [
     ["order-placement", "Order placement", "../order-placement/"],
     ["product-lookup", "Find order by product", "../product-lookup/"],
+    ["sales-outreach", "Sales outreach", "../sales-outreach/", ["BECCHR"]],
   ];
 
   function toolsMenuHtml(current) {
@@ -633,7 +635,10 @@
   // The page links, also at the top of the user menu on phones, where the
   // Tools button is hidden (styles.css).
   function toolsItemsHtml(current) {
-    return TOOLS.map(function (t) {
+    // The signed-in login's own id, also while acting as another rep.
+    var u = window.FB_USER || {};
+    var me = String((u.acting_for || u).e_user_id || "").toUpperCase();
+    return TOOLS.filter(function (t) { return !t[3] || t[3].indexOf(me) >= 0; }).map(function (t) {
       var on = t[0] === current;
       return '<a class="fop-tools__item' + (on ? " fop-tools__item--on" : "") + '" href="' + t[2] + '"' + (on ? ' aria-current="page"' : "") + ">" + esc(t[1]) + "</a>";
     }).join("");

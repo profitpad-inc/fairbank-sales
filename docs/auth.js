@@ -63,7 +63,7 @@
   var REFRESH_AFTER_S = 300;
   // Webhook path prefixes that need the session token. Add a prefix
   // only once that webhook uses the same JWT credential in n8n.
-  var PROTECTED = ['e-order-placement/'];
+  var PROTECTED = ['e-order-placement/', 'sales-outreach/'];
 
   // The only logins that may act as another rep with ?e_user_id=
   // (lower case emails; the HubSpot user id is Chris Becher's).

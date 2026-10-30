@@ -1,0 +1,169 @@
+/* Sales outreach: only what ../order-placement/styles.css does not cover.
+   Colours come from its tokens, so light and dark both work. */
+
+.so-wrap { max-width: 1280px; }
+
+/* Title left, list search right. */
+.so-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.so-filter { width: 320px; max-width: 100%; }
+
+/* ── Customer list: grid rows, a card on desktop, stacked cards on phones ── */
+.so-list { padding: 0; overflow: hidden; }
+.so-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 2.4fr) minmax(120px, 1fr) minmax(170px, 1.6fr) minmax(90px, .8fr) minmax(110px, .9fr);
+  align-items: center; gap: 12px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+  cursor: pointer;
+}
+.so-row--head {
+  padding-top: 12px; padding-bottom: 12px; border-top: 0; cursor: default;
+  font-size: 13px; font-weight: 600; color: var(--muted); background: var(--surface-head);
+}
+.so-row:not(.so-row--head):hover { background: var(--row-hover); }
+.so-row--on, .so-row--on:not(.so-row--head):hover { background: var(--row-hover); box-shadow: inset 3px 0 0 var(--gold); }
+.so-cell { min-width: 0; }
+
+.so-name {
+  display: block; max-width: 100%; padding: 0;
+  font: inherit; font-weight: 500; text-align: left; color: var(--gold-lt);
+  background: none; border: 0; cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.so-name:hover { text-decoration: underline; text-underline-offset: 3px; }
+.so-phone { display: block; font-variant-numeric: tabular-nums; }
+.so-empty { padding: 28px 16px; text-align: center; color: var(--muted); border-top: 1px solid var(--line); }
+/* Lined up with the row text (16px in from the card edge). */
+.so-count { margin-top: 10px; padding-left: 16px; font-size: 13px; color: var(--muted); }
+.so-retry { margin-left: 8px; }
+
+/* ── Side card: half the screen (at least 500px) from the right, under the
+   header bar; full screen on phones. ── */
+.so-scrim { position: fixed; inset: 40px 0 0 0; z-index: 55; background: var(--overlay); }
+.so-panel {
+  position: fixed; top: 40px; right: 0; bottom: 0; z-index: 56;
+  width: max(500px, 50vw); max-width: 100vw;
+  display: flex; flex-direction: column;
+  background: var(--panel-hi); border-left: 1px solid var(--border);
+  box-shadow: -20px 0 60px var(--shadow);
+  animation: so-slide .18s ease-out;
+}
+@keyframes so-slide { from { transform: translateX(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+html.so-panel-open { overflow: hidden; }
+
+.so-panel__head { padding: 18px 22px 16px; border-bottom: 1px solid var(--line); }
+.so-panel__top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.so-panel__title { margin: 10px 0 16px; line-height: 1.25; overflow-wrap: anywhere; }
+.so-x {
+  display: grid; place-items: center; width: 32px; height: 32px; padding: 0;
+  color: var(--muted); background: none; border: 0; border-radius: 6px; cursor: pointer;
+}
+.so-x svg { width: 20px; height: 20px; }
+.so-x:hover { color: var(--text); background: var(--row-hover); }
+
+/* Round icon buttons with the label under each, like HubSpot's record card. */
+.so-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.so-act {
+  flex: 1 1 0; min-width: 76px;
+  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 4px 2px;
+  font: inherit; font-size: 13px; color: var(--text); text-align: center; text-decoration: none;
+  background: none; border: 0; border-radius: 8px; cursor: pointer;
+}
+.so-act__ic {
+  display: grid; place-items: center; width: 42px; height: 42px;
+  color: var(--text); border: 1px solid var(--steel); border-radius: 50%; background: var(--surface);
+}
+.so-act__ic svg { width: 20px; height: 20px; }
+.so-act:hover .so-act__ic { color: var(--gold-lt); border-color: var(--gold); }
+.so-act__lbl { line-height: 1.2; }
+
+.so-panel__body { flex: 1; overflow-y: auto; padding: 8px 22px 28px; }
+.so-prop { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.so-prop:last-child { border-bottom: 0; }
+.so-prop__lbl { margin-bottom: 4px; font-size: 13px; color: var(--muted); }
+.so-prop__val { color: var(--white); overflow-wrap: anywhere; }
+.so-prop__val--lines { white-space: pre-line; line-height: 1.5; }
+
+/* ── Dialogs ── */
+.so-dialog__title { margin: 0; }
+.so-dialog__who { margin-top: 4px; font-size: 13px; color: var(--muted); }
+.so-desc { margin: 0; color: var(--text); line-height: 1.45; }
+.so-text { display: block; resize: vertical; min-height: 96px; line-height: 1.45; }
+.so-form { display: grid; gap: 12px; }
+
+.so-rec { display: grid; justify-items: start; gap: 12px; }
+.so-rec__btn svg { width: 16px; height: 16px; }
+.so-rec__live { display: flex; align-items: center; gap: 8px; color: var(--white); font-weight: 500; }
+.so-rec__dot { width: 10px; height: 10px; border-radius: 50%; background: var(--error); animation: fop-pulse 1s ease-in-out infinite; }
+.so-rec__time { font-variant-numeric: tabular-nums; color: var(--muted); }
+.so-rec__audio { width: 100%; }
+.so-rec__meta { font-size: 13px; color: var(--muted); }
+
+/* Light: the head row and the card look like HubSpot's table. */
+html[data-theme="light"] .so-row--head { color: #33475b; background: #f5f8fa; }
+html[data-theme="light"] .so-act__ic { background: #ffffff; }
+
+@media (max-width: 767px) {
+  .so-filter { width: 100%; }
+  .so-row--head { display: none; }
+  .so-row { grid-template-columns: 1fr auto; gap: 6px 12px; padding: 12px 14px; }
+  .so-row--head + .so-row { border-top: 0; }
+  .so-cell--name { grid-column: 1 / -1; }
+  .so-name { white-space: normal; }
+  .so-cell--phones { grid-column: 1; grid-row: 2; }
+  .so-cell--id { grid-column: 2; grid-row: 2; justify-self: end; }
+  .so-cell--state { grid-column: 1; grid-row: 3; color: var(--muted); }
+  .so-cell--status { grid-column: 2; grid-row: 3; justify-self: end; }
+  .so-cell--status.so-cell--empty { display: none; }
+
+  .so-scrim { display: none; }
+  .so-panel { top: 0; z-index: 70; width: 100vw; border-left: 0; animation: none; }
+  .so-panel__head { padding: 14px 16px; }
+  .so-panel__body { padding: 4px 16px 24px; }
+  .so-act { min-width: 60px; font-size: 12px; }
+}
+
+/* Free-text note under the buttons (replaced the Text Note button). */
+.so-note__lbl { margin: 16px 0 6px; }
+/* Grows with its text (autosize() in app.js) up to 40% of the screen, then scrolls. */
+.so-note { min-height: 76px; max-height: 40vh; resize: none; overflow-y: auto; }
+
+/* Call status (Status button, page only): a pill in the list and on the
+   card; tones reuse the alert colours. */
+.so-pill {
+  display: inline-block; padding: 2px 10px; font-size: 13px; font-weight: 500; line-height: 1.4; white-space: nowrap;
+  border: 1px solid; border-radius: 999px;
+}
+.so-pill--ok   { color: var(--ok-text);   background: rgba(62, 207, 142, .12); border-color: rgba(62, 207, 142, .45); }
+.so-pill--info { color: var(--text);      background: rgba(143, 164, 194, .12); border-color: var(--steel); }
+.so-pill--warn { color: var(--warn-text); background: rgba(240, 196, 106, .12); border-color: rgba(240, 196, 106, .45); }
+.so-pill--bad  { color: var(--err-text);  background: rgba(255, 95, 95, .12);  border-color: rgba(255, 95, 95, .45); }
+.so-panel__tags { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.so-status { display: grid; gap: 4px; }
+.so-status__opt { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; cursor: pointer; }
+.so-status__opt:hover { background: var(--row-hover); }
+.so-status__opt input { margin: 0; accent-color: var(--gold); }
+
+/* Record Call: "this call is being recorded" reminder at the top of the box. */
+.so-consent { line-height: 1.45; }
+.so-consent strong { font-weight: 600; }
+
+/* Transcript (Transcribe button under a recording): one block per turn, the
+   speaker label coloured so the two sides are easy to tell apart. */
+.so-rec__btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.so-tx { width: 100%; }
+.so-tx:empty { display: none; }
+.so-tx__wait { display: flex; align-items: center; gap: 10px; color: var(--muted); }
+.so-tx__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.so-tx__head .fop-label { margin: 0; }
+.so-tx__lines {
+  display: grid; gap: 10px; max-height: 40vh; overflow-y: auto; padding: 12px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
+}
+.so-tx__who { margin-bottom: 2px; font-size: 13px; font-weight: 600; }
+.so-tx__who--1 { color: var(--gold-lt); }
+.so-tx__who--2 { color: var(--ok-text); }
+.so-tx__who--3 { color: var(--warn-text); }
+.so-tx__who--4 { color: var(--err-text); }
+.so-tx__text { color: var(--text); line-height: 1.5; overflow-wrap: anywhere; }

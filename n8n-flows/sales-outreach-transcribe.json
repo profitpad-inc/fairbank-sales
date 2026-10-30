@@ -1,0 +1,170 @@
+{
+ "name": "sales outreach: transcribe",
+ "nodes": [
+  {
+   "id": "7816f29d-8c3f-4d4e-a3d9-d2b2a98c27db",
+   "name": "Webhook",
+   "type": "n8n-nodes-base.webhook",
+   "typeVersion": 2.1,
+   "position": [
+    0,
+    0
+   ],
+   "parameters": {
+    "httpMethod": "POST",
+    "path": "sales-outreach/transcribe",
+    "responseMode": "responseNode",
+    "authentication": "jwtAuth",
+    "options": {
+     "allowedOrigins": "*",
+     "binaryData": true,
+     "binaryPropertyName": "audio"
+    }
+   },
+   "webhookId": "3f96149c-c048-4afe-ac24-4fcdb3879838",
+   "credentials": {
+    "jwtAuth": {
+     "id": "6sDOPAJdRYI8fpxX",
+     "name": "Fairbank session (JWT)"
+    }
+   }
+  },
+  {
+   "id": "d0a0c34a-2f4c-48f9-92d5-349d5db34112",
+   "name": "AssemblyAI: upload audio",
+   "type": "n8n-nodes-assemblyai.assemblyAi",
+   "typeVersion": 1,
+   "position": [
+    224,
+    0
+   ],
+   "parameters": {
+    "resource": "file",
+    "operation": "upload",
+    "fileInput": "audio"
+   },
+   "onError": "continueRegularOutput",
+   "credentials": {
+    "assemblyAiApi": {
+     "id": "Fnow0uUI9j1bHZpJ",
+     "name": "chris assembly api key"
+    }
+   }
+  },
+  {
+   "id": "de1f57a2-0390-4f94-81b9-ee1b7f429c5d",
+   "name": "AssemblyAI: start transcript",
+   "type": "n8n-nodes-assemblyai.assemblyAi",
+   "typeVersion": 1,
+   "position": [
+    448,
+    0
+   ],
+   "parameters": {
+    "resource": "transcript",
+    "operation": "create",
+    "audioUrl": "={{ $json.upload_url }}",
+    "additionalFields": {
+     "speech_models": "universal-3-5-pro,universal-2",
+     "language_code": "en",
+     "punctuate": true,
+     "format_text": true,
+     "speaker_labels": true
+    }
+   },
+   "onError": "continueRegularOutput",
+   "credentials": {
+    "assemblyAiApi": {
+     "id": "Fnow0uUI9j1bHZpJ",
+     "name": "chris assembly api key"
+    }
+   }
+  },
+  {
+   "id": "091871e3-320b-403f-93c8-d795bae11dcd",
+   "name": "Shape",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    672,
+    0
+   ],
+   "parameters": {
+    "jsCode": "// AssemblyAI answers with the transcript id at once (status queued); the\n// page then polls GET sales-outreach/transcript?id=... until it is done.\nconst up = $('AssemblyAI: upload audio').first().json;\nif (up.error || !up.upload_url) {\n  return { statusCode: 502, body: { error: 'Audio upload failed: ' + String((up.error && up.error.message) || up.error || 'no upload_url'), step: 'AssemblyAI: upload audio' } };\n}\nconst t = $input.first().json;\nif (t.error || !t.id) {\n  return { statusCode: 502, body: { error: 'Could not start the transcript: ' + String((t.error && t.error.message) || t.error || 'no id'), step: 'AssemblyAI: start transcript' } };\n}\nreturn { statusCode: 200, body: { success: true, id: t.id, status: t.status } };\n"
+   }
+  },
+  {
+   "id": "b33b2655-f10e-4ef1-8f5d-d16505bb5db6",
+   "name": "Respond",
+   "type": "n8n-nodes-base.respondToWebhook",
+   "typeVersion": 1.1,
+   "position": [
+    896,
+    0
+   ],
+   "parameters": {
+    "respondWith": "json",
+    "responseBody": "={{ JSON.stringify($json.body) }}",
+    "options": {
+     "responseCode": "={{ $json.statusCode || 200 }}"
+    }
+   }
+  }
+ ],
+ "connections": {
+  "Webhook": {
+   "main": [
+    [
+     {
+      "node": "AssemblyAI: upload audio",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "AssemblyAI: upload audio": {
+   "main": [
+    [
+     {
+      "node": "AssemblyAI: start transcript",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "AssemblyAI: start transcript": {
+   "main": [
+    [
+     {
+      "node": "Shape",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Shape": {
+   "main": [
+    [
+     {
+      "node": "Respond",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1",
+  "availableInMCP": true
+ },
+ "pinData": {},
+ "meta": {
+  "workflowId": "cbCn7s0kYwBQpu6P",
+  "activeVersionId": "9519bc67-c700-4bdc-b6ae-6be79100eee2"
+ },
+ "active": true
+}

@@ -1,0 +1,168 @@
+{
+ "name": "sales outreach: get customers",
+ "nodes": [
+  {
+   "parameters": {
+    "httpMethod": "GET",
+    "path": "sales-outreach/customers",
+    "responseMode": "responseNode",
+    "authentication": "jwtAuth",
+    "options": {
+     "allowedOrigins": "*"
+    }
+   },
+   "id": "4f0b66ff-dd6b-4c78-98ce-56020dc44189",
+   "name": "Webhook",
+   "type": "n8n-nodes-base.webhook",
+   "typeVersion": 2,
+   "position": [
+    0,
+    0
+   ],
+   "webhookId": "9d79f625-6c88-4fa0-a4f1-3a5e58476407",
+   "credentials": {
+    "jwtAuth": {
+     "id": "6sDOPAJdRYI8fpxX",
+     "name": "Fairbank session (JWT)"
+    }
+   }
+  },
+  {
+   "parameters": {
+    "jsCode": "// The customers on the call list. Fixed for now (2026-10-29, from the\n// user; 58688 added the same day); later this comes from a HubSpot list or\n// a rep's filter.\nconst CONFIG = {\n  ids: [58856, 58854, 58853, 58851, 58759, 58740, 58724, 58688, 58650, 58595],\n};\nreturn { ids: CONFIG.ids.map(String) };\n"
+   },
+   "id": "7b8986a7-1df4-47b6-8f07-0a2131f889ae",
+   "name": "Config",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    224,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "resource": "objects",
+    "objectType": "0-2",
+    "operation": "batchRead",
+    "batchReadInputMode": "ui",
+    "batchReadObjectIds": "={{ $json.ids.join(',') }}",
+    "batchReadReturnAllMode": "allInOne",
+    "batchReadOptions": {
+     "idProperty": "e_customer_id",
+     "properties": [
+      "e_customer_id",
+      "name",
+      "all_phones",
+      "ai_customer_insights",
+      "createdate",
+      "address",
+      "city",
+      "state"
+     ]
+    }
+   },
+   "id": "3dbd068b-bb4a-4cee-a058-bd32b80921b7",
+   "name": "HubSpot: read customers",
+   "type": "CUSTOM.hubspotApi",
+   "typeVersion": 1,
+   "position": [
+    448,
+    0
+   ],
+   "executeOnce": true,
+   "onError": "continueRegularOutput",
+   "credentials": {
+    "hubspotApi": {
+     "id": "4HKK5aFFmTGesa3H",
+     "name": "fairbank"
+    }
+   }
+  },
+  {
+   "parameters": {
+    "jsCode": "// HubSpot customers (0-2) → the call list, in Config's order. Property\n// names read from Fairbank's HubSpot on 2026-10-29: all_phones (\"All\n// Phones\", shown as Phone Numbers), ai_customer_insights (\"Customer\n// Insights (demo data)\"), createdate, address, city, state.\nconst ids = $('Config').first().json.ids;\nconst r = $input.first().json;\nif (r.error) {\n  return { statusCode: 502, body: { error: 'HubSpot customer read failed: ' + String(r.error.message || r.error), step: 'HubSpot: read customers' } };\n}\nconst s = (v) => (v == null ? '' : String(v)).trim();\nconst byId = {};\nfor (const row of (Array.isArray(r.results) ? r.results : [])) {\n  const p = row.properties || {};\n  if (p.e_customer_id) byId[s(p.e_customer_id)] = row;\n}\nconst customers = ids.filter((id) => byId[id]).map((id) => {\n  const row = byId[id];\n  const p = row.properties || {};\n  return {\n    hs_id: s(row.id),\n    e_customer_id: id,\n    name: s(p.name) || ('Customer ' + id),\n    // All Phones holds every number on one line; split on ; , or a line break.\n    phones: s(p.all_phones).split(/\\s*(?:;|\\n|,)\\s*/).filter(Boolean),\n    insights: s(p.ai_customer_insights),\n    create_date: s(p.createdate),\n    street: s(p.address),\n    city: s(p.city),\n    state: s(p.state),\n  };\n});\nreturn { statusCode: 200, body: { success: true, customers, missing: ids.filter((id) => !byId[id]) } };\n"
+   },
+   "id": "3a7cf1df-6b0b-4a72-9caa-66f7ad84b7da",
+   "name": "Shape",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    672,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "respondWith": "json",
+    "responseBody": "={{ JSON.stringify($json.body) }}",
+    "options": {
+     "responseCode": "={{ $json.statusCode || 200 }}"
+    }
+   },
+   "id": "b13836fa-6a52-439c-b8b8-6776808b6303",
+   "name": "Respond",
+   "type": "n8n-nodes-base.respondToWebhook",
+   "typeVersion": 1.1,
+   "position": [
+    896,
+    0
+   ]
+  }
+ ],
+ "connections": {
+  "Webhook": {
+   "main": [
+    [
+     {
+      "node": "Config",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Config": {
+   "main": [
+    [
+     {
+      "node": "HubSpot: read customers",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "HubSpot: read customers": {
+   "main": [
+    [
+     {
+      "node": "Shape",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Shape": {
+   "main": [
+    [
+     {
+      "node": "Respond",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1"
+ },
+ "pinData": {},
+ "meta": {
+  "workflowId": "pvONO9WOHyT3g5WN",
+  "activeVersionId": "a845ecad-0b98-4c19-b9ba-95deee497868"
+ },
+ "active": true
+}
