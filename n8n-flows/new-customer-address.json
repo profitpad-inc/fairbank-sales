@@ -1,0 +1,313 @@
+{
+  "name": "e-order-placement: new customer address",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "e-order-placement/new-customer/address",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        },
+        "authentication": "jwtAuth"
+      },
+      "id": "8fe5c5a5-12c4-5b0a-b341-4458666065a3",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "b4761701-1f90-5ab0-a61a-56074c92c93d",
+      "credentials": {
+        "jwtAuth": {
+          "id": "6sDOPAJdRYI8fpxX",
+          "name": "Fairbank session (JWT)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Street address type-ahead for the New customer form (Google Places API\n// (New)). ?q=123 colorado&session=<uuid> lists suggestions; ?place_id=…\n// &session=<same uuid> returns the picked place as form fields. The page\n// keeps one session token from the first keystroke to the pick, so Google\n// bills the typing and the pick as one session.\nconst q = $input.first().json.query || {};\nconst s = (v) => String(v == null ? '' : v).trim();\nconst session = s(q.session).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);\nconst placeId = s(q.place_id);\nif (placeId) {\n  if (!/^[A-Za-z0-9_-]{10,300}$/.test(placeId)) return [{ json: { ok: false, statusCode: 400, body: { error: 'Invalid place_id' } } }];\n  return [{ json: { ok: true, mode: 'details', placeId, session } }];\n}\nconst text = s(q.q).slice(0, 200);\nif (text.length < 3) return [{ json: { ok: false, statusCode: 400, body: { error: 'Type at least 3 characters' } } }];\nconst body = { input: text, includedRegionCodes: ['us'], languageCode: 'en' };\nif (session) body.sessionToken = session;\nreturn [{ json: { ok: true, mode: 'suggest', body, session } }];\n"
+      },
+      "id": "c4bc3886-2ace-5039-973f-5fcedabc7e93",
+      "name": "Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "a41246a8-bfa4-5d7c-a832-8d20d3a9e684",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c29bc9bf-3f82-5432-93f0-30459d4b338a",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "05c9e4d9-2e86-5ca6-9fe8-c88ba368d5d3",
+              "leftValue": "={{ $json.mode === 'details' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "969c044e-a233-5fea-9988-7f4d4cbba665",
+      "name": "Place details?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://places.googleapis.com/v1/places/{{ encodeURIComponent($json.placeId) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "addressComponents,formattedAddress,location"
+            },
+            {
+              "name": "sessionToken",
+              "value": "={{ $json.session }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "630937f6-9de3-5349-a7a0-4709b4094246",
+      "name": "Google: place details",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        -120
+      ],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "s5mkj2P7i9AEvAea",
+          "name": "fairbank gmaps auth"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://places.googleapis.com/v1/places:autocomplete",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "28a05b60-2f88-5528-86d4-98572ec47016",
+      "name": "Google: autocomplete",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        120
+      ],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "s5mkj2P7i9AEvAea",
+          "name": "fairbank gmaps auth"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// suggest: { suggestions: [{ place_id, main, secondary }] }\n// details: { address, address2, city, state, zip, lat, lng, formatted }\nconst s = (v) => String(v == null ? '' : v).trim();\nconst fail = (r, what) => {\n  const e = r.error || {};\n  const msg = s(e.message || e.description || (typeof e === 'string' ? e : '')) || 'no answer';\n  return [{ json: { statusCode: 502, body: { error: 'Google ' + what + ' failed: ' + msg.slice(0, 300) } } }];\n};\n\nif ($('Google: autocomplete').isExecuted) {\n  const r = $('Google: autocomplete').first().json || {};\n  if (r.error) return fail(r, 'address search');\n  const suggestions = (r.suggestions || [])\n    .map((x) => x.placePrediction)\n    .filter((p) => p && p.placeId)\n    .map((p) => {\n      const f = p.structuredFormat || {};\n      return {\n        place_id: p.placeId,\n        main: s((f.mainText && f.mainText.text) || (p.text && p.text.text)),\n        secondary: s(f.secondaryText && f.secondaryText.text),\n      };\n    });\n  return [{ json: { statusCode: 200, body: { suggestions } } }];\n}\n\nconst r = $('Google: place details').first().json || {};\nif (r.error) return fail(r, 'address lookup');\n// addressComponents: [{ longText, shortText, types: [...] }]\nconst comps = r.addressComponents || [];\nconst get = (type, short) => {\n  const c = comps.find((x) => (x.types || []).includes(type));\n  return c ? s(short ? c.shortText || c.longText : c.longText || c.shortText) : '';\n};\nconst street = [get('street_number'), get('route', true)].filter(Boolean).join(' ');\n// A business result without a street number still has a route; a place\n// with neither (a town) leaves the street for the rep.\nconst sub = get('subpremise');\nconst city = get('locality') || get('postal_town') || get('sublocality_level_1') || get('sublocality') ||\n  get('administrative_area_level_3') || get('neighborhood');\nconst loc = r.location || {};\nreturn [{\n  json: {\n    statusCode: 200,\n    body: {\n      address: street,\n      address2: sub ? (/^\\d/.test(sub) ? '#' + sub : sub) : '',\n      city,\n      state: get('administrative_area_level_1', true),\n      zip: get('postal_code'),\n      lat: isFinite(loc.latitude) ? Number(loc.latitude) : null,\n      lng: isFinite(loc.longitude) ? Number(loc.longitude) : null,\n      formatted: s(r.formattedAddress),\n    },\n  },\n}];\n"
+      },
+      "id": "0b117fa0-7ddc-5049-9958-45c84c47b0fc",
+      "name": "Shape",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode || 200 }}"
+        }
+      },
+      "id": "29460429-7ceb-5052-a169-d157ec8a5ab4",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1440,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "Place details?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Place details?": {
+      "main": [
+        [
+          {
+            "node": "Google: place details",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Google: autocomplete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google: place details": {
+      "main": [
+        [
+          {
+            "node": "Shape",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google: autocomplete": {
+      "main": [
+        [
+          {
+            "node": "Shape",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "active": false
+}

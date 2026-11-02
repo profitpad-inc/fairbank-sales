@@ -30,7 +30,7 @@
   {
    "parameters": {
     "mode": "runOnceForAllItems",
-    "jsCode": "// POST { e_sorder_id: \"S2737687.0001\", to_emails: [\"a@b.com\", ...],\n// from_email: \"rep@fairbankequipment.com\" }. Same address rules as the page:\n// lowercase, a-z 0-9 . _ + - before the @, a dotted domain after it.\n// The mail goes out from from_email's own mailbox, so it must be a\n// Fairbank address; ProfitPad staff (@profitpad.com, testing and support)\n// send from treyj@fairbankequipment.com instead (user's request, 2026-10-19),\n// with that mailbox's signature. The page sends the signed-in rep's address.\nconst b = $input.first().json.body || {};\nconst bad = (error) => [{ json: { ok: false, statusCode: 400, body: { success: false, error, step: 'validate' } } }];\nconst m = String(b.e_sorder_id || '').trim().toUpperCase().match(/^S?(\\d+)\\.(\\d{1,4})$/);\nif (!m) return bad('Missing or invalid e_sorder_id (expected S1234567.0001).');\nconst EMAIL = /^[a-z0-9_+-]+(\\.[a-z0-9_+-]+)*@[a-z0-9-]+(\\.[a-z0-9-]+)*\\.[a-z]{2,}$/;\nconst list = (Array.isArray(b.to_emails) ? b.to_emails : String(b.to_emails || '').split(/[,;\\s]+/))\n  .map((e) => String(e).trim().toLowerCase()).filter(Boolean);\nconst to = [...new Set(list)];\nif (!to.length) return bad('Add at least one email address.');\nif (to.length > 20) return bad('Send to 20 addresses or fewer.');\nconst wrong = to.filter((e) => !EMAIL.test(e));\nif (wrong.length) return bad('Not a valid email address: ' + wrong.join(', '));\nconst requested = String(b.from_email || '').trim().toLowerCase();\nif (!EMAIL.test(requested)) return bad('Missing or invalid from_email.');\nconst from = /@profitpad\\.com$/.test(requested) ? 'treyj@fairbankequipment.com' : requested;\nif (!/@fairbankequipment\\.com$/.test(from)) return bad('The quote can only be sent from a fairbankequipment.com mailbox.');\nreturn [{ json: { ok: true, e_sorder_id: 'S' + m[1] + '.' + m[2].padStart(4, '0'), to, from, requested_by: requested } }];\n"
+    "jsCode": "// POST { e_sorder_id: \"S2737687.0001\", to_emails: [\"a@b.com\", ...],\n// from_email: \"rep@fairbankequipment.com\" }. Same address rules as the page:\n// lowercase, a-z 0-9 . _ + - before the @, a dotted domain after it.\n// The mail goes out from from_email's own mailbox, so it must be a\n// Fairbank address; ProfitPad staff (@profitpad.com, testing and support)\n// send from treyj@fairbankequipment.com instead (user's request, 2026-10-19),\n// with that mailbox's signature. The page sends the signed-in rep's address.\nconst b = $input.first().json.body || {};\nconst bad = (error) => [{ json: { ok: false, statusCode: 400, body: { success: false, error, step: 'validate' } } }];\nconst m = String(b.e_sorder_id || '').trim().toUpperCase().match(/^S?(\\d+)\\.(\\d{1,4})$/);\nif (!m) return bad('Missing or invalid e_sorder_id (expected S1234567.0001).');\nconst EMAIL = /^[a-z0-9_+-]+(\\.[a-z0-9_+-]+)*@[a-z0-9-]+(\\.[a-z0-9-]+)*\\.[a-z]{2,}$/;\nconst list = (Array.isArray(b.to_emails) ? b.to_emails : String(b.to_emails || '').split(/[,;\\s]+/))\n  .map((e) => String(e).trim().toLowerCase()).filter(Boolean);\nconst to = [...new Set(list)];\nif (!to.length) return bad('Add at least one email address.');\nif (to.length > 20) return bad('Send to 20 addresses or fewer.');\nconst wrong = to.filter((e) => !EMAIL.test(e));\nif (wrong.length) return bad('Not a valid email address: ' + wrong.join(', '));\nconst requested = String(b.from_email || '').trim().toLowerCase();\nif (!EMAIL.test(requested)) return bad('Missing or invalid from_email.');\nconst from = /@profitpad\\.com$/.test(requested) ? 'treyj@fairbankequipment.com' : requested;\nif (!/@fairbankequipment\\.com$/.test(from)) return bad('The quote can only be sent from a fairbankequipment.com mailbox.');\n// The page's subtotal (sum of the lines) when sent, for the quote sent log\n// (2026-10-30); '' when missing or not a number.\nconst sub = Number(b.subtotal);\nconst subtotal = b.subtotal != null && b.subtotal !== '' && isFinite(sub) ? sub.toFixed(2) : '';\nreturn [{ json: { ok: true, e_sorder_id: 'S' + m[1] + '.' + m[2].padStart(4, '0'), to, from, requested_by: requested, subtotal } }];\n"
    },
    "id": "6c88d0cd-ea26-565f-a3a0-89c07692be6c",
    "name": "Validate",
@@ -49,7 +49,8 @@
     "objectId": "={{ $json.e_sorder_id }}",
     "properties": [
      "e_sorder_id",
-     "dealname"
+     "dealname",
+     "quote_sent_log"
     ],
     "additionalOptions": {
      "idProperty": "e_sorder_id",
@@ -69,8 +70,8 @@
    ],
    "credentials": {
     "hubspotApi": {
-     "id": "4HKK5aFFmTGesa3H",
-     "name": "HubSpot account"
+     "id": "sVf2mkwjVlflhBbV",
+     "name": "Fairbank Webtool"
     }
    },
    "onError": "continueRegularOutput"
@@ -78,7 +79,7 @@
   {
    "parameters": {
     "mode": "runOnceForAllItems",
-    "jsCode": "const v = $('Validate').first().json;\nconst d = $input.first().json || {};\nconst stop = (statusCode, body) => [{ json: { ok: false, statusCode, body } }];\nif (d.error) return stop(502, { success: false, error: 'HubSpot deal lookup failed: ' + d.error + ' ' + JSON.stringify(d.message || '').substring(0, 300), step: 'getDeal' });\nif (d.objectFound === false || !d.id) return stop(404, { success: false, error: 'No HubSpot deal for ' + v.e_sorder_id + ' yet.', step: 'getDeal' });\nconst ids = [...new Set(((((d.associations || {}).quotes) || {}).results || []).map((r) => String(r.id)).filter(Boolean))];\nif (!ids.length) return stop(404, { success: false, error: 'No quote for ' + v.e_sorder_id + ' yet.', step: 'getDeal' });\nreturn [{ json: { ok: true, dealId: String(d.id), quoteIds: ids.join(',') } }];\n"
+    "jsCode": "const v = $('Validate').first().json;\nconst d = $input.first().json || {};\nconst stop = (statusCode, body) => [{ json: { ok: false, statusCode, body } }];\nif (d.error) return stop(502, { success: false, error: 'HubSpot deal lookup failed: ' + d.error + ' ' + JSON.stringify(d.message || '').substring(0, 300), step: 'getDeal' });\nif (d.objectFound === false || !d.id) return stop(404, { success: false, error: 'No HubSpot deal for ' + v.e_sorder_id + ' yet.', step: 'getDeal' });\nconst ids = [...new Set(((((d.associations || {}).quotes) || {}).results || []).map((r) => String(r.id)).filter(Boolean))];\nif (!ids.length) return stop(404, { success: false, error: 'No quote for ' + v.e_sorder_id + ' yet.', step: 'getDeal' });\n// The deal's quote_sent_log as read now; Shape adds this send's line to it.\nreturn [{ json: { ok: true, dealId: String(d.id), quoteIds: ids.join(','), sentLog: String(((d.properties || {}).quote_sent_log) || '') } }];\n"
    },
    "id": "c3ed5145-79fc-552f-a2d3-047f51abe197",
    "name": "Check deal",
@@ -117,8 +118,8 @@
    ],
    "credentials": {
     "hubspotApi": {
-     "id": "4HKK5aFFmTGesa3H",
-     "name": "HubSpot account"
+     "id": "sVf2mkwjVlflhBbV",
+     "name": "Fairbank Webtool"
     }
    },
    "onError": "continueRegularOutput",
@@ -165,8 +166,8 @@
    ],
    "credentials": {
     "hubspotApi": {
-     "id": "4HKK5aFFmTGesa3H",
-     "name": "HubSpot account"
+     "id": "sVf2mkwjVlflhBbV",
+     "name": "Fairbank Webtool"
     }
    },
    "onError": "continueRegularOutput",
@@ -250,7 +251,7 @@
   {
    "parameters": {
     "mode": "runOnceForAllItems",
-    "jsCode": "const v = $('Validate').first().json;\nconst q = $('Pick quote').first().json;\nconst r = $input.first().json || {};\nif (r.error) return [{ json: { ok: false, statusCode: 502, body: { success: false, error: 'Outlook could not send the email: ' + r.error + ' ' + JSON.stringify(r.message || r.description || '').substring(0, 300), step: 'sendMail' } } }];\nreturn [{ json: { ok: true, statusCode: 200, body: { success: true, e_sorder_id: v.e_sorder_id, quote_id: q.quoteId, quote_link: q.link, from: v.from, sent_to: v.to } } }];\n"
+    "jsCode": "// quote_sent_log on the deal: one line per send, oldest first,\n// \"<ISO time>|<from mailbox>|<requested by>|<quote link>|<to,to>|<subtotal>\".\n// Parsed newest first; lines that don't fit are skipped.\nconst parseLog = (s) => String(s || '').split(/\\r?\\n/).map((l) => l.trim()).filter(Boolean).map((l) => {\n  const f = l.split('|');\n  if (f.length < 5 || !f[0]) return null;\n  // Subtotal (6th field) since 2026-10-30; older lines have none (null).\n  const sub = f.length > 5 && f[5] !== '' && isFinite(Number(f[5])) ? Number(f[5]) : null;\n  return { at: f[0], from: f[1] || '', requested_by: f[2] || '', link: f[3] || null, to: String(f[4] || '').split(',').filter(Boolean), subtotal: sub };\n}).filter(Boolean).reverse();\nconst v = $('Validate').first().json;\nconst q = $('Pick quote').first().json;\nconst deal = $('Check deal').first().json;\nconst r = $input.first().json || {};\nif (r.error) return [{ json: { ok: false, statusCode: 502, body: { success: false, error: 'Outlook could not send the email: ' + r.error + ' ' + JSON.stringify(r.message || r.description || '').substring(0, 300), step: 'sendMail' } } }];\n// Sent: add a line to the deal's quote_sent_log (2026-10-30, on request).\n// A HubSpot multi-line text holds 65,536 characters, so the oldest lines\n// go first past 60,000.\nconst clean = (s) => String(s == null ? '' : s).replace(/[|\\r\\n]/g, ' ').trim();\nconst line = [new Date().toISOString(), clean(v.from), clean(v.requested_by), clean(q.link), v.to.map(clean).join(','), clean(v.subtotal)].join('|');\nconst lines = String(deal.sentLog || '').split(/\\r?\\n/).filter((l) => l.trim());\nlines.push(line);\nwhile (lines.length > 1 && lines.join('\\n').length > 60000) lines.shift();\nconst log = lines.join('\\n');\nreturn [{ json: { ok: true, statusCode: 200, dealId: deal.dealId, log, body: { success: true, e_sorder_id: v.e_sorder_id, quote_id: q.quoteId, quote_link: q.link, from: v.from, sent_to: v.to, sent_log: parseLog(log) } } }];\n"
    },
    "id": "f8ef2966-d885-56a1-a71d-c4e38238f8a6",
    "name": "Shape",
@@ -405,6 +406,78 @@
     3600,
     0
    ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose"
+     },
+     "conditions": [
+      {
+       "leftValue": "={{ $json.ok }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   },
+   "id": "4ebf2acf-9eed-4f73-8b66-83cef875a8b6",
+   "name": "Sent?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    3840,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "resource": "objects",
+    "objectType": "0-3",
+    "operation": "batchUpdate",
+    "batchUpdateBody": "={{ { inputs: [{ id: $json.dealId, properties: { quote_sent_log: $json.log } }] } }}"
+   },
+   "name": "HubSpot: log send",
+   "type": "CUSTOM.hubspotApi",
+   "typeVersion": 1,
+   "id": "6c1526e6-c78d-439e-9df3-67b845422b1c",
+   "position": [
+    4080,
+    0
+   ],
+   "credentials": {
+    "hubspotApi": {
+     "id": "sVf2mkwjVlflhBbV",
+     "name": "Fairbank Webtool"
+    }
+   },
+   "onError": "continueRegularOutput",
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 2000
+  },
+  {
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "// The email went out either way; a failed log write only adds\n// sent_log_saved: false (and the error) so the page can say so.\nconst s = $('Shape').first().json;\nconst r = $input.first().json || {};\nconst body = Object.assign({}, s.body, { sent_log_saved: !r.error });\nif (r.error) body.sent_log_error = String(r.error) + ' ' + JSON.stringify(r.message || '').substring(0, 300);\nreturn [{ json: { statusCode: 200, body } }];\n"
+   },
+   "name": "Logged",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "id": "a3038d5f-f7c8-40e4-a352-848c5116a0c9",
+   "position": [
+    4320,
+    0
+   ]
   }
  ],
  "connections": {
@@ -522,7 +595,7 @@
    "main": [
     [
      {
-      "node": "Respond",
+      "node": "Sent?",
       "type": "main",
       "index": 0
      }
@@ -592,6 +665,46 @@
       "index": 0
      }
     ],
+    [
+     {
+      "node": "Respond",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Sent?": {
+   "main": [
+    [
+     {
+      "node": "HubSpot: log send",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Respond",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "HubSpot: log send": {
+   "main": [
+    [
+     {
+      "node": "Logged",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Logged": {
+   "main": [
     [
      {
       "node": "Respond",

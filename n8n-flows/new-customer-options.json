@@ -1,0 +1,262 @@
+{
+  "name": "e-order-placement: new customer options",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "e-order-placement/new-customer/options",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        },
+        "authentication": "jwtAuth"
+      },
+      "id": "6e589fff-2906-5d85-8cea-3b243103fc6e",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "537ea2f8-f329-577e-878d-7c663c401ef0",
+      "credentials": {
+        "jwtAuth": {
+          "id": "6sDOPAJdRYI8fpxX",
+          "name": "Fairbank session (JWT)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "properties",
+        "objectType": "0-2",
+        "operation": "getProperty",
+        "getPropertyName": "state"
+      },
+      "id": "4402ca1b-5223-5608-91ca-03ff8945dded",
+      "name": "HubSpot: state options",
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        240,
+        0
+      ],
+      "credentials": {
+        "hubspotApi": {
+          "id": "sVf2mkwjVlflhBbV",
+          "name": "Fairbank Webtool"
+        }
+      },
+      "executeOnce": true,
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "resource": "properties",
+        "objectType": "0-2",
+        "operation": "getProperty",
+        "getPropertyName": "industry"
+      },
+      "id": "8ccc7bd9-1532-5fbd-994c-96c29045045b",
+      "name": "HubSpot: industry options",
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        480,
+        0
+      ],
+      "credentials": {
+        "hubspotApi": {
+          "id": "sVf2mkwjVlflhBbV",
+          "name": "Fairbank Webtool"
+        }
+      },
+      "executeOnce": true,
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "abcd3672-51f7-5f40-8aeb-3a08df5e64aa",
+              "leftValue": "={{ /^\\d+$/.test(String($('Webhook').first().json.query.e_customer_id || '').trim()) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8b57deee-632b-51b4-9f85-748793b34197",
+      "name": "Has bill-to?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "objects",
+        "objectType": "0-2",
+        "operation": "get",
+        "objectId": "={{ String($('Webhook').first().json.query.e_customer_id).trim() }}",
+        "properties": [
+          "e_customer_id",
+          "domain",
+          "industry",
+          "e_propane_customer"
+        ],
+        "additionalOptions": {
+          "idProperty": "e_customer_id",
+          "errorWhenNotFound": false
+        }
+      },
+      "id": "512e75a6-412a-503e-8fb8-533278e43506",
+      "name": "HubSpot: bill-to company",
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        960,
+        -160
+      ],
+      "credentials": {
+        "hubspotApi": {
+          "id": "sVf2mkwjVlflhBbV",
+          "name": "Fairbank Webtool"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// HubSpot company dropdowns for the New customer form, read on every page\n// open so new HubSpot options show without a page change. With\n// ?e_customer_id= (a new ship-to on that bill-to) it also returns the\n// bill-to's domain, industry and propane flag to pre-fill the form.\nconst opts = (name) => {\n  const r = $(name).first().json;\n  if (!r || r.error || !Array.isArray(r.options)) return null;\n  return r.options\n    .filter((o) => !o.hidden && o.value != null && String(o.value).trim())\n    .map((o, i) => ({ label: String(o.label || o.value), value: String(o.value), order: o.displayOrder == null ? i : o.displayOrder, i }))\n    .sort((a, b) => (a.order - b.order) || (a.i - b.i))\n    .map((o) => ({ label: o.label, value: o.value }));\n};\nconst states = opts('HubSpot: state options');\nconst industries = opts('HubSpot: industry options');\nif (!states) {\n  const r = $('HubSpot: state options').first().json || {};\n  return [{ json: { statusCode: 502, body: { error: 'HubSpot state options failed: ' + (r.error || 'no options') } } }];\n}\n\nlet bill_to = null;\nif ($('Has bill-to?').isExecuted && $('HubSpot: bill-to company').isExecuted) {\n  const c = $('HubSpot: bill-to company').first().json || {};\n  const p = c.properties || {};\n  if (!c.error && c.objectFound !== false && p) {\n    bill_to = {\n      e_customer_id: String(p.e_customer_id || ''),\n      hs_id: String(c.id || p.hs_object_id || ''),\n      domain: p.domain || '',\n      industry: p.industry || '',\n      e_propane_customer: p.e_propane_customer || '',\n    };\n  }\n}\n\nreturn [{ json: { statusCode: 200, body: { states, industries: industries || [], bill_to } } }];\n"
+      },
+      "id": "78ae479d-997d-5b41-936d-891232dd5859",
+      "name": "Shape",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode || 200 }}"
+        }
+      },
+      "id": "28179b05-c0bd-5e86-9580-b92eb088686b",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1200,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: state options",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: state options": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: industry options",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: industry options": {
+      "main": [
+        [
+          {
+            "node": "Has bill-to?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has bill-to?": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: bill-to company",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Shape",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: bill-to company": {
+      "main": [
+        [
+          {
+            "node": "Shape",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "active": false
+}

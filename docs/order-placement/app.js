@@ -61,6 +61,11 @@
     quote: N8N + "e-order-placement/quote",
     createQuote: N8N + "e-order-placement/create-quote",
     sendQuote: N8N + "e-order-placement/send-quote",
+    newCustomer: N8N + "e-order-placement/new-customer",
+    newCustomerCheck: N8N + "e-order-placement/new-customer/check",
+    newCustomerOptions: N8N + "e-order-placement/new-customer/options",
+    newCustomerAddress: N8N + "e-order-placement/new-customer/address",
+    newCustomerBillTos: N8N + "e-order-placement/new-customer/bill-tos",
     inquiry: N8N + "fairbank-product-inquiry",
   };
   var HS_COMPANY = "https://app.hubspot.com/contacts/43793456/record/0-2/";
@@ -426,7 +431,11 @@
     var urlProducts = productsFromParams(params);
     // ?e_customer_id with both e_product_ids and quantities skips the orders
     // list once and starts a new order with those lines.
-    var urlAutoNew = !!(params.get("e_product_ids") && params.get("quantities")) && urlProducts.length > 0;
+    // &new_order=1 does the same without products: the new-customer page
+    // sends it after a ship-to was added because New order found none.
+    var urlAutoNew = (!!(params.get("e_product_ids") && params.get("quantities")) && urlProducts.length > 0) ||
+      params.get("new_order") === "1";
+    if (params.get("new_order")) setUrlParam("new_order", null);
     // ?e_sorder_id with showChangelog=true opens the change log once the
     // order has loaded (render keeps the param in step with the dialog).
     var urlShowLog = params.get("showChangelog") === "true" && !!params.get("e_sorder_id");
@@ -471,6 +480,7 @@
     var stripRow = -1;
     var lineSeq = 0;
     var quoteCache = {};         // productId → { loading, error, data }
+    var sentLogs = {};           // e_sorder_id → the deal's quote sent log (quote lookup sent_log)
     var hsQuotes = {};           // e_sorder_id → "checking" | "creating": View Quote in flight (nothing cached)
     var newDraft = null;         // { customerId, shipTo }: the new order on the grid, kept for Back / Forward
 
@@ -625,11 +635,37 @@
         render();
       } else if (c.ship_to) {
         startOrder(c.ship_to);
+      } else if (c.bill_to && c.bill_to.is_bill_to && !(c.ship_tos || []).length) {
+        // A bill-to with no ship-tos: add one first, then the order starts
+        // on it (new-customer page, then=order).
+        window.location.href = newShipToUrl(c.bill_to.e_customer_id, true);
       } else {
         state.view = "error";
         state.error = "This customer has no ship-to to place an order against.";
         render();
       }
+    }
+
+    // new-customer/ links: a new ship-to on a bill-to (thenOrder: start a
+    // new order on it once created), or a new customer. They keep an
+    // admin's ?e_user_id= (acting as another rep).
+    function newCustomerUrl(q) {
+      var p = new URLSearchParams(q || {});
+      var actAs = readParams().get("e_user_id");
+      if (actAs) p.set("e_user_id", actAs);
+      var s = p.toString();
+      return "new-customer/" + (s ? "?" + s : "");
+    }
+    function newShipToUrl(billToId, thenOrder) {
+      var q = { e_bill_to_id: billToId };
+      if (thenOrder) q.then = "order";
+      return newCustomerUrl(q);
+    }
+    // The New ship-to button: on any customer whose bill-to is a bill-to.
+    function newShipToBtnHtml(cls) {
+      var bt = state.customer && state.customer.bill_to;
+      if (!bt || !bt.is_bill_to) return "";
+      return '<a class="' + cls + '" href="' + esc(newShipToUrl(bt.e_customer_id)) + '">+ New ship-to</a>';
     }
 
     function startOrder(shipTo) {
@@ -810,6 +846,8 @@
       state.quoteModal = null;
       state.quoteError = null;
       state.lines.forEach(function (l) { if (l.productId) fetchQuote(l.productId); });
+      // The deal's quote sent log comes with the order (order-lookup sent_log).
+      if (Array.isArray(order.sent_log)) sentLogs[order.e_sorder_id] = order.sent_log;
       // Nothing is focused or highlighted on load (r -1), so the page opens at
       // its top; only a brand new order jumps to its new line. Alt+L or a
       // click still moves into the lines.
@@ -1771,7 +1809,8 @@
         "</div>" +
         '<div class="fop-hint">↑ ↓ to move, Enter to pick. Prefix with a dot (.12345) to search by ID.</div>' +
         "</div>" +
-        '<a class="fop-xlink" href="../product-lookup/">Find an order by product</a>' +
+        '<div class="fop-row fop-xlinks"><a class="fop-xlink" href="../product-lookup/">Find an order by product</a>' +
+        '<a class="fop-xlink" href="' + esc(newCustomerUrl()) + '">New customer</a></div>' +
         "</div>"
       );
     }
@@ -1886,6 +1925,7 @@
         '<div class="fop-row">' +
         // Phones: floats fixed in the bottom right of the screen (.fop-fab).
         '<button class="fop-btn fop-fab" data-action="new-from-list">New order <span class="fop-key fop-key--dark">' + altKey("N") + '</span></button>' +
+        newShipToBtnHtml("fop-btn fop-btn--ghost") +
         (st ? '<label class="fop-check"><input type="checkbox" data-action="orders-shipto-only"' + (state.ordersShipToOnly ? "" : " checked") + "> " +
           "Show orders from other ShipTos</label>" : "") +
         "</div>" +
@@ -1911,6 +1951,8 @@
         '<div class="fop-card"><div class="fop-picklist" role="listbox">' +
         (list || '<div class="fop-muted">No ship-tos on this bill-to.</div>') +
         "</div>" +
+        // Leaves the page, so not while a new order is open behind the picker.
+        (state.keepOrder ? "" : '<div class="fop-row fop-xlinks">' + newShipToBtnHtml("fop-xlink") + "</div>") +
         '<div class="fop-hint fop-hint--keys">↑ ↓ to move, Enter or 1–9 to pick, Esc to ' + (state.keepOrder ? "go back to the order" : "go back to the orders") + ".</div>" +
         "</div></div>"
       );
@@ -3069,8 +3111,7 @@
       var ex = state.existing;
       if (!ex) return "";
       var msg = ex.editable
-        ? "On a bid the lines, ship via, ship branch, dates and notes can be changed (Update Bid), and Convert to Order makes it an order. " +
-          "Customers, PO and release stay as they are in Eclipse."
+        ? "On a bid the lines, ship via, ship branch, dates and notes can be changed (Update Bid), and Convert to Order makes it an order."
         : "This order is " + statusLabel(ex.status) + ", so it can't be edited here." +
           (ex.cancellable ? " It can still be cancelled." : "");
       var n = state.notice;
@@ -3345,10 +3386,12 @@
       }
       var id = ex.e_sorder_id, fail = "Could not check HubSpot for a quote: ";
       var here = function () { return state.existing && state.existing.e_sorder_id === id; };
+      // sentLog: the deal's quote_sent_log as the lookup parsed it.
+      var sentLog = [];
       var show = function (q) {
         delete hsQuotes[id];
         if (here() && !state.quoteModal) {
-          state.quoteModal = { id: id, quote: q, emails: [], sending: false, note: null };
+          state.quoteModal = { id: id, quote: q, emails: [], sending: false, note: null, sentLog: sentLog };
           render();
         } else refreshQuoteBtn();
       };
@@ -3357,6 +3400,8 @@
       refreshQuoteBtn();
       getJson(API.quote, { e_sorder_id: id })
         .then(function (d) {
+          sentLog = Array.isArray(d.sent_log) ? d.sent_log : [];
+          sentLogs[id] = sentLog;
           if (d.quote && d.quote.link) return show(d.quote);
           if (!d.hs_deal_id) { fail = ""; throw new Error("No HubSpot deal for this order yet, so there is nothing to quote."); }
           // No quote yet: make one (create-quote returns an existing one
@@ -3411,6 +3456,7 @@
         (m.emails.length ? "" : ' placeholder="name@example.com"') + "></div>" +
         '<span class="fop-warn-text fop-block" data-cell="email-msg"></span></div>' +
         '<div class="fop-quote__note" data-cell="send-note">' + sendNoteHtml() + "</div>" +
+        '<div class="fop-quote__sent" data-cell="sent-log">' + sentLogHtml() + "</div>" +
         '<div class="fop-row fop-row--end">' +
         // aria-disabled, not disabled: a click with no address flashes the box.
         sendBtnHtml() +
@@ -3565,6 +3611,67 @@
       return n ? '<div class="fop-alert fop-alert--' + n.kind + '">' + esc(n.text) + "</div>" : "";
     }
 
+    // Sent history (2026-10-30, on request): the deal's quote_sent_log,
+    // newest first, written by send-quote. Folded to one line ("Sent 2
+    // times · last …"); open, each send's time, mailbox, recipients and the
+    // quote link it sent. Nothing when the quote was never sent from here.
+    function sentLogRowsHtml(log) {
+      return log.map(function (x) {
+        var by = x.requested_by && x.requested_by !== x.from ? " (for " + esc(x.requested_by) + ")" : "";
+        return '<li class="fop-sentlog__row"><span class="fop-sentlog__at">' + esc(dateTimeText(x.at)) + "</span> " +
+          '<span class="fop-muted">from</span> ' + esc(x.from) + by + ' <span class="fop-muted">to</span> ' + esc((x.to || []).join(", ")) +
+          (x.subtotal != null ? ' <span class="fop-muted">·</span> ' + esc(money(x.subtotal)) : "") + "</li>";
+      }).join("");
+    }
+
+    function sentLogHtml() {
+      var log = state.quoteModal.sentLog || [];
+      if (!log.length) return "";
+      var last = log[0];
+      var rows = sentLogRowsHtml(log);
+      return '<details class="fop-sentlog"' + (state.quoteModal.sentOpen ? " open" : "") + "><summary>" +
+        "Sent " + (log.length === 1 ? "once" : log.length + " times") + ' <span class="fop-muted">· last ' + esc(dateTimeText(last.at)) + " by " + esc(last.from) + "</span>" +
+        '</summary><ul class="fop-sentlog__list">' + rows + "</ul></details>";
+    }
+
+    // Quote sent log card under the Header (desktop only, hidden on phones in
+    // styles.css; 2026-10-30, on request). Comes with the order from
+    // order-lookup (sent_log), and is replaced by View Quote and after a send. Nothing shows
+    // until the order has a send.
+    function pageSentLogHtml() {
+      var ex = state.existing, log = ex && sentLogs[ex.e_sorder_id];
+      if (!log || !log.length) return "";
+      // Laid out like the Change log dialog (2026-10-30, on request): title,
+      // entry count, then a table, newest first. Subtotal is the lines' sum
+      // the page sent with the quote ("-" on sends logged before it was).
+      var rows = log.map(function (x) {
+        var by = x.requested_by && x.requested_by !== x.from ? ' <span class="fop-muted">(for ' + esc(x.requested_by) + ")</span>" : "";
+        return '<tr><td class="fop-log__at">' + esc(logTimeText(x.at)) + "</td>" +
+          '<td class="fop-sentpage__who">' + esc(x.from) + by + "</td>" +
+          '<td class="fop-sentpage__who">' + esc((x.to || []).join(", ")) + "</td>" +
+          '<td class="fop-sentpage__amt">' + (x.subtotal != null ? esc(money(x.subtotal)) : "-") + "</td></tr>";
+      }).join("");
+      return '<section class="fop-head fop-sentpage" aria-labelledby="fop-sentpage-title">' +
+        '<h2 class="fop-h2" id="fop-sentpage-title">Quote sent log</h2>' +
+        '<div class="fop-muted fop-log__count">' + log.length + (log.length === 1 ? " entry" : " entries") + "</div>" +
+        '<div class="fop-table-wrap fop-sentpage__wrap"><table class="fop-table"><thead><tr>' +
+        "<th>Date &amp; time</th><th>From</th><th>To</th><th class=\"fop-sentpage__amt\">Subtotal</th></tr></thead><tbody>" + rows + "</tbody></table></div></section>";
+    }
+
+    function refreshPageSentLog() {
+      var cell = root.querySelector('[data-cell="page-sent-log"]');
+      if (cell) cell.innerHTML = pageSentLogHtml();
+    }
+
+    function refreshSentLog() {
+      var cell = root.querySelector('[data-cell="sent-log"]');
+      if (!cell || !state.quoteModal) return;
+      // Keeps the list open if the rep opened it.
+      var open = cell.querySelector("details");
+      state.quoteModal.sentOpen = !!(open && open.open);
+      cell.innerHTML = sentLogHtml();
+    }
+
     function emailChipsHtml() {
       return state.quoteModal.emails.map(function (em, i) {
         return '<span class="fop-chip">' + esc(em) + '<button type="button" class="fop-chip__x" data-action="remove-email" data-i="' + i + '" aria-label="Remove ' + esc(em) + '">×</button></span>';
@@ -3601,7 +3708,12 @@
 
     // Typing or pasting: lowercase only, characters an address can't hold are
     // dropped, and a comma (or ; or a space) ends an address.
-    function onEmailInput(input) {
+    // A typed space is left alone: macOS text replacement (pma → address)
+    // fires on it and swaps the text right after, by position, so changing
+    // the box here mixed the two ("czbecher@gmail.comecher@gmail.com").
+    // The next input (the replacement or the next key) ends the address.
+    function onEmailInput(input, e) {
+      if (e && e.inputType === "insertText" && /^\s+$/.test(e.data || "")) return;
       var raw = input.value;
       var v = raw.toLowerCase();
       var parts = v.split(/[,;\s]+/);
@@ -3653,13 +3765,19 @@
       m.sending = true;
       setSendNote(null, null);
       refreshEmails(null);
-      postJson(API.sendQuote, { e_sorder_id: m.id, to_emails: to, from_email: user.email })
+      // subtotal: the lines' sum as the page shows it, for the quote sent log
+      // (null while a price is still loading).
+      var sum = summary();
+      var subtotal = sum.unknown ? null : Math.round(sum.subtotal * 100) / 100;
+      postJson(API.sendQuote, { e_sorder_id: m.id, to_emails: to, from_email: user.email, subtotal: subtotal })
         .then(function (d) {
           if (state.quoteModal !== m) return;
           m.sending = false;
           m.emails = [];
           refreshEmails(null);
-          setSendNote("success", "Sent from " + (d.from || user.email) + " to " + (d.sent_to || to).join(", ") + ".");
+          if (Array.isArray(d.sent_log)) { m.sentLog = sentLogs[m.id] = d.sent_log; refreshSentLog(); refreshPageSentLog(); }
+          setSendNote(d.sent_log_saved === false ? "warning" : "success", "Sent from " + (d.from || user.email) + " to " + (d.sent_to || to).join(", ") + "." +
+            (d.sent_log_saved === false ? " HubSpot did not save this send to the deal's quote sent log." : ""));
         })
         .catch(function (err) {
           if (state.quoteModal !== m) return;
@@ -3796,6 +3914,7 @@
         '<div class="fop-credit-tag--sum" data-cell="credit-tag">' + creditTagHtml() + "</div>" +
         // Order header sits below the lines (user request).
         headerHtml() +
+        '<div data-cell="page-sent-log">' + pageSentLogHtml() + "</div>" +
         // Error + action bar: in the side layout they stay in the left column
         // (under the header), so the stock card's column runs the full height.
         placeErrorHtml(state.placeError) +
@@ -5249,7 +5368,7 @@
 
     root.addEventListener("input", function (e) {
       var t = e.target;
-      if (state.quoteModal && t.id === "fop-quote-email") { onEmailInput(t); return; }
+      if (state.quoteModal && t.id === "fop-quote-email") { onEmailInput(t, e); return; }
       if (state.customModal && t.hasAttribute("data-cf")) { onCustomField(t); return; }
       if (state.cancelAsk && t.hasAttribute("data-lost")) { onCancelLostField(t); return; }
       if (state.logModal && t.hasAttribute("data-log-note")) {
@@ -5779,15 +5898,19 @@
   // it opens the rep's email, Eclipse user id, the theme toggle and Sign out). It replaces auth.js's sign-in
   // chip on these pages (hidden in styles.css). Sticky on desktop; on phones
   // it slides away while scrolling down and comes back on any scroll up.
-  function initHeader(root, user) {
+  // A page one folder down (new-customer/) sets data-base="../" on #app so
+  // the mark and the Tools links still resolve; current is its Tools key.
+  function initHeader(root, user, current) {
+    var base = root.getAttribute("data-base") || "";
+    current = current || "order-placement";
     var name = user.name || user.e_user_id || "";
     var header = document.createElement("header");
     header.className = "fop-header";
     header.innerHTML =
       '<div class="fop-header__start">' +
       '<div class="fop-header__logo">' +
-      '<img src="fairbank-mark.png" alt="Fairbank" width="32" height="24">' +
-      "</div>" + toolsMenuHtml("order-placement") + "</div>" +
+      '<img src="' + base + 'fairbank-mark.png" alt="Fairbank" width="32" height="24">' +
+      "</div>" + toolsMenuHtml(current, base) + "</div>" +
       '<div class="fop-header__end">' +
       '<span class="fop-header__links" data-cell="hdr-links"></span>' +
       '<div class="fop-umenu">' +
@@ -5798,7 +5921,7 @@
       '<span class="fop-umenu__name fop-umenu__name--first">' + esc(name.split(/\s+/)[0]) + "</span>" +
       '<svg class="fop-umenu__caret" viewBox="0 0 10 6" aria-hidden="true"><path d="M0 0h10L5 6z" fill="currentColor"/></svg></button>' +
       '<div class="fop-umenu__panel" hidden>' +
-      '<div class="fop-umenu__tools"><span class="fop-umenu__lbl">Tools</span>' + toolsItemsHtml("order-placement") + "</div>" +
+      '<div class="fop-umenu__tools"><span class="fop-umenu__lbl">Tools</span>' + toolsItemsHtml(current, base) + "</div>" +
       // Acting as another rep (?e_user_id=): who is really signed in.
       (user.acting_for ? '<div class="fop-umenu__row"><span class="fop-umenu__lbl">Signed in as</span>' +
         esc(user.acting_for.name || user.acting_for.e_user_id) + "</div>" : "") +
@@ -5857,25 +5980,26 @@
   var TOOLS = [
     ["order-placement", "Order placement", "../order-placement/"],
     ["product-lookup", "Find order by product", "../product-lookup/"],
+    ["new-customer", "New customer", "../order-placement/new-customer/"],
     ["sales-outreach", "Sales outreach", "../sales-outreach/", ["BECCHR"]],
   ];
 
-  function toolsMenuHtml(current) {
+  function toolsMenuHtml(current, base) {
     return '<div class="fop-tools">' +
       '<button type="button" class="fop-tools__btn" aria-haspopup="true" aria-expanded="false">Tools' +
       '<svg class="fop-umenu__caret" viewBox="0 0 10 6" aria-hidden="true"><path d="M0 0h10L5 6z" fill="currentColor"/></svg></button>' +
-      '<div class="fop-tools__panel" hidden>' + toolsItemsHtml(current) + "</div></div>";
+      '<div class="fop-tools__panel" hidden>' + toolsItemsHtml(current, base) + "</div></div>";
   }
 
   // The page links, also at the top of the user menu on phones, where the
-  // Tools button is hidden (styles.css).
-  function toolsItemsHtml(current) {
+  // Tools button is hidden (styles.css). base: "../" one folder down.
+  function toolsItemsHtml(current, base) {
     // The signed-in login's own id, also while acting as another rep.
     var u = window.FB_USER || {};
     var me = String((u.acting_for || u).e_user_id || "").toUpperCase();
     return TOOLS.filter(function (t) { return !t[3] || t[3].indexOf(me) >= 0; }).map(function (t) {
       var on = t[0] === current;
-      return '<a class="fop-tools__item' + (on ? " fop-tools__item--on" : "") + '" href="' + t[2] + '"' + (on ? ' aria-current="page"' : "") + ">" + esc(t[1]) + "</a>";
+      return '<a class="fop-tools__item' + (on ? " fop-tools__item--on" : "") + '" href="' + (base || "") + t[2] + '"' + (on ? ' aria-current="page"' : "") + ">" + esc(t[1]) + "</a>";
     }).join("");
   }
 
@@ -5898,8 +6022,729 @@
     });
   }
 
+  // ── New customer (2026-10-29) ────────────────────────────────────────────
+  // new-customer/index.html (<main data-page="new-customer" data-base="../">).
+  // Creates a bill-to, a ship-to or both in Eclipse, then HubSpot, through
+  // e-order-placement/new-customer. ?e_bill_to_id=60622 is a new ship-to on
+  // that bill-to (bill-to and the Ship To flag locked); &then=order opens a
+  // new order on it afterwards (the rep clicked New order on a bill-to with
+  // no ship-tos). Before anything is written, Create runs
+  // e-order-placement/new-customer/check: Eclipse address validation and a
+  // HubSpot duplicate search. State and Industry come from HubSpot's company
+  // properties on every open (e-order-placement/new-customer/options).
+  function ncAddressLines(p) {
+    var zip = String(p.postal_code || p.zip || "");
+    if (/^\d{9}$/.test(zip)) zip = zip.slice(0, 5) + "-" + zip.slice(5);
+    var city = [p.city, [p.state, zip].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+    return [p.address_line1 || p.address, p.address_line2 || p.address2, city].filter(function (x) { return x && String(x).trim(); });
+  }
+
+  function initNewCustomer(root, user) {
+    initHeader(root, user, "new-customer");
+    var params = readParams();
+    var lockedBillTo = /^\d+$/.test(params.get("e_bill_to_id") || "") ? params.get("e_bill_to_id") : "";
+    var thenOrder = params.get("then") === "order";
+    // Acting as another rep (?e_user_id=, auth.js) carries over to the links.
+    var actAs = params.get("e_user_id") || "";
+    function opUrl(q) {
+      var p = new URLSearchParams(q || {});
+      if (actAs) p.set("e_user_id", actAs);
+      var s = p.toString();
+      return "../" + (s ? "?" + s : "");
+    }
+
+    // Outside sales choices, as on an order: the rep's territories (HubSpot
+    // e_user_all_territories) plus their default territory, once each;
+    // WIHOUSE when they have none.
+    var outsideOptions = (user.territories || []).concat([user.default_territory || ""])
+      .map(function (v) { return String(v).trim(); })
+      .filter(function (v, i, a) { return v && a.indexOf(v) === i; });
+    if (!outsideOptions.length) outsideOptions = ["WIHOUSE"];
+
+    var f = {
+      name: "", domain: "", flags: lockedBillTo ? ["ship_to"] : [],
+      outsideSales: String(user.default_territory || "").trim() || outsideOptions[0],
+      address: "", address2: "", city: "", state: "", zip: "",
+      propane: "", industry: "", description: "",
+      emails: [""], phones: [{ number: "", description: "" }],
+    };
+    var st = {
+      options: null, optionsError: "",
+      billTo: null,          // { loading } | { error } | { e_customer_id, name, lines }
+      tried: false,          // Create clicked once: show field errors
+      checking: false, check: null, keepAddress: false, skipAddress: false, dupOk: false,
+      confirm: false, creating: false, error: "", done: null,
+    };
+    var bt = { items: [], active: 0, open: false, msg: "" };   // bill-to search list
+
+    function shipOnly() { return f.flags.indexOf("ship_to") >= 0 && f.flags.indexOf("bill_to") < 0; }
+    function trim(v) { return String(v == null ? "" : v).trim(); }
+
+    function errors() {
+      var e = {};
+      if (!trim(f.name)) e.name = "Enter a name.";
+      if (!f.flags.length) e.flags = "Pick Bill To, Ship To or both.";
+      if (!trim(f.address)) e.address = "Enter the street address.";
+      if (!trim(f.city)) e.city = "Enter the city.";
+      if (!f.state) e.state = "Pick a state.";
+      if (!/^\d{5}(\d{4})?$/.test(trim(f.zip).replace(/[\s-]/g, ""))) e.zip = "5 or 9 digits.";
+      if (f.propane !== "yes" && f.propane !== "no") e.propane = "Pick one.";
+      if (!f.outsideSales) e.outsideSales = "Pick one.";
+      if (shipOnly() && !(st.billTo && st.billTo.e_customer_id)) e.billTo = "Pick the bill-to this ship-to belongs to.";
+      f.emails.forEach(function (m, i) {
+        if (trim(m) && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trim(m))) e["email" + i] = "Not a valid email.";
+      });
+      f.phones.forEach(function (p, i) {
+        if (trim(p.number) && trim(p.number).replace(/\D/g, "").length < 7) e["phone" + i] = "Not a valid phone number.";
+      });
+      return e;
+    }
+
+    // Create stays greyed out until errors() is empty; the line under it
+    // says what is still needed ("Name, State, Zip (5 or 9 digits)").
+    var NEED_LABELS = {
+      name: "Name", flags: "Bill To / Ship To", address: "Street address", city: "City", state: "State",
+      zip: "Zip", propane: "Propane customer", outsideSales: "Outside sales", billTo: "Bill to",
+    };
+    function stillNeeded() {
+      var er = errors();
+      return Object.keys(er).map(function (k) {
+        var m = /^(email|phone)(\d+)$/.exec(k);
+        if (m) return (m[1] === "email" ? "Email " : "Phone ") + (+m[2] + 1) + " (not valid)";
+        if (k === "zip" && trim(f.zip)) return "Zip (5 or 9 digits)";
+        return NEED_LABELS[k] || k;
+      });
+    }
+    function createBlocked() { return st.checking || st.creating || !st.options || stillNeeded().length > 0; }
+    function needHtml() {
+      var need = stillNeeded();
+      return need.length ? "Still needed: " + esc(need.join(", ")) : "";
+    }
+    // Typing does not re-render the form, so the button, its hint and the
+    // Google Maps link are updated in place.
+    function paintLive() {
+      var btn = root.querySelector('[data-action="nc-create"]');
+      if (btn) btn.disabled = createBlocked();
+      var hint = root.querySelector("#nc-need");
+      if (hint) hint.innerHTML = needHtml();
+      var map = root.querySelector("#nc-maps");
+      if (map) {
+        var url = mapsUrl();
+        map.hidden = !url;
+        if (url) map.href = url;
+      }
+    }
+    // https://www.google.com/maps/place/3237+Park+Ave,+Kansas+City,+MO+64109
+    function mapsUrl() {
+      var parts = [trim(f.address), trim(f.address2), trim(f.city), [f.state, trim(f.zip)].filter(Boolean).join(" ")].filter(Boolean);
+      if (!trim(f.address) && !trim(f.city) && !trim(f.zip)) return "";
+      return "https://www.google.com/maps/place/" + encodeURIComponent(parts.join(", ")).replace(/%20/g, "+").replace(/%2C/gi, ",");
+    }
+
+    // ── Rendering ──
+    function errHtml(er, key) {
+      return st.tried && er[key] ? '<div class="fop-nc__err">' + esc(er[key]) + "</div>" : "";
+    }
+    function bad(er, key) { return st.tried && er[key] ? " fop-input--err" : ""; }
+    function req() { return '<span class="fop-req" aria-hidden="true">*</span>'; }
+    function field(cls, label, inner) {
+      return '<div class="fop-field ' + cls + '"><label class="fop-label">' + label + "</label>" + inner + "</div>";
+    }
+    function input(key, er, extra) {
+      return '<input class="fop-input' + bad(er, key) + '" id="nc-' + key + '" data-f="' + key + '" value="' + esc(f[key]) + '"' +
+        ' autocomplete="off"' + (extra || "") + (st.creating ? " disabled" : "") + ">";
+    }
+    // Selected: the solid primary button (gold in dark, HubSpot green in
+    // light); not selected: the outlined ghost button.
+    function toggle(group, value, label, on, disabled) {
+      return '<button type="button" class="fop-btn fop-btn--sm fop-nc__tog' + (on ? "" : " fop-btn--ghost") + '" data-toggle="' + group + '" data-value="' + value + '"' +
+        ' aria-pressed="' + on + '"' + (disabled || st.creating ? " disabled" : "") + ">" + esc(label) + "</button>";
+    }
+    function selectHtml(key, list, er, placeholder) {
+      if (!st.options) return '<select class="fop-input" disabled><option>' + (st.optionsError ? "Not loaded" : "Loading…") + "</option></select>";
+      var has = list.some(function (o) { return o.value === f[key]; });
+      return '<select class="fop-input' + bad(er, key) + '" id="nc-' + key + '" data-f="' + key + '"' + (st.creating ? " disabled" : "") + ">" +
+        '<option value=""' + (f[key] && has ? "" : " selected") + ">" + esc(placeholder) + "</option>" +
+        list.map(function (o) {
+          return '<option value="' + esc(o.value) + '"' + (o.value === f[key] ? " selected" : "") + ">" + esc(o.label) + "</option>";
+        }).join("") + "</select>";
+    }
+
+    function billToHtml(er) {
+      if (!shipOnly()) return "";
+      var b = st.billTo;
+      var body;
+      if (b && b.e_customer_id) {
+        body = '<div class="fop-party">' +
+          '<div class="fop-party__top"><span class="fop-party__lbl">Bill to</span><span class="fop-party__topr">' +
+          (lockedBillTo || st.creating ? "" : '<button type="button" class="fop-linkbtn" data-action="nc-billto-change">Change</button>') +
+          '<span class="fop-badge" title="Eclipse customer id">' + esc(b.e_customer_id) + "</span></span></div>" +
+          '<div class="fop-party__name">' + esc(b.name) + "</div>" +
+          '<div class="fop-party__body"><div class="fop-party__addr">' +
+          (b.lines.length ? b.lines.map(function (l) { return "<div>" + esc(l) + "</div>"; }).join("") : '<span class="fop-muted">No address on file</span>') +
+          "</div></div></div>";
+      } else if (b && b.loading) {
+        body = '<div class="fop-muted">Loading bill-to ' + esc(b.id) + "…</div>";
+      } else {
+        body = (b && b.error ? '<div class="fop-alert fop-alert--error">' + esc(b.error) + "</div>" : "") +
+          (lockedBillTo ? "" :
+            '<label class="fop-label" for="nc-billto-search">Bill to' + req() + "</label>" +
+            '<div class="fop-ac"><input id="nc-billto-search" class="fop-input' + bad(er, "billTo") + '" autocomplete="off" spellcheck="false"' +
+            ' placeholder="Customer name, or .12345 for an Eclipse ID" role="combobox" aria-expanded="false" aria-controls="nc-billto-list">' +
+            '<div class="fop-ac__list" id="nc-billto-list" role="listbox"></div></div>' +
+            '<div class="fop-hint">A ship-to only customer needs an existing bill-to. Only bill-to customers are listed.</div>') +
+          errHtml(er, "billTo");
+      }
+      return '<div class="fop-card fop-nc__card"><h2 class="fop-nc__h">Bill to</h2>' + body + "</div>";
+    }
+
+    function addressCheckHtml() {
+      var c = st.check;
+      if (!c) return "";
+      var a = c.address || {};
+      var sug = a.suggestion;
+      var fromGoogle = sug && sug.source === "google";
+      var out = "";
+      if (!a.ok && !a.unavailable) {
+        // Eclipse's city choices for the zip; when Google confirmed the
+        // address, its full standardized address comes first.
+        out += '<div class="fop-alert fop-alert--error"><div class="fop-alert__title">Eclipse could not validate this address</div>' +
+          (a.errors || []).map(function (m) { return "<div>" + esc(m) + "</div>"; }).join("") +
+          (sug ? '<div class="fop-row fop-nc__sug">' + (sug.cities && sug.cities.length ? sug.cities : [sug.city]).map(function (city, i) {
+            var text = fromGoogle && i === 0 ? ncAddressLines(sug).join(", ")
+              : [city, [sug.state, sug.zip].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+            return '<button type="button" class="fop-btn fop-btn--sm" data-action="nc-use-sug" data-i="' + i + '">Use ' + esc(text) + "</button>";
+          }).join("") + "</div>" : "") + "</div>";
+      } else if (a.unavailable) {
+        out += '<div class="fop-alert fop-alert--warning">' + (a.errors || []).map(function (m) { return "<div>" + esc(m) + "</div>"; }).join("") +
+          '<div class="fop-row fop-nc__sug"><button type="button" class="fop-btn fop-btn--sm fop-btn--ghost" data-action="nc-retry-check">Try again</button>' +
+          '<button type="button" class="fop-btn fop-btn--sm fop-btn--ghost" data-action="nc-skip-address">Create without the address check</button></div></div>';
+      } else if (sug && !st.keepAddress) {
+        out += '<div class="fop-alert fop-alert--warning"><div class="fop-alert__title">' + (fromGoogle ? "Google has this address as" : "Eclipse has this address as") + "</div>" +
+          "<div>" + ncAddressLines(sug).map(esc).join("<br>") + "</div>" +
+          '<div class="fop-row fop-nc__sug"><button type="button" class="fop-btn fop-btn--sm" data-action="nc-use-sug" data-i="0">Use this</button>' +
+          '<button type="button" class="fop-btn fop-btn--sm fop-btn--ghost" data-action="nc-keep-address">Keep mine</button></div></div>';
+      } else if (a.unconfirmed && !st.keepAddress) {
+        out += '<div class="fop-alert fop-alert--warning"><div class="fop-alert__title">Address not confirmed</div>' +
+          "<div>" + esc(a.message) + " Check it on the map, or keep it if it is right (rural routes often are not on Google).</div>" +
+          '<div class="fop-row fop-nc__sug"><button type="button" class="fop-btn fop-btn--sm fop-btn--ghost" data-action="nc-keep-address">Keep this address</button></div></div>';
+      } else {
+        out += '<div class="fop-nc__ok">Address validated</div>';
+        // Google key missing or Google down: Eclipse's check still counts.
+        if (a.google && !a.google.checked && a.message) out += '<div class="fop-nc__note">' + esc(a.message) + "</div>";
+      }
+      return out;
+    }
+
+    function duplicatesHtml() {
+      var c = st.check;
+      if (!c) return "";
+      var out = c.duplicate_check_error ? '<div class="fop-alert fop-alert--info">The duplicate check failed: ' + esc(c.duplicate_check_error) + "</div>" : "";
+      var d = c.duplicates || [];
+      if (!d.length) return out;
+      var kind = f.flags.length === 2 ? "bill-tos or ship-tos" : f.flags[0] === "bill_to" ? "bill-tos" : "ship-tos";
+      return out + '<div class="fop-alert fop-alert--warning"><div class="fop-alert__title">Possible matching ' + kind + " already in HubSpot</div>" +
+        '<ul class="fop-nc__dups">' + d.map(function (x) {
+          var name = esc(x.name || "(no name)");
+          return "<li>" + (x.e_customer_id ? '<a href="' + esc(opUrl({ e_customer_id: x.e_customer_id })) + '" target="_blank" rel="noopener">' + name + "</a> " +
+            '<span class="fop-badge">' + esc(x.e_customer_id) + "</span>" : name + ' <span class="fop-muted">(not in Eclipse)</span>') +
+            '<div class="fop-muted">' + esc(x.address || "") + (x.address ? " · " : "") + esc((x.reasons || []).join(", ")) + "</div></li>";
+        }).join("") + "</ul>" +
+        (st.dupOk ? "" : '<div class="fop-row fop-nc__sug"><button type="button" class="fop-btn fop-btn--sm fop-btn--ghost" data-action="nc-dup-ok">None of these, create anyway</button></div>') +
+        "</div>";
+    }
+
+    function confirmHtml() {
+      var flags = f.flags.map(function (x) { return x === "bill_to" ? "Bill To" : "Ship To"; }).join(" / ");
+      var stateLabel = ((st.options && st.options.states) || []).filter(function (o) { return o.value === f.state; })[0];
+      var indLabel = ((st.options && st.options.industries) || []).filter(function (o) { return o.value === f.industry; })[0];
+      var rows = [
+        ["Name", f.name],
+        ["Type", flags],
+        shipOnly() ? ["Bill to", st.billTo.name + " (" + st.billTo.e_customer_id + ")"] : null,
+        ["Address", ncAddressLines({ address: f.address, address2: f.address2, city: f.city, state: stateLabel ? stateLabel.value : f.state, zip: f.zip.replace(/[\s-]/g, "") }).join(", ")],
+        ["Propane", f.propane === "yes" ? "Propane (price class LVL-3)" : "Not Propane (price class LVL-4)"],
+        ["Home branch", trim(user.default_branch) || "1"],
+        ["Outside sales", f.outsideSales],
+        f.domain ? ["Domain", f.domain] : null,
+        f.industry ? ["Industry", indLabel ? indLabel.label : f.industry] : null,
+        cleanEmails().length ? ["Email", cleanEmails().join(", ")] : null,
+        cleanPhones().length ? ["Phone", cleanPhones().map(function (p) { return p.number + (p.description ? " (" + p.description + ")" : ""); }).join(", ")] : null,
+        f.description ? ["Description", f.description] : null,
+      ].filter(Boolean);
+      return '<div class="fop-modal" role="dialog" aria-modal="true" aria-labelledby="nc-confirm-title">' +
+        '<div class="fop-modal__box fop-modal__box--sm">' +
+        '<h2 class="fop-h2" id="nc-confirm-title">Create ' + esc(lockedBillTo ? "this ship-to" : "this customer") + "?</h2>" +
+        '<p class="fop-muted">It is created in Eclipse first, then in HubSpot. Home branch comes from your HubSpot user.</p>' +
+        '<dl class="fop-nc__sum">' + rows.map(function (r) { return "<dt>" + esc(r[0]) + "</dt><dd>" + esc(r[1]) + "</dd>"; }).join("") + "</dl>" +
+        (st.error ? '<div class="fop-alert fop-alert--error">' + esc(st.error) + "</div>" : "") +
+        '<div class="fop-row fop-row--end">' +
+        '<button type="button" class="fop-btn fop-btn--ghost" data-action="nc-confirm-no"' + (st.creating ? " disabled" : "") + '>Back <span class="fop-key">Esc</span></button>' +
+        '<button type="button" class="fop-btn" data-action="nc-confirm-yes"' + (st.creating ? " disabled" : "") + ">" + (st.creating ? "Creating…" : "Create") + "</button>" +
+        "</div></div></div>";
+    }
+
+    function doneHtml() {
+      var d = st.done;
+      return '<div class="fop-wrap fop-wrap--narrow">' +
+        '<div class="fop-kicker">Order Placement</div><h1 class="fop-h1">' + esc(d.name || "Customer") + " created</h1>" +
+        '<div class="fop-alert fop-alert--success">Eclipse customer ' + esc(d.e_customer_id) + " is ready.</div>" +
+        (d.warnings || []).map(function (w) { return '<div class="fop-alert fop-alert--warning">' + esc(w) + "</div>"; }).join("") +
+        '<div class="fop-row"><a class="fop-btn" href="' + esc(nextUrl(d)) + '">' + (thenOrder && d.is_ship_to ? "Start the order" : "Open its orders") + "</a></div></div>";
+    }
+
+    function nextUrl(d) {
+      var q = { e_customer_id: d.e_customer_id };
+      if (thenOrder && d.is_ship_to) q.new_order = "1";
+      return opUrl(q);
+    }
+
+    function viewHtml() {
+      if (st.done) return doneHtml();
+      var er = errors();
+      var opts = st.options || { states: [], industries: [] };
+      var dis = st.creating ? " disabled" : "";
+      var backUrl = opUrl(lockedBillTo ? { e_customer_id: lockedBillTo } : {});
+      return '<div class="fop-wrap fop-nc">' +
+        '<div class="fop-top"><div><div class="fop-kicker">Order Placement</div><h1 class="fop-h1">' + (lockedBillTo ? "New ship-to" : "New customer") + "</h1></div>" +
+        '<div class="fop-row"><a class="fop-btn fop-btn--ghost fop-btn--sm" href="' + esc(backUrl) + '">' + (lockedBillTo ? "Back to the customer" : "Back") + "</a></div></div>" +
+        (thenOrder ? '<div class="fop-alert fop-alert--info">This bill-to has no ship-to yet. Add one, then the order starts on it.</div>' : "") +
+        (st.optionsError ? '<div class="fop-alert fop-alert--error">Could not load the state and industry lists from HubSpot: ' + esc(st.optionsError) +
+          ' <button type="button" class="fop-linkbtn" data-action="nc-reload-options">Try again</button></div>' : "") +
+
+        '<div class="fop-card fop-nc__card"><h2 class="fop-nc__h">Customer</h2><div class="fop-nc__grid">' +
+        field("fop-nc__f4", "Name" + req(), input("name", er, ' maxlength="100"') + errHtml(er, "name")) +
+        field("fop-nc__f2", "Domain", input("domain", er, ' placeholder="example.com" inputmode="url"')) +
+        field("fop-nc__f3", "Bill To / Ship To" + req(), '<div class="fop-row">' +
+          toggle("flags", "bill_to", "Bill To", f.flags.indexOf("bill_to") >= 0, !!lockedBillTo) +
+          toggle("flags", "ship_to", "Ship To", f.flags.indexOf("ship_to") >= 0, !!lockedBillTo) + "</div>" + errHtml(er, "flags")) +
+        field("fop-nc__f3", "Propane customer" + req(), '<div class="fop-row">' +
+          toggle("propane", "yes", "Propane", f.propane === "yes") + toggle("propane", "no", "Not Propane", f.propane === "no") + "</div>" + errHtml(er, "propane")) +
+        field("fop-nc__f3", "Industry", selectHtml("industry", opts.industries, er, "None")) +
+        field("fop-nc__f3", "Outside sales" + req(), '<select class="fop-input' + bad(er, "outsideSales") + '" id="nc-outsideSales" data-f="outsideSales"' + dis + ">" +
+          outsideOptions.map(function (v) {
+            return '<option value="' + esc(v) + '"' + (v === f.outsideSales ? " selected" : "") + ">" + esc(v) + "</option>";
+          }).join("") + "</select>" + errHtml(er, "outsideSales")) +
+        field("fop-nc__f6", "Description", '<textarea class="fop-input fop-notes" id="nc-description" data-f="description" rows="2" maxlength="2000"' + dis + ">" + esc(f.description) + "</textarea>") +
+        "</div></div>" +
+
+        billToHtml(er) +
+
+        '<div class="fop-card fop-nc__card"><div class="fop-nc__hrow"><h2 class="fop-nc__h">Address</h2>' +
+        '<a class="fop-xlink" id="nc-maps" target="_blank" rel="noopener" href="' + esc(mapsUrl() || "#") + '"' + (mapsUrl() ? "" : " hidden") + ">View on map" + EXT_ICON + "</a></div>" +
+        '<div class="fop-nc__grid">' +
+        // Google type-ahead under the street (addrSearch()); picking a
+        // suggestion fills street, line 2, city, state and zip.
+        field("fop-nc__f6", "Street address" + req(), '<div class="fop-ac">' +
+          input("address", er, ' placeholder="Start typing an address or business name" role="combobox" aria-expanded="false" aria-controls="nc-addr-list"') +
+          '<div class="fop-ac__list" id="nc-addr-list" role="listbox"></div></div>' + errHtml(er, "address")) +
+        field("fop-nc__f6", "Address line 2", input("address2", er, ' placeholder="Suite, unit, building"')) +
+        field("fop-nc__f2", "City" + req(), input("city", er) + errHtml(er, "city")) +
+        field("fop-nc__f2", "State" + req(), selectHtml("state", opts.states, er, "Select…") + errHtml(er, "state")) +
+        field("fop-nc__f2", "Zip" + req(), input("zip", er, ' inputmode="numeric" maxlength="10"') + errHtml(er, "zip")) +
+        "</div>" + addressCheckHtml() + "</div>" +
+
+        '<div class="fop-card fop-nc__card"><h2 class="fop-nc__h">Contact</h2>' +
+        '<label class="fop-label">Email</label>' +
+        f.emails.map(function (m, i) {
+          return '<div class="fop-nc__rowin"><input class="fop-input' + bad(er, "email" + i) + '" id="nc-email-' + i + '" data-email="' + i + '" type="email" value="' + esc(m) + '" placeholder="name@example.com"' + dis + ">" +
+            (f.emails.length > 1 ? '<button type="button" class="fop-icon-btn" data-action="nc-del-email" data-i="' + i + '" aria-label="Remove email"' + dis + ">×</button>" : "") + "</div>" + errHtml(er, "email" + i);
+        }).join("") +
+        '<button type="button" class="fop-linkbtn fop-nc__add" data-action="nc-add-email"' + dis + ">+ Add another email</button>" +
+        '<label class="fop-label fop-nc__gap">Phone</label>' +
+        f.phones.map(function (p, i) {
+          return '<div class="fop-nc__rowin"><input class="fop-input' + bad(er, "phone" + i) + '" id="nc-phone-' + i + '" data-phone="' + i + '" data-pf="number" type="tel" value="' + esc(p.number) + '" placeholder="Number"' + dis + ">" +
+            '<input class="fop-input" id="nc-phonedesc-' + i + '" data-phone="' + i + '" data-pf="description" value="' + esc(p.description) + '" placeholder="Description (e.g. Main, Cell)" maxlength="40"' + dis + ">" +
+            (f.phones.length > 1 ? '<button type="button" class="fop-icon-btn" data-action="nc-del-phone" data-i="' + i + '" aria-label="Remove phone"' + dis + ">×</button>" : "") + "</div>" + errHtml(er, "phone" + i);
+        }).join("") +
+        '<button type="button" class="fop-linkbtn fop-nc__add" data-action="nc-add-phone"' + dis + ">+ Add another phone</button>" +
+        "</div>" +
+
+        duplicatesHtml() +
+        (st.error && !st.confirm ? '<div class="fop-alert fop-alert--error">' + esc(st.error) + "</div>" : "") +
+        '<div class="fop-row fop-row--end fop-nc__actions">' +
+        '<span class="fop-nc__need" id="nc-need">' + needHtml() + "</span>" +
+        '<button type="button" class="fop-btn" data-action="nc-create"' + (createBlocked() ? " disabled" : "") + ">" +
+        (st.checking ? "Checking address…" : "Create " + (lockedBillTo ? "ship-to" : "customer")) + "</button></div>" +
+        "</div>" + (st.confirm ? confirmHtml() : "");
+    }
+
+    // Full re-render, keeping the focused box and its caret.
+    function render() {
+      var a = document.activeElement;
+      var id = a && root.contains(a) && a.id;
+      var sel = id && typeof a.selectionStart === "number" ? [a.selectionStart, a.selectionEnd] : null;
+      root.innerHTML = viewHtml();
+      if (id) {
+        var el = document.getElementById(id);
+        if (el) {
+          el.focus();
+          if (sel && el.setSelectionRange) try { el.setSelectionRange(sel[0], sel[1]); } catch (e) { /* type=email has no selection */ }
+        }
+      }
+      if (st.confirm) {
+        var yes = root.querySelector('[data-action="nc-confirm-yes"]');
+        if (yes && !id) yes.focus();
+      }
+    }
+
+    // ── Data ──
+    function loadOptions() {
+      st.optionsError = "";
+      getJson(API.newCustomerOptions, { e_customer_id: lockedBillTo }).then(function (d) {
+        // Eclipse takes 2-letter codes only; HubSpot's list also has
+        // "International" (value "international").
+        var states = (d.states || []).filter(function (o) { return /^[A-Z]{2}$/.test(o.value); });
+        st.options = { states: states, industries: d.industries || [] };
+        // A new ship-to starts with its bill-to's domain, industry and
+        // propane flag (HubSpot), unless the rep already set them.
+        var b = d.bill_to;
+        if (b) {
+          if (!f.domain && b.domain) f.domain = b.domain;
+          if (!f.industry && b.industry) f.industry = b.industry;
+          if (!f.propane && (b.e_propane_customer === "yes" || b.e_propane_customer === "no")) f.propane = b.e_propane_customer;
+        }
+        render();
+      }).catch(function (err) {
+        st.optionsError = err.message;
+        render();
+      });
+    }
+
+    function loadBillTo(id) {
+      st.billTo = { loading: true, id: id };
+      render();
+      getJson(API.customer, { e_customer_id: id }).then(function (d) {
+        var b = d.bill_to;
+        if (!b) throw new Error("No bill-to found for customer " + id + ".");
+        st.billTo = { e_customer_id: String(b.e_customer_id), name: b.name || "", lines: ncAddressLines(b) };
+        resetCheck();
+        render();
+      }).catch(function (err) {
+        st.billTo = { error: "Could not load the bill-to: " + err.message };
+        render();
+      });
+    }
+
+    function cleanEmails() { return f.emails.map(trim).filter(Boolean); }
+    function cleanPhones() {
+      return f.phones.map(function (p) { return { number: trim(p.number), description: trim(p.description) }; })
+        .filter(function (p) { return p.number; });
+    }
+
+    function resetCheck() {
+      st.check = null; st.keepAddress = false; st.skipAddress = false; st.dupOk = false; st.error = "";
+    }
+
+    // Create: field errors first, then the check, then the confirm dialog.
+    function requestCreate() {
+      st.tried = true;
+      var er = errors();
+      var first = Object.keys(er)[0];
+      if (first) {
+        render();
+        var el = root.querySelector(".fop-input--err") || root.querySelector(".fop-nc__err");
+        if (el) { el.scrollIntoView({ block: "center" }); if (el.focus) el.focus(); }
+        return;
+      }
+      if (st.check) { nextStep(); return; }
+      st.checking = true; st.error = "";
+      render();
+      getJson(API.newCustomerCheck, {
+        name: trim(f.name), domain: trim(f.domain), address: trim(f.address), address2: trim(f.address2),
+        city: trim(f.city), state: f.state, zip: trim(f.zip).replace(/[\s-]/g, ""),
+        // Duplicates are only bill-tos / ship-tos like the one being made.
+        billto_shipto_flag: f.flags.join(";"),
+      }).then(function (d) {
+        st.checking = false;
+        st.check = d;
+        nextStep();
+      }).catch(function (err) {
+        st.checking = false;
+        st.error = "The address and duplicate check failed: " + err.message;
+        render();
+      });
+    }
+
+    // Opens the confirm dialog once nothing from the check is left to answer.
+    function nextStep() {
+      var a = (st.check && st.check.address) || {};
+      var stop = (!a.ok && !a.unavailable) || (a.unavailable && !st.skipAddress) ||
+        (a.ok && (a.suggestion || a.unconfirmed) && !st.keepAddress) || ((st.check.duplicates || []).length && !st.dupOk);
+      st.confirm = !stop;
+      render();
+      if (stop) {
+        var box = root.querySelector(".fop-nc .fop-alert--error, .fop-nc .fop-alert--warning");
+        if (box) box.scrollIntoView({ block: "center", behavior: "smooth" });
+      }
+    }
+
+    function create() {
+      if (st.creating) return;
+      st.creating = true; st.error = "";
+      render();
+      var loc = st.check && st.check.address && st.check.address.location;
+      postJson(API.newCustomer, {
+        name: trim(f.name), domain: trim(f.domain), billto_shipto_flag: f.flags.slice(),
+        address: trim(f.address), address2: trim(f.address2), city: trim(f.city), state: f.state, zip: trim(f.zip).replace(/[\s-]/g, ""),
+        e_propane_customer: f.propane, industry: f.industry, description: trim(f.description), outside_salesperson: f.outsideSales,
+        // Google's coordinates for the checked address (HubSpot latitude /
+        // longitude); none when Google had no premise-level match.
+        latitude: loc ? loc.lat : "", longitude: loc ? loc.lng : "",
+        emails: cleanEmails(), phones: cleanPhones(),
+        bill_to_id: shipOnly() ? st.billTo.e_customer_id : "",
+        hs_owner_id: user.hs_owner_id || "", e_user_id: user.e_user_id || "",
+      }).then(function (d) {
+        st.creating = false; st.confirm = false;
+        // Nothing to read: go straight on. Warnings: show them first.
+        if (!(d.warnings || []).length) { window.location.href = nextUrl(d); return; }
+        st.done = d;
+        render();
+      }).catch(function (err) {
+        st.creating = false;
+        st.error = err.message;
+        render();
+      });
+    }
+
+    // ── Bill-to search: bill-tos only (HubSpot billto_shipto_flag contains
+    // bill_to; new-customer/bill-tos), same list shape as the order page's
+    // customer search ──
+    var btSearch = debounce(function (input) {
+      var q = input.value.trim();
+      if (document.activeElement !== input) return;
+      if (q.length < 2) { btClose(); return; }
+      btShow(input, [], "Searching…");
+      getJson(API.newCustomerBillTos, { q: q }).then(function (d) {
+        if (document.activeElement !== input || input.value.trim() !== q) return;
+        var items = d.e_customers || [];
+        btShow(input, items, items.length ? "" : "No bill-tos match");
+      }).catch(function (err) {
+        if (document.activeElement === input) btShow(input, [], "Search failed: " + err.message);
+      });
+    }, 250);
+
+    function btShow(input, items, msg) {
+      var list = root.querySelector("#nc-billto-list");
+      if (!list) return;
+      bt.items = items; bt.active = 0; bt.open = true;
+      list.innerHTML = msg ? '<div class="fop-ac__msg">' + esc(msg) + "</div>" : items.map(function (it, i) {
+        return '<div class="fop-ac__item' + (i === 0 ? " fop-ac__item--active" : "") + '" data-bt="' + i + '" role="option">' +
+          '<span class="fop-badge">' + esc(it.e_customer_id) + "</span> " + esc(it.name || "-") + "</div>";
+      }).join("");
+      list.classList.add("fop-ac__list--open");
+      input.setAttribute("aria-expanded", "true");
+    }
+    function btClose() {
+      var list = root.querySelector("#nc-billto-list");
+      bt.open = false; bt.items = [];
+      if (list) { list.classList.remove("fop-ac__list--open"); list.innerHTML = ""; }
+      var input = root.querySelector("#nc-billto-search");
+      if (input) input.setAttribute("aria-expanded", "false");
+    }
+    function btPick(i) {
+      var it = bt.items[i];
+      if (!it) return;
+      btClose();
+      var a = document.activeElement;
+      if (a && a.blur) a.blur();
+      loadBillTo(String(it.e_customer_id));
+    }
+
+    // ── Street address type-ahead (Google Places, new-customer/address) ──
+    // One session token from the first keystroke to the pick, so Google
+    // bills the suggestions and the pick as one session.
+    var addr = { items: [], active: 0, open: false, session: "", seq: 0 };
+    function newSession() {
+      try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (e) { /* older browsers */ }
+      return "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+    }
+    var addrSearch = debounce(function (input) {
+      var q = input.value.trim();
+      if (document.activeElement !== input) return;
+      if (q.length < 3) { addrClose(); return; }
+      if (!addr.session) addr.session = newSession();
+      var seq = ++addr.seq;
+      getJson(API.newCustomerAddress, { q: q, session: addr.session }).then(function (d) {
+        if (seq !== addr.seq || document.activeElement !== input) return;
+        var items = d.suggestions || [];
+        addrShow(input, items, items.length ? "" : "No matching addresses");
+      }).catch(function (err) {
+        if (seq === addr.seq && document.activeElement === input) addrShow(input, [], "Address search failed: " + err.message);
+      });
+    }, 300);
+
+    function addrShow(input, items, msg) {
+      var list = root.querySelector("#nc-addr-list");
+      if (!list) return;
+      addr.items = items; addr.active = 0; addr.open = true;
+      list.innerHTML = (msg ? '<div class="fop-ac__msg">' + esc(msg) + "</div>" : items.map(function (it, i) {
+        return '<div class="fop-ac__item' + (i === 0 ? " fop-ac__item--active" : "") + '" data-addr="' + i + '" role="option">' +
+          "<b>" + esc(it.main) + "</b>" + (it.secondary ? ' <span class="fop-muted">' + esc(it.secondary) + "</span>" : "") + "</div>";
+      }).join("")) + '<div class="fop-nc__google">Powered by Google</div>';
+      list.classList.add("fop-ac__list--open");
+      input.setAttribute("aria-expanded", "true");
+    }
+    function addrClose() {
+      var list = root.querySelector("#nc-addr-list");
+      addr.open = false; addr.items = [];
+      if (list) { list.classList.remove("fop-ac__list--open"); list.innerHTML = ""; }
+      var input = root.querySelector("#nc-address");
+      if (input) input.setAttribute("aria-expanded", "false");
+    }
+    function addrPick(i) {
+      var it = addr.items[i];
+      if (!it) return;
+      addrClose();
+      addr.seq++;   // drop any search still in flight
+      var session = addr.session;
+      addr.session = "";
+      getJson(API.newCustomerAddress, { place_id: it.place_id, session: session }).then(function (d) {
+        // A business with no street number leaves the street as typed.
+        f.address = d.address || f.address;
+        f.address2 = d.address2 || f.address2;
+        f.city = d.city || f.city;
+        var states = (st.options && st.options.states) || [];
+        if (d.state && states.some(function (o) { return o.value === d.state; })) f.state = d.state;
+        if (d.zip) f.zip = d.zip;
+        resetCheck();
+        render();
+        // Next box still empty, else line 2 (suite / unit).
+        var next = ["address", "city", "state", "zip"].filter(function (k) { return !trim(f[k]); })[0];
+        focusId("nc-" + (next || "address2"));
+      }).catch(function (err) {
+        st.error = "Could not load that address: " + err.message;
+        render();
+      });
+    }
+
+    // ── Events ──
+    root.addEventListener("input", function (e) {
+      var t = e.target;
+      if (t.id === "nc-billto-search") { btSearch(t); return; }
+      var key = t.getAttribute("data-f");
+      var redraw = !!st.check || st.tried || !!st.error;
+      if (key) {
+        f[key] = t.value;
+        if (key === "address") addrSearch(t);
+      } else if (t.hasAttribute("data-email")) f.emails[+t.getAttribute("data-email")] = t.value;
+      else if (t.hasAttribute("data-phone")) f.phones[+t.getAttribute("data-phone")][t.getAttribute("data-pf")] = t.value;
+      else return;
+      // Any edit after a check means checking again on Create.
+      if (st.check) resetCheck();
+      st.error = "";
+      if (redraw) render();
+      else paintLive();
+    });
+    root.addEventListener("change", function (e) {
+      var key = e.target.getAttribute("data-f");
+      if (key && e.target.tagName === "SELECT") {
+        f[key] = e.target.value;
+        if (key === "state" && st.check) resetCheck();
+        render();
+      }
+    });
+    root.addEventListener("keydown", function (e) {
+      if (e.target.id === "nc-address" && addr.open && addr.items.length) {
+        var opts = root.querySelectorAll("#nc-addr-list .fop-ac__item");
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault();
+          addr.active = (addr.active + (e.key === "ArrowDown" ? 1 : -1) + addr.items.length) % addr.items.length;
+          for (var j = 0; j < opts.length; j++) opts[j].classList.toggle("fop-ac__item--active", j === addr.active);
+          if (opts[addr.active]) opts[addr.active].scrollIntoView({ block: "nearest" });
+          return;
+        }
+        if (e.key === "Enter") { e.preventDefault(); addrPick(addr.active); return; }
+      }
+      if (e.key === "Escape" && addr.open) { addrClose(); return; }
+      if (e.target.id === "nc-billto-search" && bt.open && bt.items.length) {
+        var els = root.querySelectorAll("#nc-billto-list .fop-ac__item");
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault();
+          bt.active = (bt.active + (e.key === "ArrowDown" ? 1 : -1) + bt.items.length) % bt.items.length;
+          for (var i = 0; i < els.length; i++) els[i].classList.toggle("fop-ac__item--active", i === bt.active);
+          if (els[bt.active]) els[bt.active].scrollIntoView({ block: "nearest" });
+          return;
+        }
+        if (e.key === "Enter") { e.preventDefault(); btPick(bt.active); return; }
+      }
+      if (e.key === "Escape") {
+        if (bt.open) { btClose(); return; }
+        if (st.confirm && !st.creating) { st.confirm = false; render(); }
+      }
+    });
+    root.addEventListener("mousedown", function (e) {
+      var item = e.target.closest("[data-bt]");
+      if (item) { e.preventDefault(); btPick(+item.getAttribute("data-bt")); }
+      var place = e.target.closest("[data-addr]");
+      if (place) { e.preventDefault(); addrPick(+place.getAttribute("data-addr")); }
+    });
+    root.addEventListener("focusout", function (e) {
+      if (e.target.id === "nc-billto-search") setTimeout(btClose, 150);
+      if (e.target.id === "nc-address") setTimeout(addrClose, 150);
+    });
+    root.addEventListener("click", function (e) {
+      var tg = e.target.closest("[data-toggle]");
+      if (tg && !tg.disabled) {
+        var group = tg.getAttribute("data-toggle"), v = tg.getAttribute("data-value");
+        if (group === "flags") {
+          var at = f.flags.indexOf(v);
+          if (at >= 0) f.flags.splice(at, 1); else f.flags.push(v);
+          f.flags.sort();   // bill_to before ship_to
+          // The duplicate list depends on the kind, so check again on Create.
+          if (st.check) resetCheck();
+        } else {
+          f.propane = v;
+        }
+        render();
+        return;
+      }
+      var btn = e.target.closest("[data-action]");
+      if (!btn || btn.disabled) return;
+      var i = +btn.getAttribute("data-i");
+      switch (btn.getAttribute("data-action")) {
+        case "nc-create": requestCreate(); break;
+        case "nc-confirm-yes": create(); break;
+        case "nc-confirm-no": st.confirm = false; st.error = ""; render(); break;
+        case "nc-add-email": f.emails.push(""); render(); focusId("nc-email-" + (f.emails.length - 1)); break;
+        case "nc-del-email": f.emails.splice(i, 1); render(); break;
+        case "nc-add-phone": f.phones.push({ number: "", description: "" }); render(); focusId("nc-phone-" + (f.phones.length - 1)); break;
+        case "nc-del-phone": f.phones.splice(i, 1); render(); break;
+        case "nc-billto-change": st.billTo = null; resetCheck(); render(); focusId("nc-billto-search"); break;
+        case "nc-reload-options": loadOptions(); break;
+        case "nc-retry-check": resetCheck(); requestCreate(); break;
+        case "nc-skip-address": st.skipAddress = true; nextStep(); break;
+        case "nc-keep-address": st.keepAddress = true; nextStep(); break;
+        case "nc-dup-ok": st.dupOk = true; nextStep(); break;
+        case "nc-use-sug": {
+          var s = st.check.address.suggestion;
+          var cities = s.cities && s.cities.length ? s.cities : [s.city];
+          f.address = s.address || f.address;
+          f.address2 = s.address2 != null ? s.address2 : f.address2;
+          f.city = cities[i] || s.city || f.city;
+          if (s.state) f.state = String(s.state).toUpperCase();
+          if (s.zip) f.zip = s.zip;
+          resetCheck();
+          requestCreate();
+          break;
+        }
+      }
+    });
+    function focusId(id) {
+      var el = document.getElementById(id);
+      if (el) el.focus();
+    }
+
+    document.title = "Fairbank | " + (lockedBillTo ? "New Ship-To" : "New Customer");
+    render();
+    loadOptions();
+    if (lockedBillTo) loadBillTo(lockedBillTo);
+  }
+
   function boot() {
-    initApp(document.getElementById("app"));
+    var root = document.getElementById("app");
+    if (root.getAttribute("data-page") === "new-customer") initNewCustomer(root, window.FB_USER || {});
+    else initApp(root);
   }
 
 

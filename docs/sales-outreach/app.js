@@ -638,6 +638,7 @@
   var TOOLS = [
     ["order-placement", "Order placement", "../order-placement/"],
     ["product-lookup", "Find order by product", "../product-lookup/"],
+    ["new-customer", "New customer", "../order-placement/new-customer/"],
     ["sales-outreach", "Sales outreach", "../sales-outreach/", ["BECCHR"]],
   ];
 

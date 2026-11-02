@@ -1,0 +1,353 @@
+{
+  "name": "e-order-placement: new customer check",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "e-order-placement/new-customer/check",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        },
+        "authentication": "jwtAuth"
+      },
+      "id": "f5633aaa-061a-58d6-8e06-256efec39806",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "8ee20216-caa5-5d49-b9e2-b0c30bf5a1b9",
+      "credentials": {
+        "jwtAuth": {
+          "id": "6sDOPAJdRYI8fpxX",
+          "name": "Fairbank session (JWT)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// New customer check (runs before anything is written): Eclipse address\n// validation plus a HubSpot duplicate search. GET, so it is safe to test.\nconst q = $input.first().json.query || {};\nconst s = (v) => String(v == null ? '' : v).trim();\nconst input = {\n  name: s(q.name),\n  domain: s(q.domain).toLowerCase().replace(/^https?:\\/\\//, '').replace(/^www\\./, '').replace(/\\/.*$/, ''),\n  address: s(q.address),\n  address2: s(q.address2),\n  city: s(q.city),\n  state: s(q.state).toUpperCase(),\n  zip: s(q.zip).replace(/[\\s-]/g, ''),\n  // What is being created (bill_to;ship_to): duplicates are only records\n  // of the same kind (Shape). Empty means no filter.\n  flags: s(q.billto_shipto_flag).split(/[;,]/).map(s).filter((f) => f === 'bill_to' || f === 'ship_to'),\n};\nconst missing = ['address', 'city', 'state', 'zip'].filter((k) => !input[k]);\nif (missing.length) return [{ json: { ok: false, statusCode: 400, body: { error: 'Missing ' + missing.join(', ') } } }];\n\n// Duplicate search: same zip (5 digits, and the full zip when longer) or\n// the same domain. Name matches come from a second, free-text search.\nconst zip5 = input.zip.slice(0, 5);\nconst groups = [{ filters: [{ propertyName: 'zip', operator: 'EQ', value: zip5 }] }];\nif (input.zip !== zip5) groups.push({ filters: [{ propertyName: 'zip', operator: 'EQ', value: input.zip }] });\nif (input.domain) groups.push({ filters: [{ propertyName: 'domain', operator: 'EQ', value: input.domain }] });\n\n// Google Address Validation request (v1:validateAddress). The page's State\n// list also has Canadian provinces; USPS CASS is US / PR only.\nconst CA = ['AB', 'BC', 'MB', 'NB', 'NL', 'NS', 'NT', 'NU', 'ON', 'PE', 'QC', 'SK', 'YT'];\nconst regionCode = CA.includes(input.state) ? 'CA' : input.state === 'PR' ? 'PR' : 'US';\nconst google = {\n  address: {\n    regionCode,\n    addressLines: [input.address, input.address2].filter(Boolean),\n    locality: input.city,\n    administrativeArea: input.state,\n    postalCode: input.zip,\n  },\n};\nif (regionCode !== 'CA') google.enableUspsCass = true;\n\nreturn [{ json: { ok: true, input, filter: { filterGroups: groups }, google } }];\n"
+      },
+      "id": "7e528fb3-729d-5897-8557-29b051c5ae96",
+      "name": "Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "f0869fbe-cb44-5e11-b21d-a66b3731269f",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a57f9252-ef44-5c6c-a246-e5d2c7c59d07",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "addressValidation",
+        "operation": "validate",
+        "addressStreetLineOne": "={{ $json.input.address }}",
+        "addressStreetLineTwo": "={{ $json.input.address2 }}",
+        "addressCity": "={{ $json.input.city }}",
+        "addressState": "={{ $json.input.state }}",
+        "addressPostalCode": "={{ $json.input.zip }}"
+      },
+      "id": "aee14db0-46ff-54d0-ba04-1d597c1f281f",
+      "name": "Eclipse: validate address",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        720,
+        0
+      ],
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "resource": "objects",
+        "objectType": "0-2",
+        "operation": "search",
+        "searchInputMode": "json",
+        "filterJson": "={{ JSON.stringify($('Validate').first().json.filter) }}",
+        "properties": [
+          "name",
+          "e_customer_id",
+          "address",
+          "address2",
+          "city",
+          "state",
+          "zip",
+          "domain",
+          "billto_shipto_flag"
+        ],
+        "limit": 100,
+        "searchOptions": {}
+      },
+      "id": "3f79373b-6dfe-59dd-ad2a-140ab06dcd6b",
+      "name": "HubSpot: same zip or domain",
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        0
+      ],
+      "credentials": {
+        "hubspotApi": {
+          "id": "sVf2mkwjVlflhBbV",
+          "name": "Fairbank Webtool"
+        }
+      },
+      "executeOnce": true,
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "resource": "objects",
+        "objectType": "0-2",
+        "operation": "search",
+        "searchInputMode": "json",
+        "filterJson": "={{ JSON.stringify({ filterGroups: [] }) }}",
+        "properties": [
+          "name",
+          "e_customer_id",
+          "address",
+          "address2",
+          "city",
+          "state",
+          "zip",
+          "domain",
+          "billto_shipto_flag"
+        ],
+        "limit": 20,
+        "searchOptions": {
+          "query": "={{ $('Validate').first().json.input.name }}"
+        }
+      },
+      "id": "1503cf29-0bb4-521d-ad47-d3a04bf488a3",
+      "name": "HubSpot: same name",
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        1440,
+        0
+      ],
+      "credentials": {
+        "hubspotApi": {
+          "id": "sVf2mkwjVlflhBbV",
+          "name": "Fairbank Webtool"
+        }
+      },
+      "executeOnce": true,
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Shapes the address check and the duplicate list for the page.\n// address: { ok, errors: [text], suggestion: { address, address2, city,\n//   cities: [..], state, zip, source: 'eclipse' | 'google' } | null,\n//   unavailable, unconfirmed, message, location: { lat, lng } | null,\n//   google: { checked, confirmed, granularity } }\n// ok / errors / unavailable are Eclipse's (it refuses a city / state that\n// does not match the zip); Google adds the standardized address\n// (suggestion), whether the street address exists (unconfirmed, message)\n// and its coordinates (location).\n// duplicates: [{ e_customer_id, hs_id, name, address, reasons: [..] }]\nconst input = $('Validate').first().json.input;\nconst s = (v) => String(v == null ? '' : v).trim();\nconst same = (a, b) => s(a).toUpperCase() === s(b).toUpperCase();\n\n// ── Address ────────────────────────────────────────────────────────────\nconst a = $('Eclipse: validate address').first().json || {};\nconst address = { ok: false, errors: [], suggestion: null, unavailable: false };\nif (Array.isArray(a.errors) && a.errors.length) {\n  // A 400: the address failed. Eclipse's message can name the right\n  // city / state for the zip, e.g. Invalid City/State/Country for\n  // PostalCode \"44146\". Should be City: \"BEDFORD, ...\", State: \"OH\", Country: \"\".\n  address.errors = a.errors.map((e) => s(e && (e.message || e))).filter(Boolean);\n  const text = address.errors.join(' ');\n  const city = (text.match(/City:\\s*\"([^\"]*)\"/i) || [])[1] || '';\n  const state = (text.match(/State:\\s*\"([^\"]*)\"/i) || [])[1] || '';\n  // Several cities read \"BEDFORD, or BEDFORD HEIGHTS, or CLEVELAND\" (live\n  // GET, 2026-10-29).\n  const cities = city.split(',').map((c) => s(c).replace(/^or\\s+/i, '')).filter((c) => c && !/^\\.+$/.test(c));\n  if (cities.length || state) {\n    address.suggestion = {\n      address: input.address, address2: input.address2,\n      city: cities[0] || input.city, cities,\n      state: state || input.state, zip: input.zip, source: 'eclipse',\n    };\n  }\n} else if (a.error) {\n  // Any other failure (Eclipse down, 5xx): the page shows it and lets the\n  // rep create without the check.\n  address.unavailable = true;\n  address.errors = ['Eclipse address check failed: ' + s(a.error) + (a.message ? ' ' + JSON.stringify(a.message).slice(0, 300) : '')];\n} else {\n  // Success: Eclipse answers { results: [{ streetLineOne, city, state,\n  // postalCode, ... }] } with the address as sent (live, 2026-10-29), so\n  // there is nothing to suggest from it.\n  address.ok = true;\n}\n\n// ── Google Address Validation ──────────────────────────────────────────\n// Best-effort: no key, a quota error or Google down leaves the Eclipse\n// result alone (google.checked false, message says why).\n// Field names checked against live answers (2026-10-30: a premise match\n// with uspsData, a typo, and an RR route that came back OTHER).\nconst g = $('Google: validate address').first().json || {};\naddress.google = { checked: false, confirmed: false, granularity: '' };\naddress.unconfirmed = false;\naddress.message = '';\naddress.location = null;\nif (g.error || !g.result) {\n  const e = g.error || {};\n  address.message = 'Google address check unavailable: ' + s(e.message || e.description || (typeof e === 'string' ? e : '') || 'no result').slice(0, 200);\n} else {\n  const r = g.result;\n  const v = r.verdict || {};\n  const ad = r.address || {};\n  const gran = s(v.validationGranularity);\n  // PREMISE / SUB_PREMISE: Google found the building; anything coarser\n  // (PREMISE_PROXIMITY, BLOCK, ROUTE, OTHER) means the street number or\n  // street could not be matched, common for rural routes.\n  const confirmed = (gran === 'PREMISE' || gran === 'SUB_PREMISE') && v.addressComplete !== false && !v.hasUnconfirmedComponents;\n  address.google = { checked: true, confirmed, granularity: gran };\n  if (!confirmed) {\n    const NAMES = { street_number: 'street number', route: 'street', locality: 'city', administrative_area_level_1: 'state',\n      postal_code: 'zip', subpremise: 'unit or box', point_of_interest: 'place name', country: 'country' };\n    const words = (list) => [...new Set((list || []).map((t) => NAMES[t] || String(t).replace(/_/g, ' ')))].join(', ');\n    const missing = words(ad.missingComponentTypes);\n    const unconf = words(ad.unconfirmedComponentTypes);\n    address.unconfirmed = true;\n    address.message = 'Google could not confirm this street address' +\n      (missing ? '; missing: ' + missing : '') + (unconf ? '; not confirmed: ' + unconf : '') + '.';\n  }\n  const loc = r.geocode && r.geocode.location;\n  if (loc && isFinite(loc.latitude) && isFinite(loc.longitude) && ['PREMISE', 'SUB_PREMISE', 'PREMISE_PROXIMITY'].includes(s(r.geocode.granularity || gran))) {\n    address.location = { lat: Number(loc.latitude), lng: Number(loc.longitude) };\n  }\n  // The standardized address: USPS (US / PR, enableUspsCass), else Google's\n  // postal address. Zip stays 5 digits unless the rep typed 9.\n  const u = (r.uspsData && r.uspsData.standardizedAddress) || {};\n  const pa = ad.postalAddress || {};\n  const zipOf = (zip5, ext) => {\n    const z = s(zip5).replace(/[\\s-]/g, '');\n    return input.zip.length === 9 && ext ? z.slice(0, 5) + s(ext) : (input.zip.length === 9 ? z : z.slice(0, 5));\n  };\n  const got = u.firstAddressLine\n    ? { address: s(u.firstAddressLine), address2: s(u.secondAddressLine), city: s(u.city), state: s(u.state), zip: zipOf(u.zipCode, u.zipCodeExtension) }\n    : { address: s((pa.addressLines || [])[0]), address2: s((pa.addressLines || [])[1]), city: s(pa.locality), state: s(pa.administrativeArea), zip: zipOf(pa.postalCode) };\n  const differs = (got.address && !same(got.address, input.address)) || (got.address2 && !same(got.address2, input.address2)) ||\n    (got.city && !same(got.city, input.city)) || (got.state && !same(got.state, input.state)) ||\n    (got.zip && got.zip !== input.zip);\n  // Only a confirmed address is worth suggesting. Eclipse's own city list\n  // (a failed Eclipse check) is kept as extra choices after Google's city.\n  if (confirmed && differs && got.address && got.city) {\n    const eclipseCities = (address.suggestion && address.suggestion.cities) || [];\n    address.suggestion = {\n      address: got.address, address2: got.address2 || input.address2,\n      city: got.city, cities: [...new Set([got.city.toUpperCase()].concat(eclipseCities.map((c) => c.toUpperCase())))],\n      state: got.state || input.state, zip: got.zip || input.zip, source: 'google',\n    };\n  }\n}\n\n// ── Duplicates ─────────────────────────────────────────────────────────\nconst SUFFIX = { street: 'st', avenue: 'ave', av: 'ave', road: 'rd', drive: 'dr', boulevard: 'blvd', lane: 'ln',\n  court: 'ct', highway: 'hwy', parkway: 'pkwy', place: 'pl', circle: 'cir', terrace: 'ter', suite: 'ste',\n  north: 'n', south: 's', east: 'e', west: 'w', northeast: 'ne', northwest: 'nw', southeast: 'se', southwest: 'sw',\n  route: 'rte', county: 'co' };\nconst street = (v) => s(v).toLowerCase().replace(/[.,#]/g, ' ').split(/\\s+/).filter(Boolean)\n  .map((w) => SUFFIX[w] || w).join(' ');\n// Company names: drop HubSpot's \" - Bill/Ship - AG - City, ST - 12345\"\n// tail, punctuation and common endings.\nconst company = (v) => s(v).split(' - ')[0].toLowerCase().replace(/[^a-z0-9 ]/g, ' ')\n  .split(/\\s+/).filter((w) => w && !['inc', 'llc', 'co', 'corp', 'company', 'ltd', 'the'].includes(w)).join(' ');\n\nconst want = { street: street(input.address), zip5: input.zip.slice(0, 5), name: company(input.name), domain: input.domain };\n// Same kind only (2026-10-30, on request): a ship-to only matches ship-tos,\n// a bill-to only matches bill-tos, bill + ship matches either. A record with\n// no billto_shipto_flag (HubSpot only, never in Eclipse) is always kept.\nconst flags = input.flags || [];\nconst sameKind = (flag) => {\n  const have = s(flag).split(';').map(s).filter(Boolean);\n  return !flags.length || !have.length || flags.some((f) => have.includes(f));\n};\nconst seen = {};\nconst duplicates = [];\nlet searchError = '';\nfor (const node of ['HubSpot: same zip or domain', 'HubSpot: same name']) {\n  for (const it of $(node).all()) {\n    const r = it.json || {};\n    if (r.error) { searchError = searchError || s(r.error); continue; }\n    const list = Array.isArray(r.results) ? r.results : (r.id ? [r] : []);\n    for (const c of list) {\n      const id = String(c.id || '');\n      if (!id || seen[id]) continue;\n      const p = c.properties || {};\n      if (!sameKind(p.billto_shipto_flag)) continue;\n      const reasons = [];\n      if (want.street && street(p.address) === want.street && s(p.zip).slice(0, 5) === want.zip5) reasons.push('Same address');\n      if (want.domain && s(p.domain).toLowerCase() === want.domain) reasons.push('Same domain');\n      const n = company(p.name);\n      if (want.name && n && (n === want.name || (want.name.length >= 4 && (n.includes(want.name) || want.name.includes(n))))) reasons.push('Similar name');\n      if (!reasons.length) continue;\n      seen[id] = true;\n      duplicates.push({\n        e_customer_id: s(p.e_customer_id),\n        hs_id: id,\n        name: s(p.name),\n        address: [s(p.address), s(p.address2), [s(p.city), [s(p.state), s(p.zip)].filter(Boolean).join(' ')].filter(Boolean).join(', ')].filter(Boolean).join(', '),\n        reasons,\n      });\n    }\n  }\n}\n// Address matches first, then domain, then name.\nconst rank = (d) => (d.reasons.includes('Same address') ? 0 : d.reasons.includes('Same domain') ? 1 : 2);\nduplicates.sort((x, y) => rank(x) - rank(y));\n\nreturn [{ json: { statusCode: 200, body: { address, duplicates: duplicates.slice(0, 10), duplicate_check_error: searchError } } }];\n"
+      },
+      "id": "90dbe538-4c5e-5c24-bf1e-3308b1add9f9",
+      "name": "Shape",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode || 200 }}"
+        }
+      },
+      "id": "8ec279e3-1dcf-5f67-8086-8eb8a81da114",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1920,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://addressvalidation.googleapis.com/v1:validateAddress",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Validate').first().json.google) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "eab5c3fb-f47c-5943-b75e-2271822e89f6",
+      "name": "Google: validate address",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        0
+      ],
+      "executeOnce": true,
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true,
+      "notes": "Google Address Validation API key as a Query Auth credential (parameter name: key). GCP project fairbank-equipment.",
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "s5mkj2P7i9AEvAea",
+          "name": "fairbank gmaps auth"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: validate address",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: validate address": {
+      "main": [
+        [
+          {
+            "node": "Google: validate address",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: same zip or domain": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: same name",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: same name": {
+      "main": [
+        [
+          {
+            "node": "Shape",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google: validate address": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: same zip or domain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "active": false
+}

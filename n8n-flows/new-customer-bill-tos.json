@@ -1,0 +1,215 @@
+{
+  "name": "e-order-placement: new customer bill-tos",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "e-order-placement/new-customer/bill-tos",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        },
+        "authentication": "jwtAuth"
+      },
+      "id": "0bda056e-639b-5a1a-a410-ee5fd4a71f4c",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "6b4e8942-dd1b-5ce4-9708-beed496e39df",
+      "credentials": {
+        "jwtAuth": {
+          "id": "6sDOPAJdRYI8fpxX",
+          "name": "Fairbank session (JWT)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Bill-to search for the New customer form (a ship-to's bill-to): HubSpot\n// companies whose billto_shipto_flag contains bill_to and that have an\n// Eclipse id. ?q=acme (free text: name, domain, phone) or ?q=.12345 / 12345\n// (Eclipse id).\nconst q = String(($input.first().json.query || {}).q || '').trim().slice(0, 100);\nif (q.replace(/^\\./, '').length < 2) return [{ json: { ok: false, statusCode: 400, body: { error: 'Type at least 2 characters' } } }];\nconst filters = [\n  { propertyName: 'billto_shipto_flag', operator: 'CONTAINS_TOKEN', value: 'bill_to' },\n  { propertyName: 'e_customer_id', operator: 'HAS_PROPERTY' },\n];\nconst id = (q.match(/^\\.?(\\d+)$/) || [])[1];\nif (id) filters.push({ propertyName: 'e_customer_id', operator: 'EQ', value: id });\nreturn [{ json: { ok: true, filter: { filterGroups: [{ filters }] }, query: id ? '' : q } }];\n"
+      },
+      "id": "0268584a-052a-524c-b310-32c5eb595fb9",
+      "name": "Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "74df8c7c-ec7e-5cc2-989d-e8557df4490c",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b3a58591-2d45-5fdf-ad4d-459bf44e8c73",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "objects",
+        "objectType": "0-2",
+        "operation": "search",
+        "searchInputMode": "json",
+        "filterJson": "={{ JSON.stringify($json.filter) }}",
+        "properties": [
+          "name",
+          "e_customer_id",
+          "billto_shipto_flag"
+        ],
+        "limit": 20,
+        "searchOptions": {
+          "query": "={{ $json.query }}"
+        }
+      },
+      "id": "31129839-c806-584c-bf9b-868462494a18",
+      "name": "HubSpot: bill-tos",
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        720,
+        -80
+      ],
+      "credentials": {
+        "hubspotApi": {
+          "id": "sVf2mkwjVlflhBbV",
+          "name": "Fairbank Webtool"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Same shape as product-inquiry's customer search ({ e_customers: [{\n// e_customer_id, name }] }), so the page's list code is shared. The flag is\n// checked again here in case HubSpot's filter lets one through.\nconst r = $input.first().json || {};\nif (r.error) return [{ json: { statusCode: 502, body: { error: 'HubSpot search failed: ' + String(r.error).slice(0, 300) } } }];\nconst e_customers = (r.results || [])\n  .map((c) => c.properties || {})\n  .filter((p) => p.e_customer_id && String(p.billto_shipto_flag || '').split(';').includes('bill_to'))\n  .map((p) => ({ e_customer_id: String(p.e_customer_id), name: String(p.name || '') }));\nreturn [{ json: { statusCode: 200, body: { e_customers } } }];\n"
+      },
+      "id": "32c652b4-179e-5c97-81c1-d65108b0d99a",
+      "name": "Shape",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode || 200 }}"
+        }
+      },
+      "id": "1f37eb22-fd8b-5797-9ec0-52c20954320b",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1200,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: bill-tos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: bill-tos": {
+      "main": [
+        [
+          {
+            "node": "Shape",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "active": false
+}

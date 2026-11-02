@@ -72,8 +72,8 @@
    ],
    "credentials": {
     "hubspotApi": {
-     "id": "4HKK5aFFmTGesa3H",
-     "name": "HubSpot account"
+     "id": "sVf2mkwjVlflhBbV",
+     "name": "Fairbank Webtool"
     }
    },
    "onError": "continueRegularOutput"
@@ -81,7 +81,7 @@
   {
    "parameters": {
     "mode": "runOnceForAllItems",
-    "jsCode": "// Needs a deal with line items (the Eclipse sync puts them on the deal; the\n// quote gets copies). Its quote ids go to the existing-quote check.\nconst v = $('Validate').first().json;\nconst d = $input.first().json || {};\nconst stop = (statusCode, body) => [{ json: { ok: false, statusCode, body } }];\nif (d.error) return stop(502, { success: false, error: 'HubSpot deal lookup failed: ' + d.error + ' ' + JSON.stringify(d.message || '').substring(0, 300), step: 'getDeal' });\nif (d.objectFound === false || !d.id) return stop(404, { success: false, error: 'No HubSpot deal for ' + v.e_sorder_id + ' yet.', step: 'getDeal' });\nconst ids = (key) => [...new Set((((d.associations || {})[key] || {}).results || []).map((r) => String(r.id)).filter(Boolean))];\nconst lineIds = ids('line items');\nif (!lineIds.length) return stop(409, { success: false, error: 'The HubSpot deal for ' + v.e_sorder_id + ' has no line items yet.', step: 'getDeal' });\nconst p = d.properties || {};\nreturn [{ json: { ok: true, dealId: String(d.id), ownerId: p.hubspot_owner_id || '', priceExpires: p.e_price_expire_date || '', lineIds: lineIds.join(','), quoteIds: ids('quotes').join(',') } }];\n"
+    "jsCode": "// Needs a deal with line items (the Eclipse sync puts them on the deal; the\n// quote gets copies). Its quote ids go to the existing-quote check.\nconst v = $('Validate').first().json;\nconst d = $input.first().json || {};\nconst stop = (statusCode, body) => [{ json: { ok: false, statusCode, body } }];\nif (d.error) return stop(502, { success: false, error: 'HubSpot deal lookup failed: ' + d.error + ' ' + String(d.description || d.message || '').substring(0, 300), step: 'getDeal' });\nif (d.objectFound === false || !d.id) return stop(404, { success: false, error: 'No HubSpot deal for ' + v.e_sorder_id + ' yet.', step: 'getDeal' });\nconst ids = (key) => [...new Set((((d.associations || {})[key] || {}).results || []).map((r) => String(r.id)).filter(Boolean))];\nconst lineIds = ids('line items');\nif (!lineIds.length) return stop(409, { success: false, error: 'The HubSpot deal for ' + v.e_sorder_id + ' has no line items yet.', step: 'getDeal' });\nconst p = d.properties || {};\nreturn [{ json: { ok: true, dealId: String(d.id), ownerId: p.hubspot_owner_id || '', priceExpires: p.e_price_expire_date || '', lineIds: lineIds.join(','), quoteIds: ids('quotes').join(',') } }];\n"
    },
    "id": "a9b0cb50-c1e0-571e-aed6-61738f4124ed",
    "name": "Check deal",
@@ -122,8 +122,8 @@
    ],
    "credentials": {
     "hubspotApi": {
-     "id": "4HKK5aFFmTGesa3H",
-     "name": "HubSpot account"
+     "id": "sVf2mkwjVlflhBbV",
+     "name": "Fairbank Webtool"
     }
    },
    "onError": "continueRegularOutput",
@@ -179,8 +179,8 @@
    ],
    "credentials": {
     "hubspotApi": {
-     "id": "4HKK5aFFmTGesa3H",
-     "name": "HubSpot account"
+     "id": "sVf2mkwjVlflhBbV",
+     "name": "Fairbank Webtool"
     }
    },
    "onError": "continueRegularOutput",
@@ -217,8 +217,8 @@
    ],
    "credentials": {
     "hubspotApi": {
-     "id": "4HKK5aFFmTGesa3H",
-     "name": "HubSpot account"
+     "id": "sVf2mkwjVlflhBbV",
+     "name": "Fairbank Webtool"
     }
    },
    "onError": "continueRegularOutput"
@@ -226,7 +226,7 @@
   {
    "parameters": {
     "mode": "runOnceForAllItems",
-    "jsCode": "// The quote: Fairbank's quote template (558349092401), linked to the deal\n// (its header comes from deal properties) and to the new line items.\n// Association type ids: quote→template 286, quote→deal 64, quote→line item 67.\nconst TEMPLATE_ID = '558349092401';\nconst v = $('Validate').first().json;\nconst c = $('Check deal').first().json;\nconst r = $input.first().json || {};\nif (r.error) return [{ json: { ok: false, statusCode: 502, body: { success: false, error: 'HubSpot line item upsert failed: ' + r.error + ' ' + JSON.stringify(r.message || '').substring(0, 300), step: 'createLines' } } }];\nconst lineIds = (Array.isArray(r.results) ? r.results : []).map((x) => String(x.id));\nif (!lineIds.length) return [{ json: { ok: false, statusCode: 502, body: { success: false, error: 'HubSpot created no line items.', step: 'createLines' } } }];\n// Expiry: the deal's price expiry (Eclipse), or 10 days out when that is\n// missing or already past (\"Price is firm for 10 days\" on the template).\nconst today = new Date().toISOString().slice(0, 10);\nconst plus10 = new Date(Date.now() + 10 * 864e5).toISOString().slice(0, 10);\nconst pe = String(c.priceExpires || '').slice(0, 10);\nconst expires = /^\\d{4}-\\d{2}-\\d{2}$/.test(pe) && pe >= today ? pe : plus10;\nconst assoc = (id, typeId) => ({ to: { id }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: typeId }] });\nconst properties = {\n  hs_title: 'Quote ' + v.e_sorder_id,\n  hs_status: 'APPROVAL_NOT_NEEDED',\n  hs_expiration_date: expires,\n  hs_currency: 'USD',\n  hs_language: 'en',\n  hs_locale: 'en-us',\n};\nif (c.ownerId) properties.hubspot_owner_id = c.ownerId;\nreturn [{ json: { ok: true, body: { inputs: [{ properties, associations: [assoc(TEMPLATE_ID, 286), assoc(c.dealId, 64), ...lineIds.map((id) => assoc(id, 67))] }] } } }];\n"
+    "jsCode": "// The quote: Fairbank's quote template (558349092401), linked to the deal\n// (its header comes from deal properties) and to the new line items.\n// Association type ids: quote→template 286, quote→deal 64, quote→line item 67.\nconst TEMPLATE_ID = '558349092401';\nconst v = $('Validate').first().json;\nconst c = $('Check deal').first().json;\nconst r = $input.first().json || {};\nif (r.error) return [{ json: { ok: false, statusCode: 502, body: { success: false, error: 'HubSpot line item upsert failed: ' + r.error + ' ' + String(r.description || r.message || '').substring(0, 300), step: 'createLines' } } }];\nconst lineIds = (Array.isArray(r.results) ? r.results : []).map((x) => String(x.id));\nif (!lineIds.length) return [{ json: { ok: false, statusCode: 502, body: { success: false, error: 'HubSpot created no line items.', step: 'createLines' } } }];\n// Expiry: the deal's price expiry (Eclipse), or 10 days out when that is\n// missing or already past (\"Price is firm for 10 days\" on the template).\nconst today = new Date().toISOString().slice(0, 10);\nconst plus10 = new Date(Date.now() + 10 * 864e5).toISOString().slice(0, 10);\nconst pe = String(c.priceExpires || '').slice(0, 10);\nconst expires = /^\\d{4}-\\d{2}-\\d{2}$/.test(pe) && pe >= today ? pe : plus10;\nconst assoc = (id, typeId) => ({ to: { id }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: typeId }] });\nconst properties = {\n  hs_title: 'Quote ' + v.e_sorder_id,\n  hs_status: 'APPROVAL_NOT_NEEDED',\n  hs_expiration_date: expires,\n  hs_currency: 'USD',\n  hs_language: 'en',\n  hs_locale: 'en-us',\n};\nif (c.ownerId) properties.hubspot_owner_id = c.ownerId;\nreturn [{ json: { ok: true, body: { inputs: [{ properties, associations: [assoc(TEMPLATE_ID, 286), assoc(c.dealId, 64), ...lineIds.map((id) => assoc(id, 67))] }] } } }];\n"
    },
    "id": "3c88613c-86e6-5873-a66c-e9ea18470f04",
    "name": "Build quote",
@@ -254,8 +254,8 @@
    ],
    "credentials": {
     "hubspotApi": {
-     "id": "4HKK5aFFmTGesa3H",
-     "name": "HubSpot account"
+     "id": "sVf2mkwjVlflhBbV",
+     "name": "Fairbank Webtool"
     }
    },
    "onError": "continueRegularOutput"
@@ -263,7 +263,7 @@
   {
    "parameters": {
     "mode": "runOnceForAllItems",
-    "jsCode": "// The new quote, same shape as the quote lookup flow. Its public link is\n// hs_quote_link, else https://<hs_proposal_domain>/<hs_proposal_slug>.\nconst day = (x) => {\n  if (x == null || x === '') return null;\n  const d = /^\\d+$/.test(String(x)) ? new Date(Number(x)) : new Date(String(x));\n  return isNaN(d) ? null : d.toISOString().slice(0, 10);\n};\nconst today = new Date().toISOString().slice(0, 10);\nconst toQuote = (r) => {\n  const p = r.properties || {};\n  const expires = day(p.hs_expiration_date);\n  const link = p.hs_quote_link || (p.hs_proposal_domain && p.hs_proposal_slug ? 'https://' + p.hs_proposal_domain + '/' + p.hs_proposal_slug : null);\n  return {\n    id: String(r.id), title: p.hs_title || '', number: p.hs_quote_number || '', status: p.hs_status || '', link,\n    amount: p.hs_quote_amount != null && p.hs_quote_amount !== '' ? Number(p.hs_quote_amount) : null,\n    created: p.hs_createdate || null, expires, expired: !!expires && expires < today,\n  };\n};\nconst v = $('Validate').first().json;\nconst c = $('Check deal').first().json;\nconst r = $input.first().json || {};\nif (r.error) return [{ json: { ok: false, statusCode: 502, body: { success: false, error: 'HubSpot quote create failed: ' + r.error + ' ' + JSON.stringify(r.message || '').substring(0, 300), step: 'createQuote' } } }];\nconst row = (Array.isArray(r.results) ? r.results : [])[0];\nif (!row) return [{ json: { ok: false, statusCode: 502, body: { success: false, error: 'HubSpot returned no quote.', step: 'createQuote' } } }];\nconst quote = toQuote(row);\nreturn [{ json: { ok: true, statusCode: 200, body: { success: true, created: true, e_sorder_id: v.e_sorder_id, hs_deal_id: c.dealId, quote, quotes: [quote] } } }];\n"
+    "jsCode": "// The new quote, same shape as the quote lookup flow. Its public link is\n// hs_quote_link, else https://<hs_proposal_domain>/<hs_proposal_slug>.\nconst day = (x) => {\n  if (x == null || x === '') return null;\n  const d = /^\\d+$/.test(String(x)) ? new Date(Number(x)) : new Date(String(x));\n  return isNaN(d) ? null : d.toISOString().slice(0, 10);\n};\nconst today = new Date().toISOString().slice(0, 10);\nconst toQuote = (r) => {\n  const p = r.properties || {};\n  const expires = day(p.hs_expiration_date);\n  const link = p.hs_quote_link || (p.hs_proposal_domain && p.hs_proposal_slug ? 'https://' + p.hs_proposal_domain + '/' + p.hs_proposal_slug : null);\n  return {\n    id: String(r.id), title: p.hs_title || '', number: p.hs_quote_number || '', status: p.hs_status || '', link,\n    amount: p.hs_quote_amount != null && p.hs_quote_amount !== '' ? Number(p.hs_quote_amount) : null,\n    created: p.hs_createdate || null, expires, expired: !!expires && expires < today,\n  };\n};\nconst v = $('Validate').first().json;\nconst c = $('Check deal').first().json;\nconst r = $input.first().json || {};\nif (r.error) return [{ json: { ok: false, statusCode: 502, body: { success: false, error: 'HubSpot quote create failed: ' + r.error + ' ' + String(r.description || r.message || '').substring(0, 300), step: 'createQuote' } } }];\nconst row = (Array.isArray(r.results) ? r.results : [])[0];\nif (!row) return [{ json: { ok: false, statusCode: 502, body: { success: false, error: 'HubSpot returned no quote.', step: 'createQuote' } } }];\nconst quote = toQuote(row);\nreturn [{ json: { ok: true, statusCode: 200, body: { success: true, created: true, e_sorder_id: v.e_sorder_id, hs_deal_id: c.dealId, quote, quotes: [quote] } } }];\n"
    },
    "id": "80a9af62-449d-52d7-abc7-7f1c6bab5ec5",
    "name": "Shape",

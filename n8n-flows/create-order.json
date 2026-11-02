@@ -1010,8 +1010,8 @@
       ],
       "credentials": {
         "hubspotApi": {
-          "id": "4HKK5aFFmTGesa3H",
-          "name": "HubSpot account"
+          "id": "sVf2mkwjVlflhBbV",
+          "name": "Fairbank Webtool"
         }
       },
       "onError": "continueRegularOutput",

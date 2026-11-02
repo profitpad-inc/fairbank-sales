@@ -89,7 +89,8 @@
     "objectId": "={{ $json.e_sorder_id }}",
     "properties": [
      "e_sorder_id",
-     "dealname"
+     "dealname",
+     "quote_sent_log"
     ],
     "additionalOptions": {
      "idProperty": "e_sorder_id",
@@ -102,8 +103,8 @@
    "onError": "continueRegularOutput",
    "credentials": {
     "hubspotApi": {
-     "id": "4HKK5aFFmTGesa3H",
-     "name": "HubSpot account"
+     "id": "sVf2mkwjVlflhBbV",
+     "name": "Fairbank Webtool"
     }
    }
   },
@@ -118,7 +119,7 @@
    ],
    "parameters": {
     "mode": "runOnceForAllItems",
-    "jsCode": "// ok: true goes on to read the deal's quotes. No deal, or a deal with no\n// quotes, is not an error: the answer is \"no quote\" (the page grays out\n// View Quote). Quote ids come from the deal Get's associations\n// (associations.quotes.results[].id; HubSpot leaves the key out when empty).\nconst v = $('Validate').first().json;\nconst d = $input.first().json || {};\nconst stop = (statusCode, body) => [{ json: { ok: false, statusCode, body } }];\nif (d.error) return stop(502, { success: false, error: 'HubSpot deal lookup failed: ' + d.error + ' ' + JSON.stringify(d.message || '').substring(0, 300), step: 'getDeal' });\nif (d.objectFound === false || !d.id) return stop(200, { success: true, e_sorder_id: v.e_sorder_id, hs_deal_id: null, quote: null, quotes: [] });\nconst a = (d.associations && d.associations.quotes && d.associations.quotes.results) || [];\nconst ids = [...new Set(a.map((r) => String(r.id)).filter(Boolean))];\nif (!ids.length) return stop(200, { success: true, e_sorder_id: v.e_sorder_id, hs_deal_id: String(d.id), quote: null, quotes: [] });\nreturn [{ json: { ok: true, dealId: String(d.id), quoteIds: ids.join(',') } }];\n"
+    "jsCode": "// quote_sent_log on the deal: one line per send, oldest first,\n// \"<ISO time>|<from mailbox>|<requested by>|<quote link>|<to,to>|<subtotal>\".\n// Parsed newest first; lines that don't fit are skipped.\nconst parseLog = (s) => String(s || '').split(/\\r?\\n/).map((l) => l.trim()).filter(Boolean).map((l) => {\n  const f = l.split('|');\n  if (f.length < 5 || !f[0]) return null;\n  // Subtotal (6th field) since 2026-10-30; older lines have none (null).\n  const sub = f.length > 5 && f[5] !== '' && isFinite(Number(f[5])) ? Number(f[5]) : null;\n  return { at: f[0], from: f[1] || '', requested_by: f[2] || '', link: f[3] || null, to: String(f[4] || '').split(',').filter(Boolean), subtotal: sub };\n}).filter(Boolean).reverse();\n// ok: true goes on to read the deal's quotes. No deal, or a deal with no\n// quotes, is not an error: the answer is \"no quote\" (the page grays out\n// View Quote). Quote ids come from the deal Get's associations\n// (associations.quotes.results[].id; HubSpot leaves the key out when empty).\nconst v = $('Validate').first().json;\nconst d = $input.first().json || {};\nconst stop = (statusCode, body) => [{ json: { ok: false, statusCode, body } }];\nif (d.error) return stop(502, { success: false, error: 'HubSpot deal lookup failed: ' + d.error + ' ' + JSON.stringify(d.message || '').substring(0, 300), step: 'getDeal' });\nif (d.objectFound === false || !d.id) return stop(200, { success: true, e_sorder_id: v.e_sorder_id, hs_deal_id: null, quote: null, quotes: [], sent_log: [] });\nconst a = (d.associations && d.associations.quotes && d.associations.quotes.results) || [];\nconst ids = [...new Set(a.map((r) => String(r.id)).filter(Boolean))];\nconst sentLog = String(((d.properties || {}).quote_sent_log) || '');\nif (!ids.length) return stop(200, { success: true, e_sorder_id: v.e_sorder_id, hs_deal_id: String(d.id), quote: null, quotes: [], sent_log: parseLog(sentLog) });\nreturn [{ json: { ok: true, dealId: String(d.id), quoteIds: ids.join(','), sentLog } }];\n"
    }
   },
   {
@@ -187,8 +188,8 @@
    "onError": "continueRegularOutput",
    "credentials": {
     "hubspotApi": {
-     "id": "4HKK5aFFmTGesa3H",
-     "name": "HubSpot account"
+     "id": "sVf2mkwjVlflhBbV",
+     "name": "Fairbank Webtool"
     }
    }
   },
@@ -203,7 +204,7 @@
    ],
    "parameters": {
     "mode": "runOnceForAllItems",
-    "jsCode": "// The deal's quotes, newest first. quote = the newest one with a public\n// link (a draft has none yet), or null; the page opens quote.link.\nconst v = $('Validate').first().json;\nconst dealId = $('Check deal').first().json.dealId;\nconst items = $input.all().map((i) => i.json || {});\nconst err = items.find((j) => j.error);\nif (err) return [{ json: { ok: false, statusCode: 502, body: { success: false, error: 'HubSpot quote read failed: ' + err.error + ' ' + JSON.stringify(err.message || '').substring(0, 300), step: 'getQuotes' } } }];\n// Batch Read allInOne gives { results: [...] }; cope with one record per item too.\nconst rows = [];\nfor (const j of items) {\n  if (Array.isArray(j.results)) rows.push(...j.results);\n  else if (j.id && j.properties) rows.push(j);\n}\n// HubSpot dates arrive as ISO strings or epoch ms; keep YYYY-MM-DD.\nconst day = (x) => {\n  if (x == null || x === '') return null;\n  const d = /^\\d+$/.test(String(x)) ? new Date(Number(x)) : new Date(String(x));\n  return isNaN(d) ? null : d.toISOString().slice(0, 10);\n};\nconst today = new Date().toISOString().slice(0, 10);\nconst quotes = rows.filter((r) => !r.archived).map((r) => {\n  const p = r.properties || {};\n  const expires = day(p.hs_expiration_date);\n  return {\n    id: String(r.id),\n    title: p.hs_title || '',\n    number: p.hs_quote_number || '',\n    status: p.hs_status || '',\n    link: p.hs_quote_link || null,\n    amount: p.hs_quote_amount != null && p.hs_quote_amount !== '' ? Number(p.hs_quote_amount) : null,\n    created: p.hs_createdate || null,\n    expires,\n    expired: !!expires && expires < today,\n  };\n}).sort((a, b) => String(b.created || '').localeCompare(String(a.created || '')));\nconst quote = quotes.find((q) => q.link) || null;\nreturn [{ json: { ok: true, statusCode: 200, body: { success: true, e_sorder_id: v.e_sorder_id, hs_deal_id: dealId, quote, quotes } } }];\n"
+    "jsCode": "// quote_sent_log on the deal: one line per send, oldest first,\n// \"<ISO time>|<from mailbox>|<requested by>|<quote link>|<to,to>|<subtotal>\".\n// Parsed newest first; lines that don't fit are skipped.\nconst parseLog = (s) => String(s || '').split(/\\r?\\n/).map((l) => l.trim()).filter(Boolean).map((l) => {\n  const f = l.split('|');\n  if (f.length < 5 || !f[0]) return null;\n  // Subtotal (6th field) since 2026-10-30; older lines have none (null).\n  const sub = f.length > 5 && f[5] !== '' && isFinite(Number(f[5])) ? Number(f[5]) : null;\n  return { at: f[0], from: f[1] || '', requested_by: f[2] || '', link: f[3] || null, to: String(f[4] || '').split(',').filter(Boolean), subtotal: sub };\n}).filter(Boolean).reverse();\n// The deal's quotes, newest first. quote = the newest one with a public\n// link (a draft has none yet), or null; the page opens quote.link.\nconst v = $('Validate').first().json;\nconst dealId = $('Check deal').first().json.dealId;\nconst items = $input.all().map((i) => i.json || {});\nconst err = items.find((j) => j.error);\nif (err) return [{ json: { ok: false, statusCode: 502, body: { success: false, error: 'HubSpot quote read failed: ' + err.error + ' ' + JSON.stringify(err.message || '').substring(0, 300), step: 'getQuotes' } } }];\n// Batch Read allInOne gives { results: [...] }; cope with one record per item too.\nconst rows = [];\nfor (const j of items) {\n  if (Array.isArray(j.results)) rows.push(...j.results);\n  else if (j.id && j.properties) rows.push(j);\n}\n// HubSpot dates arrive as ISO strings or epoch ms; keep YYYY-MM-DD.\nconst day = (x) => {\n  if (x == null || x === '') return null;\n  const d = /^\\d+$/.test(String(x)) ? new Date(Number(x)) : new Date(String(x));\n  return isNaN(d) ? null : d.toISOString().slice(0, 10);\n};\nconst today = new Date().toISOString().slice(0, 10);\nconst quotes = rows.filter((r) => !r.archived).map((r) => {\n  const p = r.properties || {};\n  const expires = day(p.hs_expiration_date);\n  return {\n    id: String(r.id),\n    title: p.hs_title || '',\n    number: p.hs_quote_number || '',\n    status: p.hs_status || '',\n    link: p.hs_quote_link || null,\n    amount: p.hs_quote_amount != null && p.hs_quote_amount !== '' ? Number(p.hs_quote_amount) : null,\n    created: p.hs_createdate || null,\n    expires,\n    expired: !!expires && expires < today,\n  };\n}).sort((a, b) => String(b.created || '').localeCompare(String(a.created || '')));\nconst quote = quotes.find((q) => q.link) || null;\nreturn [{ json: { ok: true, statusCode: 200, body: { success: true, e_sorder_id: v.e_sorder_id, hs_deal_id: dealId, quote, quotes, sent_log: parseLog($('Check deal').first().json.sentLog) } } }];\n"
    }
   },
   {

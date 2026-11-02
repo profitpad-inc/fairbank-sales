@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <script src="../../auth.js"></script>
+  <script>
+    // Theme before first paint (no dark flash on a light page): the saved
+    // choice from the user menu toggle, else the system setting. See app.js.
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem("fop-theme"); } catch (e) {}
+      if (t !== "light" && t !== "dark") t = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      document.documentElement.setAttribute("data-theme", t);
+    })();
+  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fairbank | New Customer</title>
+  <link rel="icon" href="../../favicon.png" type="image/png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700&family=Barlow:wght@400;500;600&family=Lexend+Deca:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="../styles.css">
+  <script src="../app.js" defer></script>
+</head>
+<body>
+  <!--
+    New customer (bill-to, ship-to or both) or a new ship-to on an existing
+    bill-to (?e_bill_to_id=60622). Same app.js as order placement; it boots
+    into initNewCustomer() because of data-page. data-base points the header
+    mark and Tools links one folder up.
+  -->
+  <main id="app" class="fop-app" data-page="new-customer" data-base="../">
+    <noscript>
+      <div class="fop-alert fop-alert--error">
+        This tool requires JavaScript. Enable JavaScript and reload the page.
+      </div>
+    </noscript>
+  </main>
+</body>
+</html>

@@ -1,0 +1,836 @@
+{
+  "name": "e-order-placement: new customer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "e-order-placement/new-customer",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        },
+        "authentication": "jwtAuth"
+      },
+      "id": "fe87dbb8-e441-5f80-b118-ca102d4680a0",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "741906fd-b447-555e-acff-2921b95c3f86",
+      "credentials": {
+        "jwtAuth": {
+          "id": "6sDOPAJdRYI8fpxX",
+          "name": "Fairbank session (JWT)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// New customer (bill-to, ship-to or both) or a new ship-to on an existing\n// bill-to. Eclipse first, then HubSpot through \"E Customers → HS\"\n// (7RvySfhLM96IcGZC), then the HubSpot-only fields.\nconst b = $input.first().json.body || {};\nconst s = (v) => String(v == null ? '' : v).trim();\nconst bad = (msg) => [{ json: { ok: false, statusCode: 400, body: { success: false, error: msg } } }];\n\nconst flags = (Array.isArray(b.billto_shipto_flag) ? b.billto_shipto_flag : s(b.billto_shipto_flag).split(';'))\n  .map(s).filter((f) => f === 'bill_to' || f === 'ship_to');\nconst input = {\n  name: s(b.name),\n  domain: s(b.domain).toLowerCase().replace(/^https?:\\/\\//, '').replace(/^www\\./, '').replace(/\\/.*$/, ''),\n  isBillTo: flags.includes('bill_to'),\n  isShipTo: flags.includes('ship_to'),\n  address: s(b.address),\n  address2: s(b.address2),\n  city: s(b.city),\n  state: s(b.state).toUpperCase(),\n  zip: s(b.zip).replace(/[\\s-]/g, ''),\n  propane: s(b.e_propane_customer),\n  industry: s(b.industry),\n  description: s(b.description),\n  billToId: s(b.bill_to_id),\n  hsOwnerId: s(b.hs_owner_id),\n  eUserId: s(b.e_user_id).toUpperCase(),\n  // Picked on the page from the rep's territories (like an order's).\n  outsideSales: s(b.outside_salesperson),\n  // From Google Address Validation in the check (latitude / longitude on\n  // the HubSpot company; customer-lookup uses them for branch distances).\n  lat: b.latitude === '' || b.latitude == null ? null : Number(b.latitude),\n  lng: b.longitude === '' || b.longitude == null ? null : Number(b.longitude),\n  emails: (Array.isArray(b.emails) ? b.emails : []).map(s).filter(Boolean),\n  phones: (Array.isArray(b.phones) ? b.phones : [])\n    .map((p) => ({ number: s(p && p.number), description: s(p && p.description) }))\n    .filter((p) => p.number),\n};\n\nif (!input.name) return bad('Enter a name.');\nif (!input.isBillTo && !input.isShipTo) return bad('Pick Bill To, Ship To or both.');\nif (!input.address || !input.city || !input.state || !input.zip) return bad('Enter the street address, city, state and zip.');\nif (!/^[A-Z]{2}$/.test(input.state)) return bad('State must be a 2-letter code.');\nif (!/^\\d{5}(\\d{4})?$/.test(input.zip)) return bad('Zip must be 5 or 9 digits.');\nif (input.propane !== 'yes' && input.propane !== 'no') return bad('Pick Propane or Not Propane.');\nconst shipOnly = input.isShipTo && !input.isBillTo;\nif (shipOnly && !/^\\d+$/.test(input.billToId)) return bad('A ship-to needs its bill-to.');\nif (!shipOnly) input.billToId = '';\nconst coord = (v, max) => typeof v === 'number' && isFinite(v) && Math.abs(v) <= max;\nif (!coord(input.lat, 90) || !coord(input.lng, 180)) { input.lat = null; input.lng = null; }\nconst badEmail = input.emails.find((e) => !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(e));\nif (badEmail) return bad('Not a valid email: ' + badEmail);\nconst badPhone = input.phones.find((p) => p.number.replace(/\\D/g, '').length < 7);\nif (badPhone) return bad('Not a valid phone number: ' + badPhone.number);\n\nreturn [{ json: { ok: true, input, shipOnly } }];\n"
+      },
+      "id": "cd9c59c8-869d-516c-9e86-39de21d71461",
+      "name": "Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "fb05c3c1-ca37-53a9-bc65-eabd2444da2f",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "cd367626-fc8e-53c5-a4f8-5b60d4aefb0a",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "owners",
+        "objectType": "users",
+        "operation": "search",
+        "searchInputMode": "json",
+        "filterJson": "={{ JSON.stringify({ filterGroups: [{ filters: [{ propertyName: 'e_user_id', operator: 'EQ', value: $json.input.eUserId || '-' }] }] }) }}",
+        "returnAll": false,
+        "limit": 1,
+        "searchOptions": {
+          "errorWhenNotFound": false,
+          "properties": [
+            "e_user_id",
+            "hs_internal_user_id",
+            "e_user_default_territory",
+            "e_user_default_branch",
+            "e_user_default_sales_source_id"
+          ]
+        }
+      },
+      "id": "4d34ac30-c644-542a-86ea-b69bc3e263e7",
+      "name": "HubSpot: find user",
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        720,
+        0
+      ],
+      "credentials": {
+        "hubspotApi": {
+          "id": "sVf2mkwjVlflhBbV",
+          "name": "Fairbank Webtool"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "f772d0fa-73b8-575d-b7ec-8ca718494c4e",
+              "leftValue": "={{ $('Validate').first().json.shipOnly }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "9acde867-90a1-5d2d-9bb2-01cdb21daf87",
+      "name": "Ship-to only?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "customer",
+        "operation": "get",
+        "customerId": "={{ $('Validate').first().json.input.billToId }}"
+      },
+      "id": "5663471e-e194-522c-976c-37dd050d0db4",
+      "name": "Eclipse: get bill-to",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        -160
+      ],
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Same defaults as format_customer in \"HS Customer → E\"\n// (Pm8oaApE4sJDrA6F), from the rep's HubSpot user (found by e_user_id;\n// 2026-10-30, the page's hs_owner_id was blank for every rep), plus emails\n// and phones. Outside sales is the rep's pick on the page when sent.\n// isBillto / isShipto are spelled as in that flow (a live create,\n// execution 244776, came back isBillTo / isShipTo true).\nconst v = $('Validate').first().json;\nconst inp = v.input;\nconst fail = (code, msg) => [{ json: { ok: false, statusCode: code, body: { success: false, error: msg } } }];\n\n// Bill-to check for a ship-to only customer.\nif (v.shipOnly) {\n  const env = $('Eclipse: get bill-to').first().json || {};\n  if (env.error) return fail(502, 'Eclipse bill-to lookup failed: ' + env.error + (env.message ? ' ' + JSON.stringify(env.message).slice(0, 300) : ''));\n  const bill = (Array.isArray(env.results) ? env.results[0] : env) || {};\n  if (!bill.id) return fail(404, 'Eclipse customer ' + inp.billToId + ' not found.');\n  if (bill.isBillTo !== true) return fail(400, 'Customer ' + bill.id + ' (' + (bill.name || '') + ') is not a bill-to.');\n}\n\n// User lookup is best-effort: no user (or a failed lookup) falls back to\n// the page's Eclipse user as writer and the flow's own defaults.\nconst fu = $('HubSpot: find user').first().json || {};\nconst user = (!fu.error && Array.isArray(fu.results) && fu.results[0]) || null;\nconst op = (user && user.properties) || {};\nconst name = inp.name;\nconst c = {\n  name,\n  addressLine1: inp.address,\n  city: inp.city,\n  state: inp.state,\n  postalCode: inp.zip,\n  isBillto: inp.isBillTo,\n  isShipto: inp.isShipTo,\n  sortBy: name.toLowerCase().substring(0, 12),\n  nameIndex: name.toLowerCase().substring(0, 12),\n  types: inp.propane === 'yes' ? [{ type: 'PROPANE' }] : [],\n  defaultPriceClass: inp.propane === 'yes' ? 'LVL-3' : 'LVL-4',\n  outsideSalesperson: inp.outsideSales || op.e_user_default_territory || 'WIHOUSE',\n  writer: op.e_user_id || inp.eUserId || 'BECCHR',\n  homeBranch: op.e_user_default_branch || '1',\n};\nif (inp.address2) c.addressLine2 = inp.address2;\nif (op.e_user_default_sales_source_id) c.salesSource = op.e_user_default_sales_source_id;\nif (v.shipOnly) c.billToId = inp.billToId;\nif (inp.emails.length) c.emails = inp.emails.map((address) => ({ address }));\nif (inp.phones.length) c.phones = inp.phones.map((p) => (p.description ? { number: p.number, description: p.description } : { number: p.number }));\n\nreturn [{ json: { ok: true, customer: c, ownerFound: !!user } }];\n"
+      },
+      "id": "0a0601a3-4690-5168-b945-c45432c33b9c",
+      "name": "Build",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "caf3788d-8727-51a0-b161-cc83139487a2",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "9d949399-a74b-51b1-bf56-6ee81c520a2a",
+      "name": "Built?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "customer",
+        "operation": "create",
+        "inputMode": "json",
+        "customJson": "={{ $json.customer }}"
+      },
+      "id": "26186e02-29db-5d2e-a244-ecbde70f366c",
+      "name": "Eclipse: create customer",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        1680,
+        0
+      ],
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Eclipse's create answers with the new customer at the top level\n// (execution 244776 of Pm8oaApE4sJDrA6F); an error goes back word for word.\nconst r = $input.first().json || {};\nconst v = $('Validate').first().json;\nconst created = (Array.isArray(r.results) ? r.results[0] : r) || {};\nif (r.error || !created.id) {\n  const m = r.message;\n  const text = (m && m.errors && m.errors[0] && m.errors[0].message) || (typeof m === 'string' ? m : (m ? JSON.stringify(m).slice(0, 500) : '')) || r.error || 'Eclipse returned no customer id.';\n  return [{ json: { ok: false, statusCode: 502, body: { success: false, step: 'eclipse', error: 'Eclipse did not create the customer: ' + String(text).replace(/\\r?\\n/g, ' ') } } }];\n}\nconst id = String(created.id);\nreturn [{\n  json: {\n    ok: true,\n    id,\n    // A new ship-to on an existing bill-to: make sure the bill-to lists it.\n    linkBillTo: v.shipOnly,\n    // E Customers → HS reads both, so the bill-to's ship-to list and the\n    // Bill To association update in HubSpot too.\n    customer_ids: [id].concat(v.shipOnly ? [v.input.billToId] : []).join(','),\n    created: {\n      e_customer_id: id,\n      name: created.name || v.input.name,\n      is_bill_to: created.isBillTo === true,\n      is_ship_to: created.isShipTo === true,\n      bill_to_id: v.shipOnly ? v.input.billToId : (created.isBillTo ? id : ''),\n      home_branch: String(created.homeBranch || ''),\n      price_class: String(created.defaultPriceClass || ''),\n      terms: String(created.defaultTerms || ''),\n    },\n  },\n}];\n"
+      },
+      "id": "89bc0f36-6c9d-5326-aa96-73e19c1c0acf",
+      "name": "Check create",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c17c6c79-75d8-5a9c-93f3-5f7f555ce7be",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "6d0c3ef2-3383-5bd1-bb06-0b31e6bd39a2",
+      "name": "Created?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cc69af07-d0bd-5966-b14d-e46ec0118a3f",
+              "leftValue": "={{ $json.linkBillTo }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "181fa90a-5476-5358-a421-e5e0f3a0fab8",
+      "name": "Link to bill-to?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "customer",
+        "operation": "get",
+        "customerId": "={{ $('Validate').first().json.input.billToId }}"
+      },
+      "id": "e6f8a29c-c841-5422-8b9d-5f5f803066f5",
+      "name": "Eclipse: re-read bill-to",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        2640,
+        -160
+      ],
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Re-read bill-to: when Eclipse did not add the new ship-to to the\n// bill-to's shipToLists by itself (UNVERIFIED either way), append it.\n// customer-lookup lists a bill-to's ship-tos from shipToLists.\nconst env = $input.first().json || {};\nconst k = $('Check create').first().json;\nconst bill = (Array.isArray(env.results) ? env.results[0] : env) || {};\nif (env.error || !bill.id) {\n  return [{ json: { update: false, warning: 'Could not re-read bill-to ' + $('Validate').first().json.input.billToId + ' to check its ship-to list: ' + (env.error || 'not found') } }];\n}\nconst ids = (bill.shipToLists || []).map((x) => String((x && (x.shipToId != null ? x.shipToId : x.id)) || '')).filter(Boolean);\nif (ids.includes(k.id)) return [{ json: { update: false } }];\nreturn [{ json: { update: true, billToId: String(bill.id), shipToLists: ids.concat([k.id]).join(',') } }];\n"
+      },
+      "id": "bca92828-8e61-529f-9249-229c8632b2f2",
+      "name": "Plan bill-to link",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2880,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "3a30979c-11c8-5a4b-88e2-0ba0bc663928",
+              "leftValue": "={{ $json.update }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e2abda0c-1c4f-5415-90c2-c56e18fe76ba",
+      "name": "Needs update?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "customer",
+        "operation": "update",
+        "customerId": "={{ $json.billToId }}",
+        "inputMode": "fields",
+        "updateFields": {
+          "shipToLists": "={{ $json.shipToLists }}"
+        }
+      },
+      "id": "7f1e1b44-b520-5aa7-bfc4-b50060fb5fb4",
+      "name": "Eclipse: add to bill-to",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        3360,
+        -320
+      ],
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "Eclipse account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://n8n.fairbankequipment.com/webhook/update-eclipse-customers",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "customer_ids",
+              "value": "={{ $('Check create').first().json.customer_ids }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "02eb3d5e-dd01-5f88-b6fd-cf4f4d18e79d",
+      "name": "HubSpot sync (E Customers → HS)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3600,
+        0
+      ],
+      "executeOnce": true,
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// HubSpot-only fields, written after \"E Customers → HS\" has made the\n// company (matched by e_customer_id). Not name: that flow writes HubSpot's\n// composite \"Name - Bill/Ship - AG - City, ST - id\".\nconst inp = $('Validate').first().json.input;\nconst props = { e_propane_customer: inp.propane };\nif (inp.domain) props.domain = inp.domain;\nif (inp.industry) props.industry = inp.industry;\nif (inp.description) props.description = inp.description;\n// Owner: the page's hs_owner_id, else the rep's owner from HubSpot: owner id\n// (owners by userId = the user's hs_internal_user_id).\nconst ow = $('HubSpot: owner id').first().json || {};\nconst ownerId = inp.hsOwnerId || (!ow.error && ow.objectFound !== false && ow.id ? String(ow.id) : '');\nif (ownerId) props.hubspot_owner_id = ownerId;\nif (inp.lat != null && inp.lng != null) { props.latitude = String(inp.lat); props.longitude = String(inp.lng); }\nreturn [{ json: { id: $('Check create').first().json.id, props } }];\n"
+      },
+      "id": "866ecafe-1a55-5e3d-9709-96de13596be0",
+      "name": "HubSpot fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3840,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "objects",
+        "objectType": "0-2",
+        "operation": "update",
+        "objectId": "={{ $json.id }}",
+        "updateInputMode": "json",
+        "updateJson": "={{ $json.props }}",
+        "updateOptions": {
+          "idProperty": "e_customer_id"
+        }
+      },
+      "id": "3e666ef5-a999-5e32-bbb6-91ab3d2bb0ef",
+      "name": "HubSpot: set company fields",
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        4080,
+        0
+      ],
+      "credentials": {
+        "hubspotApi": {
+          "id": "sVf2mkwjVlflhBbV",
+          "name": "Fairbank Webtool"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// The customer exists in Eclipse by now, so anything after the create that\n// fails is a warning, not an error.\nconst k = $('Check create').first().json;\nconst warnings = [];\nif (!$('Build').first().json.ownerFound) warnings.push('No HubSpot user has Eclipse id ' + ($('Validate').first().json.input.eUserId || '(none)') + ', so home branch and sales source used the defaults.');\nif ($('Link to bill-to?').isExecuted) {\n  const l = $('Plan bill-to link').first().json;\n  if (l.warning) warnings.push(l.warning);\n  if (l.update && $('Eclipse: add to bill-to').isExecuted) {\n    const u = $('Eclipse: add to bill-to').first().json || {};\n    if (u.error) warnings.push('The ship-to was created but could not be added to bill-to ' + l.billToId + \"'s ship-to list: \" + u.error);\n  }\n}\nconst sync = $('HubSpot sync (E Customers → HS)').first().json || {};\nif (sync.error) warnings.push('HubSpot sync failed (' + String(sync.error.message || sync.error).slice(0, 200) + '); the company should still show in HubSpot within a few minutes.');\nconst hs = $('HubSpot: set company fields').first().json || {};\nlet hsId = '';\nif (hs.error) warnings.push('HubSpot domain, industry, description, propane, owner and map location were not saved: ' + String(hs.error).slice(0, 300));\nelse hsId = String(hs.id || '');\nreturn [{ json: { statusCode: 200, body: Object.assign({ success: true, hs_id: hsId, warnings }, k.created) } }];\n"
+      },
+      "id": "a5b3841e-1b21-5195-9553-c91b2e0ded89",
+      "name": "Shape",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode || 200 }}"
+        }
+      },
+      "id": "ac748a91-fcc0-5217-9869-147f997c3297",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        4560,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "owners",
+        "objectType": "owners",
+        "operation": "get",
+        "idProperty": "userId",
+        "objectId": "={{ (($json.results || [])[0] || { properties: {} }).properties.hs_internal_user_id || '0' }}",
+        "additionalOptions": {
+          "errorWhenNotFound": false
+        }
+      },
+      "id": "1b7db222-8ece-576d-86c5-63c0fb774ae6",
+      "name": "HubSpot: owner id",
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        840,
+        160
+      ],
+      "credentials": {
+        "hubspotApi": {
+          "id": "sVf2mkwjVlflhBbV",
+          "name": "Fairbank Webtool"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: find user",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ship-to only?": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: get bill-to",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: get bill-to": {
+      "main": [
+        [
+          {
+            "node": "Build",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build": {
+      "main": [
+        [
+          {
+            "node": "Built?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Built?": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: create customer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: create customer": {
+      "main": [
+        [
+          {
+            "node": "Check create",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check create": {
+      "main": [
+        [
+          {
+            "node": "Created?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Created?": {
+      "main": [
+        [
+          {
+            "node": "Link to bill-to?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Link to bill-to?": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: re-read bill-to",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HubSpot sync (E Customers → HS)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: re-read bill-to": {
+      "main": [
+        [
+          {
+            "node": "Plan bill-to link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan bill-to link": {
+      "main": [
+        [
+          {
+            "node": "Needs update?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs update?": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: add to bill-to",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HubSpot sync (E Customers → HS)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: add to bill-to": {
+      "main": [
+        [
+          {
+            "node": "HubSpot sync (E Customers → HS)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot sync (E Customers → HS)": {
+      "main": [
+        [
+          {
+            "node": "HubSpot fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot fields": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: set company fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: set company fields": {
+      "main": [
+        [
+          {
+            "node": "Shape",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: find user": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: owner id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: owner id": {
+      "main": [
+        [
+          {
+            "node": "Ship-to only?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "active": false
+}
