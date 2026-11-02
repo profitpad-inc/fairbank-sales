@@ -690,10 +690,17 @@
       return newCustomerUrl(q);
     }
     // The New ship-to button: on any customer whose bill-to is a bill-to.
-    function newShipToBtnHtml(cls) {
+    // keyCls: show the Alt+S (Control+S on a Mac) hint in that key style.
+    function newShipToBtnHtml(cls, keyCls) {
       var bt = state.customer && state.customer.bill_to;
       if (!bt || !bt.is_bill_to) return "";
-      return '<a class="' + cls + '" href="' + esc(newShipToUrl(bt.e_customer_id)) + '">+ New ship-to</a>';
+      return '<a class="' + cls + '" data-action="new-ship-to" href="' + esc(newShipToUrl(bt.e_customer_id)) + '">+ New ship-to' +
+        (keyCls ? ' <span class="' + keyCls + '">' + altKey("S") + "</span>" : "") + "</a>";
+    }
+    // Alt+S (Control+S on a Mac): follows the New ship-to button, if shown.
+    function goNewShipTo() {
+      var a = root.querySelector("[data-action=new-ship-to]");
+      if (a) window.location.href = a.href;
     }
 
     function startOrder(shipTo) {
@@ -1174,6 +1181,18 @@
         if (branch && branchIdOf(stock[i].warehouse) === branch) atBranch += qty;
       }
       return { atBranch: atBranch, total: total, rows: stock };
+    }
+
+    // The same product can be on several lines (allowed), so a branch's
+    // stock has to cover all of them: line's qty plus every other line of
+    // that product shipping from branch (2026-11-02, on request: two lines
+    // of 2 showed Wichita's 2 as enough).
+    function branchNeed(line, branch) {
+      var need = Number(line.qty) || 1;
+      state.lines.forEach(function (l) {
+        if (l !== line && !l.custom && l.productId && String(l.productId) === String(line.productId) && lineBranch(l) === branch) need += Number(l.qty) || 0;
+      });
+      return need;
     }
 
     function filledLines() {
@@ -1965,13 +1984,13 @@
         customerSummaryHtml() +
         '<div class="fop-row">' +
         // Phones: floats fixed in the bottom right of the screen (.fop-fab).
-        '<button class="fop-btn fop-fab" data-action="new-from-list">New order <span class="fop-key fop-key--dark">' + altKey("N") + '</span></button>' +
-        newShipToBtnHtml("fop-btn fop-btn--ghost") +
+        '<button class="fop-btn fop-fab" data-action="new-from-list">New order <span class="fop-key fop-key--dark">' + altKey("O") + '</span></button>' +
+        newShipToBtnHtml("fop-btn fop-btn--ghost", "fop-key") +
         (st ? '<label class="fop-check"><input type="checkbox" data-action="orders-shipto-only"' + (state.ordersShipToOnly ? "" : " checked") + "> " +
           "Show orders from other ShipTos</label>" : "") +
         "</div>" +
         '<div class="fop-card">' + ordersBodyHtml(filter) +
-        '<div class="fop-hint fop-hint--keys">↑ ↓ to move, Enter to open, N for a new order, Esc to change customer.</div>' +
+        '<div class="fop-hint fop-hint--keys">↑ ↓ to move, Enter to open, ' + altKey("O") + ' for a new order, ' + altKey("S") + ' for a new ship-to, Esc to change customer.</div>' +
         "</div></div>"
       );
     }
@@ -2703,7 +2722,6 @@
       var s = lineStock(line);
       var ship = lineBranch(line);
       var pick = r != null && r >= 0 && !linesLocked();
-      var need = Number(line.qty) || 1;
       var rows = s.rows.map(function (x) {
         var id = branchIdOf(x.warehouse);
         var known = BRANCHES.filter(function (b) { return b[0] === id; })[0];
@@ -2721,7 +2739,7 @@
       return lbl + rows.map(function (x) {
         var on = ship && x.id === ship;
         var inner = '<span class="fop-chip__br">' + esc(x.id) + " " + esc(x.name) + '</span><span class="fop-stock ' +
-          stockClass(x.qty, need) + '">' + x.qty + "</span>";
+          stockClass(x.qty, branchNeed(line, x.id)) + '">' + x.qty + "</span>";
         if (!pick || !x.id) return '<span class="fop-chip' + (on ? " fop-chip--ship" : "") + '">' + inner + "</span>";
         return '<button type="button" class="fop-chip fop-chip--pick' + (on ? " fop-chip--ship" : "") + '" tabindex="-1" data-action="pick-branch" data-r="' + r +
           '" data-branch="' + esc(x.id) + '" aria-pressed="' + !!on + '" title="' + (on ? "Ships from " : "Ship this line from ") + esc(x.id + " " + x.name) + '">' + inner + "</button>";
@@ -2742,7 +2760,7 @@
         (open ? rest.map(function (b) {
           return '<button type="button" class="fop-chip fop-chip--pick fop-chip--empty" tabindex="-1" data-action="pick-branch" data-r="' + r +
             '" data-branch="' + esc(b[0]) + '" title="Ship this line from ' + esc(b[0] + " " + b[1]) + ' (no stock)">' +
-            '<span class="fop-chip__br">' + esc(b[0]) + " " + esc(b[1]) + '</span><span class="fop-stock ' + stockClass(0, Number((state.lines[r] || {}).qty) || 1) + '">0</span></button>';
+            '<span class="fop-chip__br">' + esc(b[0]) + " " + esc(b[1]) + '</span><span class="fop-stock ' + stockClass(0, 1) + '">0</span></button>';
         }).join("") : "");
     }
 
@@ -2823,8 +2841,11 @@
       // header's (the column title) is prefixed with its id.
       var b = lineBranch(line);
       var other = b !== state.header.shipBranch;
+      // Other lines of this product from the same branch count too.
+      var need = branchNeed(line, b);
+      var shared = need > (Number(line.qty) || 1) ? ' title="' + need + " on this order from branch " + esc(branchName(b)) + '"' : "";
       return '<span class="fop-mlabel">At branch </span>' + (other ? '<span class="fop-muted" title="At branch ' + esc(branchName(b)) + '">' + esc(b) + ": </span>" : "") +
-        '<span class="fop-stock ' + stockClass(s.atBranch, Number(line.qty) || 1) + '">' + s.atBranch + "</span>";
+        '<span class="fop-stock ' + stockClass(s.atBranch, need) + '"' + shared + ">" + s.atBranch + "</span>";
     }
 
     function totalStockHtml(line) {
@@ -4033,7 +4054,8 @@
       if (customLines().length || ls.some(isItemLine)) return no + "custom lines are never in stock at branch " + br + ".";
       if (ls.some(function (l) { return lineBranch(l) !== h.shipBranch; })) return no + "some lines ship from another branch.";
       if (ls.some(function (l) { return !lineStock(l); })) return no + "the stock at branch " + br + " is still loading.";
-      if (ls.some(function (l) { return lineStock(l).atBranch < Number(l.qty); })) {
+      // Lines of the same product add up (branchNeed).
+      if (ls.some(function (l) { return lineStock(l).atBranch < branchNeed(l, lineBranch(l)); })) {
         return no + "not everything in this generation is in stock at branch " + br + ".";
       }
       return "";
@@ -4304,7 +4326,7 @@
         '<div class="fop-row">' +
         (r.mode === "update" ? '<button class="fop-btn fop-btn--ghost" data-action="reload-order">Back to bid</button>' : "") +
         (r.mode === "cancel" ? '<button class="fop-btn fop-btn--ghost" data-action="reload-order">Back to order</button>' : "") +
-        '<button class="fop-btn" data-action="new-order">New order, same ship-to <span class="fop-key fop-key--dark">' + altKey("N") + '</span></button>' +
+        '<button class="fop-btn" data-action="new-order">New order, same ship-to <span class="fop-key fop-key--dark">' + altKey("O") + '</span></button>' +
         '<button class="fop-btn fop-btn--ghost" data-action="change-customer">Change customer</button>' +
         (dealId ? '<a class="fop-btn fop-btn--ghost" href="' + HS_DEAL + encodeURIComponent(dealId) + '" target="_blank" rel="noopener">HS Deal ' + EXT_ICON + "</a>" : "") +
         (hsId ? '<a class="fop-btn fop-btn--ghost" href="' + HS_COMPANY + encodeURIComponent(hsId) + '" target="_blank" rel="noopener">HS Customer ' + EXT_ICON + "</a>" : "") +
@@ -4326,6 +4348,13 @@
       el.querySelector('[data-cell="ext"]').innerHTML = extHtml(line);
       var availCell = el.querySelector('[data-cell="avail"]');
       if (availCell) availCell.innerHTML = availHtml(line);
+      // Other lines of the same product share its stock (branchNeed): their
+      // Br counts recolour too.
+      state.lines.forEach(function (l, i) {
+        if (i === r || l.custom || !l.productId || String(l.productId) !== String(line.productId)) return;
+        var oc = rowEl(i) && rowEl(i).querySelector('[data-cell="avail"]');
+        if (oc) oc.innerHTML = availHtml(l);
+      });
       var totalCell = el.querySelector('[data-cell="total"]');
       if (totalCell) totalCell.innerHTML = totalStockHtml(line);
       refreshStrips(r);
@@ -5825,8 +5854,8 @@
       }
 
       // Orders list: ↑↓ move between "New order" and the orders, Enter opens
-      // (native button click), Alt+N (Control+N on a Mac) starts a new order,
-      // Esc changes customer.
+      // (native button click), Alt+O (Control+O on a Mac) starts a new order,
+      // Alt+S (Control+S) a new ship-to, Esc changes customer.
       if (state.view === "orders") {
         if (t.type === "checkbox" && e.key !== "Escape") return;
         var items = Array.prototype.slice.call(root.querySelectorAll("[data-action=new-from-list], [data-open-order]"));
@@ -5834,9 +5863,12 @@
         if (e.key === "ArrowDown" || e.key === "ArrowUp") {
           e.preventDefault();
           if (items.length) items[oi < 0 ? 0 : (oi + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length].focus();
-        } else if (isShortcutMod(e) && e.code === "KeyN") {
+        } else if (isShortcutMod(e) && e.code === "KeyO") {
           e.preventDefault();
           newOrderFromList();
+        } else if (isShortcutMod(e) && e.code === "KeyS") {
+          e.preventDefault();
+          goNewShipTo();
         } else if (e.key === "Escape") {
           e.preventDefault();
           goToCustomerSearch();
@@ -5854,6 +5886,10 @@
         } else if (/^[1-9]$/.test(e.key) && picks[Number(e.key) - 1]) {
           e.preventDefault();
           startOrder(state.customer.ship_tos[Number(e.key) - 1]);
+        } else if (isShortcutMod(e) && e.code === "KeyS") {
+          // New ship-to (the link is not shown while an order is open behind).
+          e.preventDefault();
+          goNewShipTo();
         } else if (e.key === "Escape") {
           if (state.keepOrder) { state.keepOrder = false; state.view = "order"; render(); return; }
           state.view = "orders";
@@ -5864,7 +5900,7 @@
       }
 
       if (state.view === "done") {
-        if (isShortcutMod(e) && e.code === "KeyN") { e.preventDefault(); leaveExisting(); startOrder(state.shipTo); }
+        if (isShortcutMod(e) && e.code === "KeyO") { e.preventDefault(); leaveExisting(); startOrder(state.shipTo); }
         return;
       }
 
