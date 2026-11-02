@@ -324,13 +324,34 @@
     return m ? m[1] : "";
   }
 
-  function getJson(url, params) {
+  // timeoutMs: give up after that long and explain the failure. Order lookup
+  // and customer lookup stop their own run after 12 seconds when Eclipse does
+  // not answer (workflow executionTimeout); n8n then answers 500, which the
+  // flows never send themselves, so a 500 means the Eclipse API is down.
+  // No answer at all by timeoutMs, or a network error, means n8n is not
+  // reachable.
+  function getJson(url, params, timeoutMs) {
     var u = new URL(url);
     Object.keys(params || {}).forEach(function (k) {
       if (params[k] != null && params[k] !== "") u.searchParams.set(k, params[k]);
     });
-    return fetch(u.toString()).then(readJson);
+    if (!timeoutMs) return fetch(u.toString()).then(readJson);
+    var ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    var timer = ctl && setTimeout(function () { ctl.abort(); }, timeoutMs);
+    return fetch(u.toString(), ctl ? { signal: ctl.signal } : {}).then(readJson).catch(function (err) {
+      if (err && err.status === 500) throw new Error(ECLIPSE_DOWN_MSG);
+      if (err && err.name === "AbortError") throw new Error("Can't reach n8n (no answer after " + Math.round(timeoutMs / 1000) + " seconds). Check your internet connection and try again. If the issue persists, please email " + SUPPORT_EMAIL + ".");
+      // fetch rejects with a TypeError when the request never reaches n8n.
+      if (err && err.name === "TypeError") throw new Error("Can't reach n8n. Check your internet connection and try again. If the issue persists, please email " + SUPPORT_EMAIL + ".");
+      throw err;
+    }).finally(function () { clearTimeout(timer); });
   }
+
+  // Order and customer loads behind the "Loading…" spinner (3 seconds more
+  // than the flows' own 12 second timeout).
+  var LOAD_TIMEOUT_MS = 15000;
+  var SUPPORT_EMAIL = "chris.becher@profitpad.com";
+  var ECLIPSE_DOWN_MSG = "The Eclipse API is down temporarily, please try again in a minute. If the issue persists, please email " + SUPPORT_EMAIL + ".";
 
   function postJson(url, body) {
     return fetch(url, {
@@ -345,6 +366,7 @@
       if (!res.ok || (data && data.error && !data.success)) {
         var err = new Error((data && data.error) || ("Server error (status " + res.status + ")"));
         err.data = data;
+        err.status = res.status;
         throw err;
       }
       return data;
@@ -599,7 +621,7 @@
     // bill-to and its ship-tos from Eclipse (names, addresses, branch,
     // price class, credit limit) plus HubSpot record ids and coordinates.
     function resolveCustomer(id) {
-      return getJson(API.customer, { e_customer_id: id }).then(function (d) {
+      return getJson(API.customer, { e_customer_id: id }, LOAD_TIMEOUT_MS).then(function (d) {
         var party = function (p) {
           if (!p) return null;
           p.address_lines = addressLines(p);
@@ -741,7 +763,7 @@
       hsQuotes = {};
       render();
 
-      getJson(API.order, { e_sorder_id: state.orderId })
+      getJson(API.order, { e_sorder_id: state.orderId }, LOAD_TIMEOUT_MS)
         .then(function (o) {
           state.order = o;
           return openGen(o.generation_id);
@@ -1807,7 +1829,7 @@
     function viewError() {
       return (
         '<div class="fop-wrap">' + titleHtml("Order Placement", "Something went wrong") +
-        '<div class="fop-alert fop-alert--error">' + esc(state.error || "Unknown error") + "</div>" +
+        '<div class="fop-alert fop-alert--error">' + esc(state.error || "Unknown error").split(SUPPORT_EMAIL).join('<a href="mailto:' + SUPPORT_EMAIL + '">' + SUPPORT_EMAIL + "</a>") + "</div>" +
         '<div class="fop-row">' +
         (state.orderId ? '<button class="fop-btn" data-action="retry-order">Retry</button>'
           : state.customerId ? '<button class="fop-btn" data-action="retry-customer">Retry</button>' : "") +
@@ -4724,7 +4746,7 @@
       // The saved order takes the place of the new order (or the old
       // generation) in the browser history, so Back skips the stale grid.
       navReplace = true;
-      return getJson(API.order, { e_sorder_id: id })
+      return getJson(API.order, { e_sorder_id: id }, LOAD_TIMEOUT_MS)
         .then(function (o) {
           var placed = data.mode === "bid" || data.mode === "order";
           var what = data.what === "bid" ? "Bid " : "Order ";
