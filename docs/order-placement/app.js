@@ -148,6 +148,12 @@
     "SEE INSTRUCTION", "SALESMAN DELIVR", "CPU PICK UP", "UPS", "BW BEST WAY", "OT OUR TRUCK", "WC WILL CALL",
   ];
 
+  // SALESMAN DELI CC is only offered at ship branch 8 (2026-11-02): with a
+  // product line on any other branch it is grayed out in the ship via list
+  // and left out of the Recommended group (deliCcBlocked()).
+  var DELI_CC_SHIP_VIA = "SALESMAN DELI CC";
+  var DELI_CC_BRANCH = "8";
+
   // A ship via whose last 2 characters are "CC" adds a 3% credit card
   // surcharge to the subtotal area (display only; nothing extra is sent
   // to Eclipse).
@@ -1422,12 +1428,25 @@
       return 'Ship via is "SEE INSTRUCTION": add Shipping instructions.';
     }
 
+    // True when at least one product line ships from a branch other than 8.
+    function deliCcBlocked() {
+      return state.lines.some(function (l) {
+        return l.productId && !l.custom && !isFreightLine(l) && branchIdOf(lineBranch(l)) !== DELI_CC_BRANCH;
+      });
+    }
+
+    function deliCcReason() {
+      if (state.header.shipVia !== DELI_CC_SHIP_VIA || !deliCcBlocked()) return null;
+      return "SALESMAN DELI CC ships from branch " + DELI_CC_BRANCH + " only: pick another ship via.";
+    }
+
     function placeBlockedReason(mode) {
       var h = state.header;
       if (!filledLines().length && !customLines().length) return "Add at least one product with a quantity.";
       var missing = state.lines.filter(function (l) { return l.productId && l.notFound; })[0];
       if (missing) return "Product " + missing.productId + " was not found. Fix or remove that line.";
       if (seeInstructionReason()) return seeInstructionReason();
+      if (deliCcReason()) return deliCcReason();
       if (mode === "update" || mode === "convert") {
         if (!state.existing || !state.existing.editable) return "Only a bid can be " + (mode === "update" ? "updated." : "converted.");
         if (!h.shipBranch) return "Pick a ship branch.";
@@ -1962,13 +1981,15 @@
     // shipping fields (headLocked(key)).
     function lockAttr(key) { return headLocked(key) ? " disabled" : ""; }
 
-    function selectHtml(field, options, value, placeholder, groups, groupLabel) {
+    // off: option values shown grayed out (disabled).
+    function selectHtml(field, options, value, placeholder, groups, groupLabel, off) {
       var html = '<select class="fop-input" data-head="' + field + '" id="fop-h-' + field + '"' + lockAttr(field) + ">";
       // Placeholder only while nothing is picked (both selects are required).
       // A locked field (existing order) shows a blank box, not "Select…".
       if (placeholder && !value) html += '<option value="" selected disabled>' + (headLocked(field) ? "" : esc(placeholder)) + "</option>";
       var opt = function (o) {
-        return '<option value="' + esc(o[1]) + '"' + (String(o[1]) === String(value) ? " selected" : "") + ">" + esc(o[0]) + "</option>";
+        return '<option value="' + esc(o[1]) + '"' + (String(o[1]) === String(value) ? " selected" : "") +
+          (off && off.indexOf(o[1]) >= 0 ? " disabled" : "") + ">" + esc(o[0]) + "</option>";
       };
       if (groups) {
         html += '<optgroup label="' + esc(groupLabel || "Common") + '">' + options.slice(0, groups).map(opt).join("") + "</optgroup>";
@@ -1983,16 +2004,33 @@
     }
 
     // Ship via: the bill-to's recommended ship vias first (by terms), else
-    // the usual Common group.
+    // the usual Common group. SALESMAN DELI CC is grayed out, and left out
+    // of Recommended, while a product line ships from outside branch 8.
     function shipViaSelectHtml(value) {
       var code = String((state.customer && state.customer.bill_to && state.customer.bill_to.terms_code) || "").trim();
       var rec = CC_TERMS.test(code) ? CC_SHIP_VIAS : NET_TERMS.test(code) ? CREDIT_SHIP_VIAS : null;
-      if (!rec) return selectHtml("shipVia", SHIP_VIAS, value, "Select…", COMMON_SHIP_VIAS);
+      var off = deliCcBlocked() ? [DELI_CC_SHIP_VIA] : [];
+      if (!rec) return selectHtml("shipVia", SHIP_VIAS, value, "Select…", COMMON_SHIP_VIAS, null, off);
+      rec = rec.filter(function (v) { return off.indexOf(v) < 0; });
       var byVal = {};
       SHIP_VIAS.forEach(function (o) { byVal[o[1]] = o; });
       var first = rec.map(function (v) { return byVal[v]; });
       var rest = SHIP_VIAS.filter(function (o) { return rec.indexOf(o[1]) < 0; });
-      return selectHtml("shipVia", first.concat(rest), value, "Select…", first.length, "Recommended");
+      return selectHtml("shipVia", first.concat(rest), value, "Select…", first.length, "Recommended", off);
+    }
+
+    // Redraws the ship via options when a line's branch or product changes
+    // whether SALESMAN DELI CC is offered (the select itself stays, so it
+    // keeps focus).
+    function refreshShipViaOptions() {
+      var sel = root.querySelector("#fop-h-shipVia");
+      if (!sel || sel.disabled) return;
+      var blocked = deliCcBlocked() ? "1" : "";
+      if ((sel.getAttribute("data-deli-off") || "") === blocked) return;
+      var tmp = document.createElement("div");
+      tmp.innerHTML = shipViaSelectHtml(state.header.shipVia);
+      sel.innerHTML = tmp.firstChild.innerHTML;
+      sel.setAttribute("data-deli-off", blocked);
     }
 
     // req: the header key of a required field. Its label gets a red
@@ -3961,20 +3999,14 @@
     // Why Pick Up Now is not offered ("" when it is): never over the
     // available credit (the order waits in credit review); every product line of
     // the generation must ship from the header's branch and be in stock
-    // there. A bid with other Bid generations is left out, since Convert to
-    // Order converts them all at once.
+    // there. On a bid, Pick Up Now converts only the open generation; the
+    // other Bid generations stay bids (2026-11-02, on request).
     function pickUpReason() {
       if (!confirmIsOrder()) return "";
       var h = state.header;
       var br = branchIdOf(h.shipBranch);
       var no = "Pick Up Now isn't an option: ";
       if (creditLimitReason()) return no + "the order is over the available credit and goes into the credit review queue.";
-      if (state.confirm.mode === "convert") {
-        var others = ((state.order && state.order.generations) || []).filter(function (g) {
-          return g.status === "Bid" && g.e_sorder_id !== state.existing.e_sorder_id;
-        });
-        if (others.length) return no + "this bid has other generations (" + others.map(function (g) { return g.e_sorder_id; }).join(", ") + ") that convert with it.";
-      }
       var ls = filledLines().filter(function (l) { return !isFreightLine(l); });
       if (customLines().length || ls.some(isItemLine)) return no + "custom lines are never in stock at branch " + br + ".";
       if (ls.some(function (l) { return lineBranch(l) !== h.shipBranch; })) return no + "some lines ship from another branch.";
@@ -4195,12 +4227,16 @@
       var h = state.header;
       var leaves = h.requiredDate !== (ex.required_date || "") || !filledLines().concat(customLines()).some(function (l) { return lineBranch(l) === home; });
       var gens = convert ? ((state.order && state.order.generations) || []).filter(function (g) { return g.status === "Bid"; }).map(function (g) { return g.e_sorder_id; }) : [];
+      // Pick Up Now converts only this generation; the others stay bids.
+      var gensText = !convert ? "" : isPickUpNow()
+        ? "Converts only " + ex.e_sorder_id + "." + (gens.length > 1 ? " " + gens.filter(function (id) { return id !== ex.e_sorder_id; }).join(", ") + " stay" + (gens.length > 2 ? "" : "s") + " a bid." : "")
+        : "Converts " + (gens.length > 1 ? "every bid generation: " : "") + (gens.join(", ") || ex.e_sorder_id) + ".";
       return (
         '<div class="fop-modal" role="dialog" aria-modal="true" aria-labelledby="fop-confirm-title">' +
         '<div class="fop-modal__box">' +
         '<h2 class="fop-h2" id="fop-confirm-title">' + (convert ? "Convert bid " + esc(ex.e_sorder_id) + " to an order?" : "Update bid " + esc(ex.e_sorder_id) + "?") + "</h2>" +
         (convert ? creditReviewHtml() + statusPickerHtml() +
-          '<div class="fop-muted fop-confirm-gens">Converts ' + (gens.length > 1 ? "every bid generation: " : "") + esc(gens.join(", ") || ex.e_sorder_id) + "." +
+          '<div class="fop-muted fop-confirm-gens">' + esc(gensText) +
           (ch.any ? " The changes below are saved first." : "") + "</div>" : "") +
         (ch.any ? '<div class="fop-muted">' + esc(summary) + ".</div>" : "") +
         (ch.head.length ? '<ul class="fop-confirm-head">' + ch.head.map(function (x) {
@@ -4370,6 +4406,7 @@
       // Lines on several branches: the hint under Ship branch.
       var hint = root.querySelector('[data-cell="branch-hint"]');
       if (hint) hint.innerHTML = branchHintHtml();
+      refreshShipViaOptions();
     }
 
     // Looks disabled but still takes clicks (every place / bid button), so a
@@ -4390,6 +4427,7 @@
       state.lines.forEach(function (l, r) { refreshRow(r); });
       var head = root.querySelector(".fop-line--head .fop-cell--stock");
       if (head) head.textContent = noStock() ? "" : "Br " + (state.header.shipBranch || "-");
+      refreshShipViaOptions();
     }
 
     // ── Grid focus + line ops ──────────────────────────────────────────────
@@ -4630,6 +4668,7 @@
         blocked === "Pick a ship via." ? "shipVia" :
         blocked === "Enter a valid email." ? "email" :
         blocked === seeInstructionReason() ? "shippingInstructions" :
+        blocked === deliCcReason() ? "shipVia" :
         blocked === "Pick a ship date." ? "shipDate" :
         blocked === "Pick a required date." || blocked === "Required date cannot be before ship date." ? "requiredDate" : null;
       if (!field) return;
