@@ -2186,10 +2186,23 @@
     }
 
     // The branch rows (shipRowsHtml()), keyed by branch and line count.
+    // The line numbers (as the line chart numbers them) that ship from b.
+    function branchLineNums(b) {
+      var out = [];
+      state.lines.forEach(function (l, i) {
+        if ((l.custom || (l.productId && Number(l.qty) > 0)) && lineBranch(l) === b) out.push(i + 1);
+      });
+      return out;
+    }
+
+    // "Line 2" / "Lines 2, 3, 5, 8" under a branch's Ship branch box.
+    function branchLinesText(b) {
+      var n = branchLineNums(b);
+      return (n.length === 1 ? "Line " : "Lines ") + n.join(", ");
+    }
+
     function shipRowsKey() {
-      return shipRows().map(function (b) {
-        return b + ":" + sentLines().filter(function (l) { return lineBranch(l) === b; }).length;
-      }).join("|");
+      return shipRows().map(function (b) { return b + ":" + branchLineNums(b).join(","); }).join("|");
     }
 
     // Redraws the branch rows when a line change adds or drops a branch, or
@@ -2569,7 +2582,6 @@
         var s = shipOf(b);
         var other = b && b !== h.shipBranch ? b : null;
         var ba = other ? ' data-branch="' + esc(other) + '"' : "";
-        var n = sentLines().filter(function (l) { return lineBranch(l) === b; }).length;
         return '<div class="fop-head__grid fop-head__grid--ship' + (multi ? " fop-head__grid--tabbed" : "") +
           (multi && b === tab ? " is-active" : "") + '" data-ship-row="' + esc(b) + '"' + (multi ? ' role="tabpanel" id="fop-ship-panel-' + esc(b) + '"' : "") + ">" +
           // Phones: ship branch and ship via each take a full row (--mfull).
@@ -2579,7 +2591,7 @@
           // the dropdown.
           (multi
             ? field("Ship branch", '<input class="fop-input fop-input--fixed" value="' + esc(branchLabel(b)) + '" disabled>' +
-                '<span class="fop-branch-hint">' + n + " line" + (n === 1 ? "" : "s") + "</span>", "fop-field--mfull")
+                '<span class="fop-branch-hint">' + esc(branchLinesText(b)) + "</span>", "fop-field--mfull")
             : field("Ship branch", selectHtml("shipBranch", branches, b, "Select…"), "fop-field--mfull", "shipBranch")) +
           field("Ship via", shipViaSelectHtml(s.shipVia, b), "fop-field--mfull", "shipVia") +
           field("Ship date", '<input class="fop-input fop-date" data-date="shipDate"' + ba + ' value="' + esc(s.shipDate) + '"' + lockAttr("shipDate") + ">", "", "shipDate") +
@@ -2760,7 +2772,7 @@
         '<div class="fop-cell fop-cell--qty fop-num fop-custom-num" role="cell"><span class="fop-mlabel">Qty </span>' + cl.qty + "</div>" +
         '<div class="fop-cell fop-cell--price fop-num fop-custom-num" role="cell"><span class="fop-mlabel">Unit price </span>' + unitMoney(cl.price) + "</div>" +
         '<div class="fop-cell fop-cell--cost fop-num" role="cell" title="Estimated COGS"><span class="fop-mlabel">Est. COGS </span>' + money(cl.cogs) + "</div>" +
-        '<div class="fop-cell fop-cell--ext fop-num" role="cell"><span class="fop-mlabel">Ext. </span>' + money(cl.price * cl.qty) + "</div>" +
+        '<div class="fop-cell fop-cell--ext fop-num" role="cell"><span class="fop-mlabel">Ext </span>' + money(cl.price * cl.qty) + "</div>" +
         (noStock() ? "" : '<div class="fop-cell fop-cell--stock" role="cell" data-cell="avail"></div>' +
           (inlineLayout ? '<div class="fop-cell fop-cell--stock" role="cell" data-cell="total"></div>' : "")) +
         '<div class="fop-cell fop-cell--del" role="cell">' +
@@ -2920,7 +2932,7 @@
     function customMarginHtml(d) {
       var qty = Number(d.qty), price = Number(d.price), cogs = Number(d.cogs);
       if (!(qty > 0) || String(d.price).trim() === "" || !isFinite(price)) return "";
-      var out = "Ext. " + money(price * qty);
+      var out = "Ext " + money(price * qty);
       if (String(d.cogs).trim() !== "" && isFinite(cogs) && price > 0) {
         var margin = (price - cogs) / price * 100;
         out += " · Margin " + margin.toFixed(1) + "%";
@@ -3073,7 +3085,7 @@
         var q = quoteOf(line);
         return q && q.loading ? '<span class="fop-dots">···</span>' : "-";
       }
-      return '<span class="fop-mlabel">Ext. </span>' + money(p * (Number(line.qty) || 0));
+      return '<span class="fop-mlabel">Ext </span>' + money(p * (Number(line.qty) || 0));
     }
 
     function stockClass(have, need) {
@@ -3086,10 +3098,12 @@
       if (!s) return '<span class="fop-dots">···</span>';
       // No ship branch picked yet: no branch count to show.
       if (!lineBranch(line)) return '<span class="fop-muted">-</span>';
-      // The count is at the line's own branch; one that differs from the
-      // header's (the column title) is prefixed with its id.
+      // The count is at the line's own branch, prefixed with its id ("4: 8")
+      // whenever the order ships from more than one branch, or the line from
+      // another branch than the header's (2026-11-04, on request; before,
+      // only the latter). The column title is "Br: Inv".
       var b = lineBranch(line);
-      var other = b !== state.header.shipBranch;
+      var other = b !== state.header.shipBranch || shipRows().length > 1;
       // Other lines of this product from the same branch count too.
       var need = branchNeed(line, b);
       var shared = need > (Number(line.qty) || 1) ? ' title="' + need + " on this order from branch " + esc(branchName(b)) + '"' : "";
@@ -3310,7 +3324,7 @@
         '<input class="fop-input fop-num' + (edited ? " fop-input--override" : "") + '" id="fop-dm-price" data-dm="price" inputmode="decimal" autocomplete="off" value="' +
         esc(priceText(line)) + '"' + ro + "></div>" +
         cell("Unit cost", '<div class="fop-details__val fop-num" data-cell="details-cost">' + costHtml(line) + "</div>") +
-        cell("Ext.", '<div class="fop-details__val fop-num" data-cell="details-ext">' + extHtml(line) + "</div>") +
+        cell("Ext", '<div class="fop-details__val fop-num" data-cell="details-ext">' + extHtml(line) + "</div>") +
         "</div>";
     }
 
@@ -4242,10 +4256,10 @@
         '<div class="fop-cell fop-cell--num">#</div><div class="fop-cell fop-cell--product">Product</div>' +
         '<div class="fop-cell fop-cell--desc">Description</div><div class="fop-cell fop-cell--qty">Qty</div>' +
         '<div class="fop-cell fop-cell--price">Unit price</div><div class="fop-cell fop-cell--cost">Unit cost</div>' +
-        '<div class="fop-cell fop-cell--ext">Ext.</div>' +
+        '<div class="fop-cell fop-cell--ext">Ext</div>' +
         // Invoiced / cancelled: no Br / All columns, so the numbers sit against
         // the right edge (.fop-grid--nostock).
-        (noStock() ? "" : '<div class="fop-cell fop-cell--stock">Br ' + esc(state.header.shipBranch || "-") + "</div>" +
+        (noStock() ? "" : '<div class="fop-cell fop-cell--stock">Br: Inv</div>' +
           (inlineLayout ? '<div class="fop-cell fop-cell--stock">All</div>' : "")) + '<div class="fop-cell fop-cell--del"></div>' +
         "</div>" + linesHtml + "</div>" +
         // Under the lines: grid buttons left, the totals summary box right.
@@ -4501,7 +4515,7 @@
         "</div>" +
         (state.confirm.mode === "order" ? statusPickerHtml() : "") +
         '<div class="fop-table-wrap"><table class="fop-table"><thead><tr><th>Product</th><th>Description</th>' + (multi ? '<th class="fop-num">Br</th>' : "") +
-        '<th class="fop-num">Qty</th><th class="fop-num">Ext.</th></tr></thead><tbody>' + rows + "</tbody></table></div>" +
+        '<th class="fop-num">Qty</th><th class="fop-num">Ext</th></tr></thead><tbody>' + rows + "</tbody></table></div>" +
         confirmTotalHtml(t) +
         placeErrorHtml(state.placeError) +
         '<div class="fop-row fop-row--end">' +
@@ -4574,7 +4588,7 @@
         (ch.any && !leaves && ch.moved ? '<div class="fop-alert fop-alert--info">Lines for another branch move to that branch\'s generation (a new one if needed).</div>' : "") +
         (ch.commented ? '<div class="fop-muted">A line that gets a comment is re-created in Eclipse with the same product, qty and price (Eclipse can\'t edit the comments of a line).</div>' : "") +
         '<div class="fop-table-wrap"><table class="fop-table"><thead><tr><th>Product</th><th>Description</th>' + (multi ? '<th class="fop-num">Br</th>' : "") +
-        '<th class="fop-num">Qty</th><th class="fop-num">Ext.</th><th></th></tr></thead><tbody>' + rows + "</tbody></table></div>" +
+        '<th class="fop-num">Qty</th><th class="fop-num">Ext</th><th></th></tr></thead><tbody>' + rows + "</tbody></table></div>" +
         confirmTotalHtml(t) +
         placeErrorHtml(state.placeError) +
         '<div class="fop-row fop-row--end">' +
@@ -4758,7 +4772,7 @@
     function refreshAllRows() {
       state.lines.forEach(function (l, r) { refreshRow(r); });
       var head = root.querySelector(".fop-line--head .fop-cell--stock");
-      if (head) head.textContent = noStock() ? "" : "Br " + (state.header.shipBranch || "-");
+      if (head) head.textContent = noStock() ? "" : "Br: Inv";
       refreshShipRows();
     }
 
