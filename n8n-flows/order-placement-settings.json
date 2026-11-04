@@ -1,0 +1,85 @@
+{
+  "id": "FK94eaRZKMITiSvc",
+  "name": "order placement settings",
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "id": "1268bc42-01a9-433d-b6cf-0d6e2668299c",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "e-order-placement/settings",
+        "responseMode": "responseNode",
+        "authentication": "jwtAuth",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "webhookId": "ba575955-21d2-4062-bc29-17f9b1a0f6e9",
+      "credentials": {
+        "jwtAuth": {
+          "id": "6sDOPAJdRYI8fpxX",
+          "name": "Fairbank session (JWT)"
+        }
+      }
+    },
+    {
+      "id": "95cbdc5b-3d53-4e90-99d2-cfa2d8535e79",
+      "name": "read settings",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [224, 0],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT setting_id, data FROM fairbank_sales_settings WHERE setting_id IN ('ship_vias_by_branch');",
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "wiJjdZBJJ71KnbxL",
+          "name": "fairbank warehouse"
+        }
+      }
+    },
+    {
+      "id": "30258def-f544-4aa0-bce0-ed79ccf2f3fa",
+      "name": "Shape",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [448, 0],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Settings the order placement page reads once per page load, keyed by\n// setting_id: { ship_vias_by_branch: { branches, branch_count, refreshed_at } }.\n// A missing row is left out (the page then offers every ship via).\nconst body = {};\nfor (const it of $input.all()) {\n  const r = it.json || {};\n  if (!r.setting_id) continue;\n  let d = r.data;\n  if (typeof d === 'string') { try { d = JSON.parse(d); } catch (e) { d = null; } }\n  if (d) body[r.setting_id] = d;\n}\nreturn { body };"
+      }
+    },
+    {
+      "id": "6a7499f4-31b2-48e7-aca8-f24b0f4a7f65",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [672, 0],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "read settings", "type": "main", "index": 0 }]]
+    },
+    "read settings": {
+      "main": [[{ "node": "Shape", "type": "main", "index": 0 }]]
+    },
+    "Shape": {
+      "main": [[{ "node": "Respond", "type": "main", "index": 0 }]]
+    }
+  }
+}

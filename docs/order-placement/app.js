@@ -66,6 +66,7 @@
     newCustomerOptions: N8N + "e-order-placement/new-customer/options",
     newCustomerAddress: N8N + "e-order-placement/new-customer/address",
     newCustomerBillTos: N8N + "e-order-placement/new-customer/bill-tos",
+    settings: N8N + "e-order-placement/settings",
     inquiry: N8N + "fairbank-product-inquiry",
   };
   var HS_COMPANY = "https://app.hubspot.com/contacts/43793456/record/0-2/";
@@ -133,9 +134,16 @@
     ["UPS.BLUE", "UPS.BLUE"], ["UPS.RED", "UPS.RED"], ["US ROAD", "US ROAD"],
     ["VENDOR DIRECT", "VENDOR DIRECT"], ["WCPU WILL CPU", "WCPU WILL CPU"], ["WEEKLY", "WEEKLY"],
     ["XPO", "XPO"], ["UPS.RED CC", "UPS.RED CC"], ["PONY EXPRESS", "PONY EXPRESS"],
-    ["WC WILL CALL", "WC WILL CALL"], ["SHOP ASSEMBLY", "SHOP ASSEMBLY"],
+    ["WC WILL CALL", "WC WILL CALL"], ["SHOP ASSEMBLY", "SHOP ASSEMBLY"], ["OVERNIGHT", "OVERNIGHT"],
   ];
   var COMMON_SHIP_VIAS = 9;
+
+  // The label a ship via value shows with (SALESMAN DELI CC shows as
+  // "SALESMAN DELIVERY CC"); the value itself when it is not in the list.
+  function viaLabel(v) {
+    var o = SHIP_VIAS.filter(function (x) { return x[1] === v; })[0];
+    return o ? o[0] : String(v || "");
+  }
 
   // Recommended ship vias (values) by the bill-to's terms, shown first in
   // a "Recommended" group (2026-10-28): credit card terms (CC_TERMS) and
@@ -145,7 +153,7 @@
     "UPS", "UPS CC", "BW BEST WAY", "BW BEST WAY CC", "OT OUR TRUCK",
   ];
   var CREDIT_SHIP_VIAS = [
-    "SEE INSTRUCTION", "SALESMAN DELIVR", "CPU PICK UP", "UPS", "BW BEST WAY", "OT OUR TRUCK", "WC WILL CALL",
+    "SEE INSTRUCTION", "SALESMAN DELIVR", "CPU PICK UP", "UPS", "BW BEST WAY", "OT OUR TRUCK", "WCPU WILL CPU",
   ];
 
   // SALESMAN DELI CC is only offered at ship branch 8 (2026-11-02): with a
@@ -457,6 +465,7 @@
     var inlineLayout = !sideLayout && !detailsLayout;
     var params = readParams();
     var urlProducts = productsFromParams(params);
+    loadShipViaSettings();
     // ?e_customer_id with both e_product_ids and quantities skips the orders
     // list once and starts a new order with those lines.
     // &new_order=1 does the same without products: the new-customer page
@@ -1176,7 +1185,7 @@
         return x.status === "Bid" && branchIdOf(x.ship_branch) === b && String(x.generation_id) !== String(ex.generation_id);
       })[0]) : null;
       if (g) return { shipVia: g.ship_via || "", shipDate: g.ship_date || "", requiredDate: g.required_date || "", shippingInstructions: g.shipping_instructions || "" };
-      return { shipVia: h.shipVia === DELI_CC_SHIP_VIA && deliCcOff(b) ? "" : h.shipVia, shipDate: h.shipDate, requiredDate: h.requiredDate, shippingInstructions: h.shippingInstructions };
+      return { shipVia: (h.shipVia === DELI_CC_SHIP_VIA && deliCcOff(b)) || !viaAllowed(b, h.shipVia) ? "" : h.shipVia, shipDate: h.shipDate, requiredDate: h.requiredDate, shippingInstructions: h.shippingInstructions };
     }
 
     // The rows: every branch a sent line ships from, the header's first;
@@ -1576,6 +1585,33 @@
 
     // True when ship branch b can't use SALESMAN DELI CC (every branch but 8).
     // Per branch row since 2026-11-04 (before: any product line off branch 8).
+    // Ship vias valid at each branch (2026-11-04): row ship_vias_by_branch of
+    // the fairbank_sales_settings table, refreshed from Eclipse every day at
+    // 5 AM and read once per page load through e-order-placement/settings.
+    // { "<branch id>": [ship via values] }. Until it loads, or for a branch
+    // it does not list, every ship via is offered (the old behaviour).
+    var shipViasByBranch = null;
+
+    function loadShipViaSettings() {
+      getJson(API.settings, {}).then(function (d) {
+        var m = d && d.ship_vias_by_branch && d.ship_vias_by_branch.branches;
+        if (!m || typeof m !== "object") return;
+        shipViasByBranch = m;
+        if (state.view !== "order") return;
+        var box = root.querySelector("#fop-head-ship");
+        if (box) box.removeAttribute("data-key");
+        refreshShipRows();
+        refreshAllRows();
+        refreshRequiredMarks();
+      }).catch(function () { /* not loaded: every ship via stays offered */ });
+    }
+
+    // Is ship via v allowed at branch b? Unknown branch or list: yes.
+    function viaAllowed(b, v) {
+      var list = shipViasByBranch && shipViasByBranch[branchIdOf(b)];
+      return !v || !Array.isArray(list) || list.indexOf(v) >= 0;
+    }
+
     function deliCcOff(b) {
       return branchIdOf(b) !== DELI_CC_BRANCH;
     }
@@ -1602,6 +1638,7 @@
         var b = rows[i], s = shipOf(b);
         if (!b) return { msg: "Pick a ship branch.", branch: b, key: "shipBranch" };
         if (!s.shipVia) return { msg: "Pick a ship via" + on(b) + ".", branch: b, key: "shipVia" };
+        if (!viaAllowed(b, s.shipVia)) return { msg: viaLabel(s.shipVia) + " is not available at branch " + branchName(b) + ": pick another ship via.", branch: b, key: "shipVia" };
         if (!s.shipDate) return { msg: "Pick a ship date" + on(b) + ".", branch: b, key: "shipDate" };
         if (!s.requiredDate) return { msg: "Pick a required date" + on(b) + ".", branch: b, key: "requiredDate" };
         if (s.requiredDate < s.shipDate) return { msg: "Required date cannot be before ship date" + on(b) + ".", branch: b, key: "requiredDate" };
@@ -2145,7 +2182,9 @@
 
     // off: option values shown grayed out (disabled).
     // branch: another branch row's select (data-branch, its own id).
-    function selectHtml(field, options, value, placeholder, groups, groupLabel, off, branch) {
+    // tail: { label, options } listed last in their own group, every one
+    // grayed out (ship vias the branch does not allow).
+    function selectHtml(field, options, value, placeholder, groups, groupLabel, off, branch, tail) {
       var html = '<select class="fop-input" data-head="' + field + '" id="fop-h-' + field + (branch ? "-" + esc(branch) : "") + '"' +
         (branch ? ' data-branch="' + esc(branch) + '"' : "") + lockAttr(field) + ">";
       // Placeholder only while nothing is picked (both selects are required).
@@ -2161,9 +2200,14 @@
       } else {
         html += options.map(opt).join("");
       }
+      if (tail && tail.options.length) {
+        html += '<optgroup label="' + esc(tail.label) + '">' + tail.options.map(function (o) {
+          return '<option value="' + esc(o[1]) + '" disabled' + (String(o[1]) === String(value) ? " selected" : "") + ">" + esc(o[0]) + "</option>";
+        }).join("") + "</optgroup>";
+      }
       // Keep an unknown current value (e.g. a customer default not in the list).
-      var known = options.some(function (o) { return String(o[1]) === String(value); });
-      if (value && !known) html += '<option value="' + esc(value) + '" selected>' + esc(value) + "</option>";
+      var known = options.concat(tail ? tail.options : []).some(function (o) { return String(o[1]) === String(value); });
+      if (value && !known) html += '<option value="' + esc(value) + '" selected>' + esc(field === "shipVia" ? viaLabel(value) : value) + "</option>";
       return html + "</select>";
     }
 
@@ -2176,13 +2220,20 @@
       var row = b == null ? state.header.shipBranch : b;
       var off = deliCcOff(row) ? [DELI_CC_SHIP_VIA] : [];
       var attr = row && row !== state.header.shipBranch ? row : null;
-      if (!rec) return selectHtml("shipVia", SHIP_VIAS, value, "Select…", COMMON_SHIP_VIAS, null, off, attr);
-      rec = rec.filter(function (v) { return off.indexOf(v) < 0; });
+      // The ship vias this branch allows (viaAllowed()); the others are
+      // listed last, grayed out, under "Not available at branch …".
+      var vias = SHIP_VIAS.filter(function (o) { return viaAllowed(row, o[1]); });
+      var tail = { label: "Not available at branch " + branchName(row), options: SHIP_VIAS.filter(function (o) { return !viaAllowed(row, o[1]); }) };
+      if (!rec) {
+        var common = SHIP_VIAS.slice(0, COMMON_SHIP_VIAS).filter(function (o) { return viaAllowed(row, o[1]); }).length;
+        return selectHtml("shipVia", vias, value, "Select…", common, null, off, attr, tail);
+      }
+      rec = rec.filter(function (v) { return off.indexOf(v) < 0 && viaAllowed(row, v); });
       var byVal = {};
       SHIP_VIAS.forEach(function (o) { byVal[o[1]] = o; });
       var first = rec.map(function (v) { return byVal[v]; });
-      var rest = SHIP_VIAS.filter(function (o) { return rec.indexOf(o[1]) < 0; });
-      return selectHtml("shipVia", first.concat(rest), value, "Select…", first.length, "Recommended", off, attr);
+      var rest = vias.filter(function (o) { return rec.indexOf(o[1]) < 0; });
+      return selectHtml("shipVia", first.concat(rest), value, "Select…", first.length, "Recommended", off, attr, tail);
     }
 
     // The branch rows (shipRowsHtml()), keyed by branch and line count.
