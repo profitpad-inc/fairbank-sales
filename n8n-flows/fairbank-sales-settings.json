@@ -1,0 +1,271 @@
+{
+  "name": "fairbank sales settings",
+  "id": "NNUQPUAElqxiRTup",
+  "nodes": [
+    {
+      "id": "dae3a112-0972-4e94-b9c3-991b9f434efe",
+      "name": "Run setup",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "915471a1-0835-404a-974c-1590c8cecbb3",
+      "name": "fairbank_sales_settings table",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Same shape as outlook_integration_settings. Safe to re-run: never drops anything.\n-- Shared trigger function (same body as the one the outlook tables use)\nCREATE OR REPLACE FUNCTION set_row_updated_at()\nRETURNS TRIGGER AS $$\nBEGIN\n  NEW.row_updated_at = now();\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql;\n\nCREATE TABLE IF NOT EXISTS fairbank_sales_settings (\n  setting_id     TEXT PRIMARY KEY,\n  data           JSONB,\n  row_created_at TIMESTAMPTZ NOT NULL DEFAULT now(),\n  row_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()\n);\n\nDROP TRIGGER IF EXISTS trg_fairbank_sales_settings_row_updated_at ON fairbank_sales_settings;\n\nCREATE TRIGGER trg_fairbank_sales_settings_row_updated_at\nBEFORE UPDATE ON fairbank_sales_settings\nFOR EACH ROW\nEXECUTE FUNCTION set_row_updated_at();",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "wiJjdZBJJ71KnbxL",
+          "name": "fairbank warehouse"
+        }
+      }
+    },
+    {
+      "id": "d3fb09f0-b177-4e24-aa82-25fe614851e4",
+      "name": "check columns",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        448,
+        0
+      ],
+      "executeOnce": true,
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT column_name, data_type, is_nullable, column_default\nFROM information_schema.columns\nWHERE table_schema = 'public' AND table_name = 'fairbank_sales_settings'\nORDER BY ordinal_position;",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "wiJjdZBJJ71KnbxL",
+          "name": "fairbank warehouse"
+        }
+      }
+    },
+    {
+      "id": "9a55e3e2-d77d-40bd-80de-329c5f2efe97",
+      "name": "Daily 5 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        256
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 5,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "5a647910-88b6-4160-bab9-2a750632092b",
+      "name": "Get many branches",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        224,
+        256
+      ],
+      "parameters": {
+        "resource": "branch",
+        "operation": "getMany",
+        "pageSize": 100,
+        "fieldsFilterMode": "selected",
+        "fieldsToInclude": "id,shipViaOverrides.shipViaId",
+        "additionalOptions": {}
+      },
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "eclipse"
+        }
+      }
+    },
+    {
+      "id": "2c3fdb53-1106-4aa6-b232-e2aee160eebf",
+      "name": "Build ship vias by branch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        256
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Eclipse Get many branches -> { branches: { \"<branch id>\": [ship via ids, A to Z] } }\n// Accepts the envelope ({ metadata, results }) or one branch per item.\nconst branchList = [];\nlet total = null;\nfor (const item of $input.all()) {\n  const j = item.json || {};\n  if (Array.isArray(j.results)) {\n    branchList.push(...j.results);\n    if (j.metadata && j.metadata.totalItems != null) total = Number(j.metadata.totalItems);\n  } else if (j.id != null) {\n    branchList.push(j);\n  }\n}\n\nif (!branchList.length) {\n  throw new Error('Eclipse returned no branches; ship_vias_by_branch left unchanged');\n}\nif (total != null && total > branchList.length) {\n  throw new Error(`Eclipse has ${total} branches but only ${branchList.length} came back (raise the page size); ship_vias_by_branch left unchanged`);\n}\n\nconst branches = {};\nfor (const b of branchList) {\n  const id = String(b.id || '').trim();\n  if (!id) continue;\n  const vias = (b.shipViaOverrides || [])\n    .map(o => String((o && o.shipViaId) || '').trim())\n    .filter(Boolean);\n  branches[id] = [...new Set(vias)].sort();\n}\n\nreturn {\n  \"setting_id\": \"ship_vias_by_branch\",\n  \"data\": {\n    \"branches\": branches,\n    \"branch_count\": Object.keys(branches).length,\n    \"refreshed_at\": new Date().toISOString()\n  }\n};"
+      }
+    },
+    {
+      "id": "6d37663d-239d-4fa6-9753-7e4e84245b6c",
+      "name": "upsert ship_vias_by_branch",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        672,
+        256
+      ],
+      "parameters": {
+        "operation": "upsert",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "fairbank_sales_settings",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "setting_id": "={{ $json.setting_id }}",
+            "data": "={{ $json.data }}"
+          },
+          "matchingColumns": [
+            "setting_id"
+          ],
+          "schema": [
+            {
+              "id": "setting_id",
+              "displayName": "setting_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "data",
+              "displayName": "data",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "row_created_at",
+              "displayName": "row_created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": false,
+              "removed": true
+            },
+            {
+              "id": "row_updated_at",
+              "displayName": "row_updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": false,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "wiJjdZBJJ71KnbxL",
+          "name": "fairbank warehouse"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Run setup": {
+      "main": [
+        [
+          {
+            "node": "fairbank_sales_settings table",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get many branches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "fairbank_sales_settings table": {
+      "main": [
+        [
+          {
+            "node": "check columns",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily 5 AM": {
+      "main": [
+        [
+          {
+            "node": "Get many branches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get many branches": {
+      "main": [
+        [
+          {
+            "node": "Build ship vias by branch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build ship vias by branch": {
+      "main": [
+        [
+          {
+            "node": "upsert ship_vias_by_branch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": true,
+  "versionId": "35bcccf0-0d76-41ea-b95b-ed5f10e5a7c6"
+}

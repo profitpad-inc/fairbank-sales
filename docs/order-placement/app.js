@@ -150,7 +150,7 @@
 
   // SALESMAN DELI CC is only offered at ship branch 8 (2026-11-02): with a
   // product line on any other branch it is grayed out in the ship via list
-  // and left out of the Recommended group (deliCcBlocked()).
+  // and left out of the Recommended group (deliCcOff()).
   var DELI_CC_SHIP_VIA = "SALESMAN DELI CC";
   var DELI_CC_BRANCH = "8";
 
@@ -566,7 +566,8 @@
         internalNotes: "",
         shippingInstructions: "",
         outsideSales: String(user.default_territory || "").trim(),  // outsideSalesOptions()
-        email: recentEmail(state.shipTo),  // contactFields(); sent as email
+        email: recentEmail(state.shipTo),  // emailField(); sent as email
+        branches: {},            // shipping of the other ship branches (shipOf())
       };
     }
 
@@ -853,6 +854,7 @@
         internalNotes: order.internal_notes || "",
         shippingInstructions: order.shipping_instructions || "",
         outsideSales: order.outside_sales || "",
+        branches: {},
       };
       // A bid's unsaved header edits on this tab.
       if (saved && saved.header) state.header = saved.header;
@@ -1147,6 +1149,83 @@
       return id ? id + (known ? " - " + known[1] : "") : "";
     }
 
+    // ── Shipping per branch (2026-11-04) ───────────────────────────────────
+    // Every ship branch the lines use is its own Eclipse generation, so each
+    // gets its own ship via, ship date, required date and shipping
+    // instructions: one row (a tab, with several) per branch at the top of
+    // the header (shipRowsHtml()). The header's own fields (state.header.
+    // shipVia / shipDate / requiredDate / shippingInstructions) are the
+    // header ship branch's; header.branches[id] holds every other branch's.
+
+    // The shipping of branch b: the header itself for the header's branch.
+    function shipOf(b) {
+      var h = state.header;
+      if (!b || b === h.shipBranch) return h;
+      if (!h.branches) h.branches = {};
+      if (!h.branches[b]) h.branches[b] = newBranchShip(b);
+      return h.branches[b];
+    }
+
+    // A branch row's starting values: on a bid, the order's other Bid
+    // generation on that branch (the lines join it); else the header's
+    // (SALESMAN DELI CC only where it is allowed).
+    function newBranchShip(b) {
+      var h = state.header;
+      var ex = state.existing;
+      var g = ex && state.order ? ((state.order.generations || []).filter(function (x) {
+        return x.status === "Bid" && branchIdOf(x.ship_branch) === b && String(x.generation_id) !== String(ex.generation_id);
+      })[0]) : null;
+      if (g) return { shipVia: g.ship_via || "", shipDate: g.ship_date || "", requiredDate: g.required_date || "", shippingInstructions: g.shipping_instructions || "" };
+      return { shipVia: h.shipVia === DELI_CC_SHIP_VIA && deliCcOff(b) ? "" : h.shipVia, shipDate: h.shipDate, requiredDate: h.requiredDate, shippingInstructions: h.shippingInstructions };
+    }
+
+    // The rows: every branch a sent line ships from, the header's first;
+    // just the header's while there are no lines.
+    function shipRows() {
+      var h = state.header;
+      var bs = orderBranches();
+      if (!bs.length) return [h.shipBranch];
+      if (bs.indexOf(h.shipBranch) > 0) bs = [h.shipBranch].concat(bs.filter(function (b) { return b !== h.shipBranch; }));
+      return bs;
+    }
+
+    // The shipping an input belongs to: data-branch marks another branch's
+    // row; without it, the header.
+    function shipTargetOf(el) {
+      var b = el && el.getAttribute && el.getAttribute("data-branch");
+      return b ? shipOf(b) : state.header;
+    }
+
+    // { "<branch>": { ship_via, ship_date, required_date, shipping_instructions } } for every row
+    // but the header's (create-order and update-bid take it as branches).
+    function branchShipPayload() {
+      var out = {};
+      shipRows().forEach(function (b) {
+        if (!b || b === state.header.shipBranch) return;
+        var s = shipOf(b);
+        out[b] = { ship_via: s.shipVia, ship_date: s.shipDate, required_date: s.requiredDate, shipping_instructions: s.shippingInstructions || "" };
+      });
+      return out;
+    }
+
+    function anyShipVia(test) {
+      return shipRows().some(function (b) { return test(String(shipOf(b).shipVia || "").trim()); });
+    }
+
+    // The ship branch picked while there is one row (several rows show the
+    // branch as text): the header and the lines that follow it move there,
+    // and lines already on that branch join them.
+    function moveShipRow(to) {
+      var h = state.header;
+      if (!h.branches) h.branches = {};
+      if (to && to !== h.shipBranch) {
+        state.lines.forEach(function (l) { if (l.branch === to) l.branch = ""; });
+        delete h.branches[to];
+        h.shipBranch = to;
+      }
+      render();
+    }
+
     // An inventory tile picked: line r ships from that branch. When every
     // line with a product then ships from one branch, that becomes the
     // header's ship branch (and the lines follow it again).
@@ -1160,7 +1239,15 @@
       var ls = state.lines.filter(function (l) { return !l.custom && !isFreightLine(l) && l.productId; });
       var first = ls.length ? lineBranch(ls[0]) : "";
       if (first && ls.every(function (l) { return lineBranch(l) === first; })) {
-        state.header.shipBranch = first;
+        var h = state.header;
+        var moved = first !== h.shipBranch && h.branches && h.branches[first];
+        // The header takes that branch's row values (ship via, dates, instructions).
+        if (moved) {
+          h.shipVia = moved.shipVia; h.shipDate = moved.shipDate; h.requiredDate = moved.requiredDate;
+          h.shippingInstructions = moved.shippingInstructions || "";
+          delete h.branches[first];
+        }
+        h.shipBranch = first;
         state.lines.forEach(function (l) { l.branch = ""; });
       }
       state.focus = { r: r, c: state.focus.c };
@@ -1373,6 +1460,8 @@
         ship_via: h.shipVia, ship_branch: h.shipBranch, ship_date: h.shipDate, required_date: h.requiredDate,
         shipping_instructions: h.shippingInstructions, internal_notes: h.internalNotes,
         outside_sales: h.outsideSales,
+        // The other branch rows (lines moved off the bid's branch).
+        branches: branchShipPayload(),
       };
     }
 
@@ -1391,6 +1480,14 @@
       add("Shipping instructions", ex.shipping_instructions, h.shippingInstructions);
       add("Internal notes", ex.internal_notes, h.internalNotes);
       add("Outside sales", ex.outside_sales, h.outsideSales);
+      // The other branch rows: their lines go to that branch's generation
+      // (an existing bid one, or a new one) with these values.
+      shipRows().forEach(function (b) {
+        if (!b || b === h.shipBranch) return;
+        var s = shipOf(b);
+        out.push({ label: "Branch " + branchName(b), from: "", to: (s.shipVia || "No ship via") + ", ship " + dateText(s.shipDate) + ", required " + dateText(s.requiredDate) +
+          (String(s.shippingInstructions || "").trim() ? ', instructions "' + String(s.shippingInstructions).trim() + '"' : "") });
+      });
       return out;
     }
 
@@ -1464,22 +1561,52 @@
     // Ship via "SEE INSTRUCTION" is not useful on its own: require real
     // shipping instructions (at least 1 character, 2026-10-28; 5 before) before a bid, order,
     // update or convert, in every mode.
+    // Per branch row (2026-11-04): each generation has its own instructions.
+    function seeInstructionRow() {
+      return shipRows().filter(function (b) {
+        var s = shipOf(b);
+        return s.shipVia === "SEE INSTRUCTION" && !String(s.shippingInstructions || "").trim();
+      })[0];
+    }
     function seeInstructionReason() {
-      if (state.header.shipVia !== "SEE INSTRUCTION") return null;
-      if (String(state.header.shippingInstructions || "").trim().length >= 1) return null;
-      return 'Ship via is "SEE INSTRUCTION": add Shipping instructions.';
+      var b = seeInstructionRow();
+      if (b == null) return null;
+      return 'Ship via is "SEE INSTRUCTION": add Shipping instructions' + (shipRows().length > 1 ? " for branch " + branchName(b) : "") + ".";
     }
 
-    // True when at least one product line ships from a branch other than 8.
-    function deliCcBlocked() {
-      return state.lines.some(function (l) {
-        return l.productId && !l.custom && !isFreightLine(l) && branchIdOf(lineBranch(l)) !== DELI_CC_BRANCH;
-      });
+    // True when ship branch b can't use SALESMAN DELI CC (every branch but 8).
+    // Per branch row since 2026-11-04 (before: any product line off branch 8).
+    function deliCcOff(b) {
+      return branchIdOf(b) !== DELI_CC_BRANCH;
+    }
+
+    // The first row with SALESMAN DELI CC on a branch that can't use it.
+    function deliCcRow() {
+      return shipRows().filter(function (b) { return shipOf(b).shipVia === DELI_CC_SHIP_VIA && deliCcOff(b); })[0];
     }
 
     function deliCcReason() {
-      if (state.header.shipVia !== DELI_CC_SHIP_VIA || !deliCcBlocked()) return null;
-      return "SALESMAN DELI CC ships from branch " + DELI_CC_BRANCH + " only: pick another ship via.";
+      var b = deliCcRow();
+      if (b == null) return null;
+      return "SALESMAN DELI CC ships from branch " + DELI_CC_BRANCH + " only: pick another ship via" +
+        (shipRows().length > 1 ? " for branch " + branchName(b) : "") + ".";
+    }
+
+    // The first branch row missing a ship via or date (or with the required
+    // date before the ship date): { msg, branch, key }, else null. One row
+    // keeps the old messages; several name the branch.
+    function shipProblem() {
+      var rows = shipRows();
+      var on = function (b) { return rows.length > 1 ? " for branch " + branchName(b) : ""; };
+      for (var i = 0; i < rows.length; i++) {
+        var b = rows[i], s = shipOf(b);
+        if (!b) return { msg: "Pick a ship branch.", branch: b, key: "shipBranch" };
+        if (!s.shipVia) return { msg: "Pick a ship via" + on(b) + ".", branch: b, key: "shipVia" };
+        if (!s.shipDate) return { msg: "Pick a ship date" + on(b) + ".", branch: b, key: "shipDate" };
+        if (!s.requiredDate) return { msg: "Pick a required date" + on(b) + ".", branch: b, key: "requiredDate" };
+        if (s.requiredDate < s.shipDate) return { msg: "Required date cannot be before ship date" + on(b) + ".", branch: b, key: "requiredDate" };
+      }
+      return null;
     }
 
     function placeBlockedReason(mode) {
@@ -1496,10 +1623,7 @@
         // new order). Ship via and required date are needed for an update
         // too, like a new bid, and so is the ship date (2026-10-23).
         if (mode === "convert" && customLines().length) return "An order with custom lines can only be placed as a bid.";
-        if (!h.shipVia) return "Pick a ship via.";
-        if (!h.shipDate) return "Pick a ship date.";
-        if (!h.requiredDate) return "Pick a required date.";
-        if (h.requiredDate && h.shipDate && h.requiredDate < h.shipDate) return "Required date cannot be before ship date.";
+        if (shipProblem()) return shipProblem().msg;
         if (!user.e_user_id) return "Sign in again: no Eclipse user on this session.";
         if (mode === "convert") return null;
         return bidChanges().any ? null : "No changes to save.";
@@ -1509,12 +1633,10 @@
       if (mode === "order" && customLines().length) return "An order with custom lines can only be placed as a bid.";
       if (!h.shipBranch) return "Pick a ship branch.";
       // Ship via, ship date and required date are required for a bid and an
-      // order (2026-10-23; a bid could go without a ship via before).
-      if (!h.shipVia) return "Pick a ship via.";
-      if (!h.shipDate) return "Pick a ship date.";
-      if (!h.requiredDate) return "Pick a required date.";
+      // order (2026-10-23; a bid could go without a ship via before), on
+      // every branch row (2026-11-04).
+      if (shipProblem()) return shipProblem().msg;
       if (String(h.email || "").trim() && !EMAIL_RE.test(String(h.email).trim().toLowerCase())) return "Enter a valid email.";
-      if (h.requiredDate && h.shipDate && h.requiredDate < h.shipDate) return "Required date cannot be before ship date.";
       if (!user.e_user_id) return "Sign in again: no Eclipse user on this session.";
       return null;
     }
@@ -1589,29 +1711,22 @@
       el.style.height = el.scrollHeight + 2 + "px";
     }
 
-    // Shipping instructions and internal notes sit side by side, so they
-    // always share one height: the taller of the two (on request).
+    // The header's notes boxes (each branch's shipping instructions, and
+    // internal notes), each its own height since 2026-11-04 (they no longer
+    // sit side by side). A box in a closed branch tab is skipped (it has no
+    // height yet; openShipTab() sizes it). On phones an empty, unfocused one
+    // is only its label (styles.css stretches the box over the row), so it
+    // takes no height of its own.
     function autosizeNotesPair() {
-      var pair = [root.querySelector('[data-head="shippingInstructions"]'), root.querySelector('[data-head="internalNotes"]')]
-        .filter(Boolean);
-      // Phones stack them, each its own height. An empty, unfocused one is
-      // only its label there (styles.css stretches the box over the row),
-      // so it takes no height of its own.
-      if (window.matchMedia && window.matchMedia("(max-width: 767px)").matches) {
-        pair.forEach(function (el) {
-          if (getComputedStyle(el).position === "absolute") el.style.height = "";
-          else autosize(el);
-        });
-        return;
-      }
-      pair.forEach(function (el) { el.style.height = "auto"; });
-      var h = Math.max.apply(null, pair.map(function (el) { return el.scrollHeight; }).concat([0]));
-      pair.forEach(function (el) { el.style.height = h + 2 + "px"; });
+      root.querySelectorAll("#fop-head .fop-notes").forEach(function (el) {
+        if (el.closest(".fop-head__grid--tabbed:not(.is-active)")) return;
+        if (getComputedStyle(el).position === "absolute") el.style.height = "";
+        else autosize(el);
+      });
     }
 
     function autosizeNotes(el) {
-      var paired = el && /^(shippingInstructions|internalNotes)$/.test(el.getAttribute("data-head") || "");
-      if (paired) autosizeNotesPair(); else if (el) autosize(el);
+      if (el) autosize(el);
     }
 
     // Date fields use Flatpickr (vendor/, same setup as the camo-cpq
@@ -1620,8 +1735,9 @@
     // destroyed and new ones attached each time.
     var datePickers = [];
 
-    function dateErrorOn() {
-      var h = state.header;
+    // s: the shipping the dates belong to (a branch row; the header by default).
+    function dateErrorOn(s) {
+      var h = s || state.header;
       // An order that can't be edited (invoiced, cancelled, non-bid) shows its
       // dates as Eclipse has them (e.g. a cancelled ship date in 2241); there
       // is nothing to fix, so no red outline.
@@ -1632,7 +1748,7 @@
     function refreshDateError() {
       datePickers.forEach(function (fp) {
         if (fp.input.getAttribute("data-date") === "requiredDate" && fp.altInput) {
-          fp.altInput.classList.toggle("fop-input--err", dateErrorOn());
+          fp.altInput.classList.toggle("fop-input--err", dateErrorOn(shipTargetOf(fp.input)));
         }
       });
     }
@@ -1676,8 +1792,8 @@
     // Earliest pickable date: today (ship date) or the ship date (required
     // date). On a bid a date already in the past stays pickable, because
     // flatpickr clears a selected date that falls below minDate.
-    function dateMin(key) {
-      var h = state.header;
+    function dateMin(key, s) {
+      var h = s || state.header;
       var min = key === "requiredDate" && h.shipDate ? h.shipDate : isoDate(0);
       if (state.existing && h[key] && h[key] < min) min = h[key];
       return min;
@@ -1692,15 +1808,19 @@
         (function (el) {
           var key = el.getAttribute("data-date");
           var locked = headLocked(key);
+          // A branch row's dates (data-branch), else the header's.
+          var bkey = el.getAttribute("data-branch") || "";
+          var tgt = shipTargetOf(el);
+          var sameRow = function (p) { return (p.input.getAttribute("data-branch") || "") === bkey; };
           var fp = window.flatpickr(el, {
             dateFormat: "Y-m-d",           // state + create-order keep YYYY-MM-DD
             altInput: true,
             altFormat: "M j, Y",           // "Oct 26, 2026"
             altInputClass: "fop-input fop-date-alt",
-            defaultDate: state.header[key] || undefined,
+            defaultDate: tgt[key] || undefined,
             // A locked order's dates can be in the past. Required date cannot
             // be before the ship date.
-            minDate: locked ? null : dateMin(key),
+            minDate: locked ? null : dateMin(key, tgt),
             clickOpens: !locked,
             disableMobile: true,           // keep the themed calendar on phones
             // The field can be typed in. While the calendar is open it shows
@@ -1711,28 +1831,28 @@
             allowInput: !phoneDates(),
             parseDate: typedDateParser(function () { return fp; }),
             onChange: function (_dates, dateStr) {
-              state.header[key] = dateStr;
+              tgt[key] = dateStr;
               // The same date in another box (the dialog's Ship date and the
               // header's) follows it; false = no onChange loop.
               datePickers.forEach(function (p) {
-                if (p !== fp && p.input.getAttribute("data-date") === key && p.input.value !== dateStr) {
+                if (p !== fp && sameRow(p) && p.input.getAttribute("data-date") === key && p.input.value !== dateStr) {
                   if (dateStr) p.setDate(dateStr, false); else p.clear(false);
                 }
               });
               if (key === "shipDate" && !headLocked("requiredDate")) {
                 datePickers.forEach(function (p) {
-                  if (p.input.getAttribute("data-date") === "requiredDate") p.set("minDate", dateStr || "today");
+                  if (sameRow(p) && p.input.getAttribute("data-date") === "requiredDate") p.set("minDate", dateStr || "today");
                 });
               }
               refreshDateError();
               refreshTotals();
-              var cd = root.querySelector('[data-cell="confirm-dates"]');
-              if (cd) cd.innerHTML = "<span>Ship / Req</span> " + esc(state.header.shipDate) + " / " + esc(state.header.requiredDate);
+              var cd = root.querySelector('[data-cell="confirm-ship"]');
+              if (cd) cd.innerHTML = confirmShipHtml();
             },
             // Opening Required date while it is before Ship date moves it to
             // the ship date (selected, so closing keeps it).
             onOpen: function () {
-              var h = state.header;
+              var h = tgt;
               if (key === "requiredDate" && h.shipDate && (!h.requiredDate || h.requiredDate < h.shipDate)) {
                 fp.setDate(h.shipDate, true);
               }
@@ -1755,7 +1875,7 @@
             var d = isoDateOnly(fp.altInput.value);
             if (d && fp.isOpen) fp.jumpToDate(d);
           });
-          if (fp.altInput) fp.altInput.setAttribute("aria-label", key === "shipDate" ? "Ship date" : "Required date");
+          if (fp.altInput) fp.altInput.setAttribute("aria-label", (key === "shipDate" ? "Ship date" : "Required date") + (bkey ? ", branch " + bkey : ""));
           if (fp.altInput && locked) fp.altInput.disabled = true;
           datePickers.push(fp);
         })(els[i]);
@@ -2024,8 +2144,10 @@
     function lockAttr(key) { return headLocked(key) ? " disabled" : ""; }
 
     // off: option values shown grayed out (disabled).
-    function selectHtml(field, options, value, placeholder, groups, groupLabel, off) {
-      var html = '<select class="fop-input" data-head="' + field + '" id="fop-h-' + field + '"' + lockAttr(field) + ">";
+    // branch: another branch row's select (data-branch, its own id).
+    function selectHtml(field, options, value, placeholder, groups, groupLabel, off, branch) {
+      var html = '<select class="fop-input" data-head="' + field + '" id="fop-h-' + field + (branch ? "-" + esc(branch) : "") + '"' +
+        (branch ? ' data-branch="' + esc(branch) + '"' : "") + lockAttr(field) + ">";
       // Placeholder only while nothing is picked (both selects are required).
       // A locked field (existing order) shows a blank box, not "Select…".
       if (placeholder && !value) html += '<option value="" selected disabled>' + (headLocked(field) ? "" : esc(placeholder)) + "</option>";
@@ -2045,50 +2167,62 @@
       return html + "</select>";
     }
 
-    // Ship via: the bill-to's recommended ship vias first (by terms), else
-    // the usual Common group. SALESMAN DELI CC is grayed out, and left out
-    // of Recommended, while a product line ships from outside branch 8.
-    function shipViaSelectHtml(value) {
+    // Ship via of branch row b: the bill-to's recommended ship vias first
+    // (by terms), else the usual Common group. SALESMAN DELI CC is grayed
+    // out, and left out of Recommended, on every branch but 8.
+    function shipViaSelectHtml(value, b) {
       var code = String((state.customer && state.customer.bill_to && state.customer.bill_to.terms_code) || "").trim();
       var rec = CC_TERMS.test(code) ? CC_SHIP_VIAS : NET_TERMS.test(code) ? CREDIT_SHIP_VIAS : null;
-      var off = deliCcBlocked() ? [DELI_CC_SHIP_VIA] : [];
-      if (!rec) return selectHtml("shipVia", SHIP_VIAS, value, "Select…", COMMON_SHIP_VIAS, null, off);
+      var row = b == null ? state.header.shipBranch : b;
+      var off = deliCcOff(row) ? [DELI_CC_SHIP_VIA] : [];
+      var attr = row && row !== state.header.shipBranch ? row : null;
+      if (!rec) return selectHtml("shipVia", SHIP_VIAS, value, "Select…", COMMON_SHIP_VIAS, null, off, attr);
       rec = rec.filter(function (v) { return off.indexOf(v) < 0; });
       var byVal = {};
       SHIP_VIAS.forEach(function (o) { byVal[o[1]] = o; });
       var first = rec.map(function (v) { return byVal[v]; });
       var rest = SHIP_VIAS.filter(function (o) { return rec.indexOf(o[1]) < 0; });
-      return selectHtml("shipVia", first.concat(rest), value, "Select…", first.length, "Recommended", off);
+      return selectHtml("shipVia", first.concat(rest), value, "Select…", first.length, "Recommended", off, attr);
     }
 
-    // Redraws the ship via options when a line's branch or product changes
-    // whether SALESMAN DELI CC is offered (the select itself stays, so it
-    // keeps focus).
-    function refreshShipViaOptions() {
-      var sel = root.querySelector("#fop-h-shipVia");
-      if (!sel || sel.disabled) return;
-      var blocked = deliCcBlocked() ? "1" : "";
-      if ((sel.getAttribute("data-deli-off") || "") === blocked) return;
-      var tmp = document.createElement("div");
-      tmp.innerHTML = shipViaSelectHtml(state.header.shipVia);
-      sel.innerHTML = tmp.firstChild.innerHTML;
-      sel.setAttribute("data-deli-off", blocked);
+    // The branch rows (shipRowsHtml()), keyed by branch and line count.
+    function shipRowsKey() {
+      return shipRows().map(function (b) {
+        return b + ":" + sentLines().filter(function (l) { return lineBranch(l) === b; }).length;
+      }).join("|");
+    }
+
+    // Redraws the branch rows when a line change adds or drops a branch, or
+    // changes a row's line count (the rows stay as they are otherwise, so a
+    // focused box keeps focus).
+    function refreshShipRows() {
+      var box = root.querySelector("#fop-head-ship");
+      if (!box) return;
+      var key = shipRowsKey();
+      if (box.getAttribute("data-key") === key) { refreshShipTabDots(); return; }
+      box.setAttribute("data-key", key);
+      box.innerHTML = shipRowsHtml();
+      initDatePickers();
+      refreshRequiredMarks();
     }
 
     // req: the header key of a required field. Its label gets a red
     // asterisk while the field can be edited; Shipping instructions only
     // while ship via is "SEE INSTRUCTION" (refreshRequiredMarks()).
-    function field(label, inner, cls, req) {
+    // branch: the branch row a required mark belongs to (shipping
+    // instructions are per branch).
+    function field(label, inner, cls, req, branch) {
       return '<div class="fop-field ' + (cls || "") + '"><label class="fop-label">' + esc(label) +
-        (req ? '<span class="fop-req" data-req="' + req + '" aria-hidden="true"' + (requiredMark(req) ? "" : " hidden") + ">*</span>" : "") +
+        (req ? '<span class="fop-req" data-req="' + req + '"' + (branch ? ' data-req-branch="' + esc(branch) + '"' : "") +
+          ' aria-hidden="true"' + (requiredMark(req, branch) ? "" : " hidden") + ">*</span>" : "") +
         "</label>" + inner + "</div>";
     }
-    function requiredMark(key) {
+    function requiredMark(key, branch) {
       if (headLocked(key)) return false;
-      return key !== "shippingInstructions" || state.header.shipVia === "SEE INSTRUCTION";
+      return key !== "shippingInstructions" || shipOf(branch || "").shipVia === "SEE INSTRUCTION";
     }
     function refreshRequiredMarks() {
-      root.querySelectorAll("[data-req]").forEach(function (el) { el.hidden = !requiredMark(el.getAttribute("data-req")); });
+      root.querySelectorAll("[data-req]").forEach(function (el) { el.hidden = !requiredMark(el.getAttribute("data-req"), el.getAttribute("data-req-branch")); });
     }
 
     // Miles from the ship-to to branch id, or null (no ship-to coordinates,
@@ -2119,14 +2253,6 @@
       return list.map(function (b) {
         return [b.id + " - " + b.name + (b.mi != null ? " · " + Math.round(b.mi).toLocaleString("en-US") + " mi" : ""), b.id];
       });
-    }
-
-    // Under Ship branch while the lines ship from more than one branch.
-    function branchHintHtml() {
-      if (linesLocked()) return "";
-      var bs = orderBranches();
-      if (bs.length < 2) return "";
-      return "Lines ship from branches " + esc(bs.join(", ")) + ": one generation per branch.";
     }
 
     // "2026-04-16" → "Apr 16, 2026" (same look as the date pickers).
@@ -2167,15 +2293,15 @@
     // Top right of the header. A new order: a select of every branch in
     // branch-number order, starting on the writer's home branch. An existing
     // order: its own price branch, read-only (update-bid never changes it).
-    function priceBranchField() {
+    function priceBranchField(cls) {
       if (!state.existing) {
         var opts = BRANCHES.map(function (b) { return [b[0] + " - " + b[1], b[0]]; });
-        return field("Price branch", selectHtml("priceBranch", opts, newPriceBranch(), "Select…"), "fop-field--end");
+        return field("Price branch", selectHtml("priceBranch", opts, newPriceBranch(), "Select…"), cls);
       }
       var id = branchIdOf(state.existing.price_branch);
       var known = BRANCHES.filter(function (b) { return b[0] === id; })[0];
       var text = id ? id + (known ? " - " + known[1] : "") : "";
-      return field("Price branch", '<input class="fop-input" value="' + esc(text) + '" disabled>', "fop-field--end");
+      return field("Price branch", '<input class="fop-input" value="' + esc(text) + '" disabled>', cls);
     }
 
     // Read-only order info for an existing order that is not a bid; "" on a
@@ -2193,30 +2319,40 @@
 
     // Writer, read-only on every order: the signed-in rep on a new order,
     // the order's own writer on an existing one.
-    function writerField() {
+    function writerField(cls) {
       var v = state.existing ? state.existing.writer : user.e_user_id;
-      return field("Writer", '<input class="fop-input" value="' + esc(v || "") + '" disabled>', "fop-field--row");
+      return field("Writer", '<input class="fop-input" value="' + esc(v || "") + '" disabled>', cls);
     }
 
     // Outside sales: a dropdown on a new order or a bid (outsideSalesOptions(),
     // defaulting to the rep's default territory); read-only on other orders.
-    function outsideSalesField() {
-      if (linesLocked()) return orderInfoField("outsideSales");
-      return field("Outside sales", selectHtml("outsideSales", outsideSalesOptions(), state.header.outsideSales, "Select…"));
+    // Only one choice (the rep's one territory, or the bid's own value when
+    // it is that one): read-only like Writer, no dropdown (2026-11-04, on
+    // request). The value is still sent.
+    function outsideSalesField(cls) {
+      if (linesLocked()) return orderInfoField("outsideSales", cls);
+      var opts = outsideSalesOptions();
+      var cur = String(state.header.outsideSales || "").trim();
+      var choices = opts.map(function (o) { return o[1]; });
+      if (cur && choices.indexOf(cur) < 0) choices.push(cur);
+      if (choices.length <= 1) {
+        if (!cur && choices.length) state.header.outsideSales = cur = choices[0];
+        return field("Outside sales", '<input class="fop-input" value="' + esc(cur) + '" disabled>', cls);
+      }
+      return field("Outside sales", selectHtml("outsideSales", opts, state.header.outsideSales, "Select…"), cls);
     }
 
-    // Email and phone, on their own row above writer / outside sales. A new
-    // order: Customer P/O # then email (editable, starts from the last
-    // order, recentEmail(); sent to create-order as email), no phone. An existing order: both
-    // read-only, the order's own (order-lookup email / phone).
-    function contactFields() {
+    // Email: on a new order editable, starting from the last order
+    // (recentEmail(); sent to create-order as email); on an existing order
+    // the order's own, read-only (order-lookup email). Phone: existing
+    // orders only, read-only.
+    function emailField(cls) {
       var ex = state.existing;
       if (!ex) {
-        return poField("fop-field--row") + field("Email", '<input class="fop-input" type="email" data-head="email" autocomplete="off" spellcheck="false" value="' + esc(state.header.email) + '">' +
-          '<span class="fop-branch-hint" data-cell="email-note">' + emailNote() + "</span>");
+        return field("Email", '<input class="fop-input" type="email" data-head="email" autocomplete="off" spellcheck="false" value="' + esc(state.header.email) + '">' +
+          '<span class="fop-branch-hint" data-cell="email-note">' + emailNote() + "</span>", cls);
       }
-      return field("Email", '<input class="fop-input" value="' + esc(ex.email || "") + '" disabled>', "fop-field--row") +
-        field("Phone", '<input class="fop-input" value="' + esc(ex.phone || "") + '" disabled>');
+      return field("Email", '<input class="fop-input" value="' + esc(ex.email || "") + '" disabled>', cls);
     }
 
     // Under a new order's Email while it still holds the pre-filled address.
@@ -2351,43 +2487,144 @@
       return field("Tracking details", inner, "fop-field--full");
     }
 
+    // ── Branch tabs (2026-11-04, on request: phones first, "on mobile it has
+    // to be tabs", then desktop too). With several rows, a tab per branch and
+    // only the open tab's row shows (phones also hide its Ship branch field:
+    // the tab names it). A tab with a missing ship via or date shows a red
+    // dot.
+    var shipTabPick = "";
+    function shipTab() {
+      var rows = shipRows();
+      return rows.indexOf(shipTabPick) >= 0 ? shipTabPick : rows[0];
+    }
+    function shipRowIncomplete(b) {
+      var s = shipOf(b);
+      return !s.shipVia || !s.shipDate || !s.requiredDate || s.requiredDate < s.shipDate;
+    }
+    function shipTabsHtml(rows, tab) {
+      if (rows.length < 2) return "";
+      // The generation tabs' look (.fop-tabs / .fop-tab, 2026-11-04, on request).
+      return '<div class="fop-tabs fop-ship-tabs" role="tablist" aria-label="Ship branches">' + rows.map(function (b) {
+        var known = BRANCHES.filter(function (x) { return x[0] === String(b); })[0];
+        var n = sentLines().filter(function (l) { return lineBranch(l) === b; }).length;
+        return '<button type="button" class="fop-tab fop-ship-tab' + (b === tab ? " fop-tab--active" : "") + '" role="tab" data-action="ship-tab" data-branch-tab="' + esc(b) + '"' +
+          ' aria-selected="' + (b === tab) + '" aria-controls="fop-ship-panel-' + esc(b) + '" title="' + esc(branchName(b) + ", " + n + " line" + (n === 1 ? "" : "s")) + '">' +
+          esc(known ? known[1] : b) + ' <span class="fop-ship-tab__sub">· ' + n + " line" + (n === 1 ? "" : "s") + "</span>" +
+          '<span class="fop-ship-tab__dot" aria-label="Missing ship via or date"' + (shipRowIncomplete(b) && !linesLocked() ? "" : " hidden") + "></span></button>";
+      }).join("") + "</div>";
+    }
+    // Opens branch b's tab (no redraw, so focus and pickers stay).
+    function openShipTab(b) {
+      var rows = shipRows();
+      var from = rows.indexOf(shipTab());
+      shipTabPick = b;
+      // Nudge direction: from the right when moving to a later tab.
+      var dir = rows.indexOf(b) >= from ? "fop-tab-in--r" : "fop-tab-in--l";
+      root.querySelectorAll("#fop-head-ship [data-branch-tab]").forEach(function (t) {
+        var on = t.getAttribute("data-branch-tab") === b;
+        t.classList.toggle("fop-tab--active", on);
+        t.setAttribute("aria-selected", String(on));
+      });
+      root.querySelectorAll("#fop-head-ship [data-ship-row]").forEach(function (r) {
+        var on = r.getAttribute("data-ship-row") === b;
+        var was = r.classList.contains("is-active");
+        r.classList.toggle("is-active", on);
+        // A 90ms nudge on the new tab's values: in from the side moved
+        // toward, with a fade (labels stay), so the switch shows (2026-11-04,
+        // on request; styles.css .fop-tab-in).
+        if (on && !was) {
+          r.classList.remove("fop-tab-in--r", "fop-tab-in--l");
+          void r.offsetWidth;
+          r.classList.add(dir);
+        }
+      });
+      autosizeNotesPair();
+    }
+    function refreshShipTabDots() {
+      root.querySelectorAll("#fop-head-ship [data-branch-tab]").forEach(function (t) {
+        var dot = t.querySelector(".fop-ship-tab__dot");
+        if (dot) dot.hidden = !(shipRowIncomplete(t.getAttribute("data-branch-tab")) && !linesLocked());
+      });
+    }
+
+    // Branch b as the ship branch dropdown shows it ("1 - Wichita · 1,338 mi").
+    function branchLabel(b) {
+      var o = branchOptions().filter(function (x) { return String(x[1]) === String(b); })[0];
+      return o ? o[0] : branchName(b);
+    }
+
+    // One header grid per ship branch: ship branch, ship via, ship date and
+    // required date, then that branch's shipping instructions across the
+    // full width. Several branches: one tab each (shipTabsHtml(), desktop
+    // and phones since 2026-11-04) and only the open one's grid shows. The
+    // header branch's row edits the header; the others carry data-branch.
+    // Flatpickr calendars (initDatePickers) replace the date inputs.
+    function shipRowsHtml() {
+      var h = state.header;
+      var rows = shipRows();
+      var multi = rows.length > 1;
+      var branches = branchOptions();
+      var tab = shipTab();
+      return shipTabsHtml(rows, tab) + rows.map(function (b) {
+        var s = shipOf(b);
+        var other = b && b !== h.shipBranch ? b : null;
+        var ba = other ? ' data-branch="' + esc(other) + '"' : "";
+        var n = sentLines().filter(function (l) { return lineBranch(l) === b; }).length;
+        return '<div class="fop-head__grid fop-head__grid--ship' + (multi ? " fop-head__grid--tabbed" : "") +
+          (multi && b === tab ? " is-active" : "") + '" data-ship-row="' + esc(b) + '"' + (multi ? ' role="tabpanel" id="fop-ship-panel-' + esc(b) + '"' : "") + ">" +
+          // Phones: ship branch and ship via each take a full row (--mfull).
+          // Several branches (2026-11-04, on request): the branch is a grayed
+          // box with the dropdown's text (name and distance), not clickable
+          // (lines change branch on their inventory tiles); one branch keeps
+          // the dropdown.
+          (multi
+            ? field("Ship branch", '<input class="fop-input fop-input--fixed" value="' + esc(branchLabel(b)) + '" disabled>' +
+                '<span class="fop-branch-hint">' + n + " line" + (n === 1 ? "" : "s") + "</span>", "fop-field--mfull")
+            : field("Ship branch", selectHtml("shipBranch", branches, b, "Select…"), "fop-field--mfull", "shipBranch")) +
+          field("Ship via", shipViaSelectHtml(s.shipVia, b), "fop-field--mfull", "shipVia") +
+          field("Ship date", '<input class="fop-input fop-date" data-date="shipDate"' + ba + ' value="' + esc(s.shipDate) + '"' + lockAttr("shipDate") + ">", "", "shipDate") +
+          field("Required date", '<input class="fop-input fop-date" data-date="requiredDate"' + ba + ' value="' + esc(s.requiredDate) + '"' + lockAttr("requiredDate") + ">", "", "requiredDate") +
+          // Per generation too (2026-11-04, on request), full width under
+          // the branch's ship via and dates. Multi-line, grows with its text.
+          field("Shipping instructions", '<textarea class="fop-input fop-notes" rows="1" data-head="shippingInstructions"' + ba + lockAttr("shippingInstructions") + ">" +
+            esc(s.shippingInstructions || "") + "</textarea>", "fop-field--full", "shippingInstructions", other) +
+          "</div>";
+      }).join("") +
+        (multi && !linesLocked() ? '<div class="fop-head__ship-note">One generation per ship branch, each with its own ship via and dates.</div>' : "");
+    }
+
     function headerHtml() {
       var h = state.header;
-      var branches = branchOptions();
       return (
         // Always open (no longer collapsible, on request).
         '<section class="fop-head' + (headLocked() ? " fop-head--locked" : "") + '" id="fop-head" aria-labelledby="fop-head-title">' +
         '<div class="fop-head__sum" id="fop-head-title">Header</div>' +
         // Rows of up to three (user's order); fop-field--row starts a new row.
-        // Writer and outside sales show on every order; inside sales and
-        // print status only on an existing order that is not a bid.
-        '<div class="fop-head__grid">' +
-        // Phones: ship via and ship branch each take a full row (--mfull).
-        field("Ship via", shipViaSelectHtml(h.shipVia), "fop-field--row fop-field--mfull", "shipVia") +
-        // Lines on several branches: the hint under it says so (it is the
-        // branch of the lines that follow the header).
-        field("Ship branch", selectHtml("shipBranch", branches, h.shipBranch, "Select…") +
-          '<span class="fop-branch-hint" data-cell="branch-hint">' + branchHintHtml() + "</span>", "fop-field--mfull") +
-        priceBranchField() +
-        // Flatpickr calendars (initDatePickers) replace these plain inputs.
-        field("Ship date", '<input class="fop-input fop-date" data-date="shipDate" value="' + esc(h.shipDate) + '"' + lockAttr("shipDate") + ">", "fop-field--row", "shipDate") +
-        field("Required date", '<input class="fop-input fop-date" data-date="requiredDate" value="' + esc(h.requiredDate) + '"' + lockAttr("requiredDate") + ">", "", "requiredDate") +
-        // Order date is never editable: the order's own, or today on a new
-        // order (Eclipse dates it when it is created).
+        // Inside sales and print status only on an existing order that is
+        // not a bid.
+        // Shipping, one row per ship branch (2026-11-04, on request), then
+        // the fields every branch shares.
+        '<div class="fop-head__ship" id="fop-head-ship" data-key="' + esc(shipRowsKey()) + '">' + shipRowsHtml() + "</div>" +
+        '<div class="fop-head__grid fop-head__grid--main">' +
+        // Four columns on desktop, like the ship rows (2026-11-04, on
+        // request): outside sales, writer, order date (the fourth left
+        // blank); then price branch, customer P/O, email and, on an existing
+        // order, phone. Order date is never editable: the order's own, or
+        // today on a new order (Eclipse dates it when it is created).
+        outsideSalesField("fop-field--row") + writerField() +
         field("Order date", '<input class="fop-input" value="' + esc(dateText(state.existing ? state.existing.order_date : isoDate(0))) + '" disabled>') +
-        contactFields() +
-        writerField() + outsideSalesField() + orderInfoField("insideSales") +
-        // A new order: P/O sits before email (contactFields()). A bid: P/O
-        // ends the writer row. Release is hidden on both (a new order still
-        // sends the bill-to's default release). Other orders: P/O, release
-        // and print status on their own row.
-        (state.existing ? poField(linesLocked() ? "fop-field--row" : "") : "") +
+        priceBranchField("fop-field--row") + poField() + emailField() +
+        (state.existing ? field("Phone", '<input class="fop-input" value="' + esc(state.existing.phone || "") + '" disabled>') : "") +
+        // An order that is not a bid adds a row: inside sales, release and
+        // print status. Release is hidden on a new order and a bid (a new
+        // order still sends the bill-to's default release).
+        orderInfoField("insideSales", "fop-field--row") +
         (linesLocked() ? field("Customer release #", '<input class="fop-input" data-head="release" maxlength="30" value="' + esc(h.release) + '"' + lockAttr("release") + ">") : "") +
         orderInfoField("printStatus") +
-        // Bottom row: shipping instructions left, internal notes right.
-        // Multi-line notes; textareas grow with their content (autosize()).
-        field("Shipping instructions", '<textarea class="fop-input fop-notes" rows="1" data-head="shippingInstructions"' + lockAttr("shippingInstructions") + ">" + esc(h.shippingInstructions) + "</textarea>", "fop-field--half", "shippingInstructions") +
-        field("Internal notes (no credit cards)", '<textarea class="fop-input fop-notes" rows="1" data-head="internalNotes"' + lockAttr("internalNotes") + ">" + esc(h.internalNotes) + "</textarea>", "fop-field--half") +
+        // Last: internal notes across the full width (2026-11-04, on request;
+        // shipping instructions moved up into each branch's row). Grows with
+        // its text (autosize()).
+        field("Internal notes (no credit cards)", '<textarea class="fop-input fop-notes" rows="1" data-head="internalNotes"' + lockAttr("internalNotes") + ">" + esc(h.internalNotes) + "</textarea>", "fop-field--full") +
         trackingHtml() +
         "</div></section>"
       );
@@ -2873,9 +3110,22 @@
     // Total is Eclipse's own total while an existing order's lines are
     // unchanged, otherwise subtotal + freight + handling + tax.
     // 3% of the lines' subtotal while the ship via ends in "CC"; null otherwise.
+    // Several branch rows (2026-11-04): only the lines on rows whose ship via
+    // ends in "CC".
     function ccSurcharge(subtotal) {
-      if (!CC_SHIP_VIA.test(String(state.header.shipVia || "").trim())) return null;
-      return Math.round(subtotal * CC_SURCHARGE * 100) / 100;
+      var rows = shipRows();
+      var cc = rows.filter(function (b) { return CC_SHIP_VIA.test(String(shipOf(b).shipVia || "").trim()); });
+      if (!cc.length) return null;
+      var base = subtotal;
+      if (cc.length < rows.length) {
+        base = sentLines().reduce(function (sum, l) {
+          if (cc.indexOf(lineBranch(l)) < 0) return sum;
+          if (l.custom) return sum + l.custom.price * l.custom.qty;
+          var p = linePrice(l);
+          return sum + (p == null ? 0 : p * Number(l.qty));
+        }, 0);
+      }
+      return Math.round(base * CC_SURCHARGE * 100) / 100;
     }
 
     function summary() {
@@ -3008,6 +3258,8 @@
         // A branch tile picked here can move the header's ship branch and
         // every line's branch (pickBranch), so Cancel puts all of them back.
         branches: state.lines.map(function (l) { return l.branch; }), shipBranch: state.header.shipBranch,
+        // pickBranch can move a branch row's values onto the header.
+        ship: JSON.stringify({ shipVia: state.header.shipVia, shipDate: state.header.shipDate, requiredDate: state.header.requiredDate, shippingInstructions: state.header.shippingInstructions, branches: state.header.branches || {} }),
       };
       render();
     }
@@ -3020,6 +3272,7 @@
         Object.assign(line, m.orig);
         state.lines.forEach(function (l, i) { l.branch = m.branches[i]; });
         state.header.shipBranch = m.shipBranch;
+        Object.assign(state.header, JSON.parse(m.ship));
       }
       state.detailsModal = null;
       state.focus = { r: m.r, c: state.focus.c };
@@ -4109,6 +4362,26 @@
         (h.orderStatus === "ShipWhenSpecified" ? confirmShipDateHtml() : "");
     }
 
+    // The confirm dialog's branch, ship via and dates: one branch as before;
+    // several, one line per branch row.
+    function confirmShipHtml() {
+      var rows = shipRows();
+      if (rows.length < 2) {
+        var h = state.header;
+        return "<div><span>Branch</span> " + esc(h.shipBranch) + "</div>" +
+          "<div><span>Ship via</span> " + esc(h.shipVia || "None") + "</div>" +
+          "<div><span>Ship / Req</span> " + esc(h.shipDate) + " / " + esc(h.requiredDate) + "</div>";
+      }
+      // One full-width line per branch, "Branch 16  SEE INSTRUCTION ·
+      // 2026-11-04 / 2026-11-11" (2026-11-04, on request: they wrapped in the
+      // two-column grid).
+      return rows.map(function (b) {
+        var s = shipOf(b);
+        return '<div class="fop-confirm-meta__wide"><span>Branch ' + esc(b) + "</span> " + esc(s.shipVia || "None") + " · " +
+          esc(s.shipDate) + " / " + esc(s.requiredDate) + "</div>";
+      }).join("");
+    }
+
     // Ship When Specified: the header's Ship date box again, in the dialog
     // (2026-10-28, on request), since that status ships on that date. It is
     // a second flatpickr on state.header.shipDate (initDatePickers); the
@@ -4223,9 +4496,7 @@
         '<div class="fop-confirm-meta">' +
         "<div><span>Ship-to</span> " + esc(state.shipTo.name) + " (" + esc(state.shipTo.e_customer_id) + ")</div>" +
         "<div><span>Price level</span> " + esc(state.customer.bill_to.price_class || "Unknown") + "</div>" +
-        "<div><span>Branch</span> " + esc(multi ? orderBranches().join(", ") : h.shipBranch) + "</div>" +
-        "<div><span>Ship via</span> " + esc(h.shipVia || "None") + "</div>" +
-        '<div data-cell="confirm-dates"><span>Ship / Req</span> ' + esc(h.shipDate) + " / " + esc(h.requiredDate) + "</div>" +
+        '<div class="fop-confirm-ship" data-cell="confirm-ship">' + confirmShipHtml() + "</div>" +
         (h.po ? "<div><span>PO</span> " + esc(h.po) + "</div>" : "") +
         "</div>" +
         (state.confirm.mode === "order" ? statusPickerHtml() : "") +
@@ -4467,9 +4738,7 @@
       if (conv) setSoftDisabled(conv, placeBlockedReason("convert"));
       refreshQuoteBtn();
       // Lines on several branches: the hint under Ship branch.
-      var hint = root.querySelector('[data-cell="branch-hint"]');
-      if (hint) hint.innerHTML = branchHintHtml();
-      refreshShipViaOptions();
+      refreshShipRows();
     }
 
     // Looks disabled but still takes clicks (every place / bid button), so a
@@ -4490,7 +4759,7 @@
       state.lines.forEach(function (l, r) { refreshRow(r); });
       var head = root.querySelector(".fop-line--head .fop-cell--stock");
       if (head) head.textContent = noStock() ? "" : "Br " + (state.header.shipBranch || "-");
-      refreshShipViaOptions();
+      refreshShipRows();
     }
 
     // ── Grid focus + line ops ──────────────────────────────────────────────
@@ -4726,11 +4995,23 @@
     // to blame (no lines, a product not found, custom lines, no Eclipse
     // user, no changes to save) flashes nothing.
     function flashBlockedField(blocked) {
+      // A branch row's ship via or date: flash that row's box.
+      var sp = shipProblem();
+      var deli = deliCcRow();
+      var see = seeInstructionRow();
+      var at = sp && blocked === sp.msg ? sp : deli != null && blocked === deliCcReason() ? { branch: deli, key: "shipVia" } :
+        see != null && blocked === seeInstructionReason() ? { branch: see, key: "shippingInstructions" } : null;
+      if (at) {
+        if (shipRows().length > 1) openShipTab(at.branch);
+        var row = root.querySelector('#fop-head [data-ship-row="' + at.branch + '"]');
+        var box = row && (row.querySelector('[data-head="' + at.key + '"]') || row.querySelector('[data-date="' + at.key + '"]'));
+        flashField(box && box._flatpickr && box._flatpickr.altInput ? box._flatpickr.altInput : box);
+        return;
+      }
       var field =
         blocked === "Pick a ship branch." ? "shipBranch" :
         blocked === "Pick a ship via." ? "shipVia" :
         blocked === "Enter a valid email." ? "email" :
-        blocked === seeInstructionReason() ? "shippingInstructions" :
         blocked === deliCcReason() ? "shipVia" :
         blocked === "Pick a ship date." ? "shipDate" :
         blocked === "Pick a required date." || blocked === "Required date cannot be before ship date." ? "requiredDate" : null;
@@ -4763,11 +5044,19 @@
     // Flash a box yellow twice (restarts if already flashing), and scroll it
     // into view when it is off screen. Used for a blank Ship via (Place
     // Order) and a blank order status (Place Order in the dialog).
+    // A header field also flashes its whole row: on phones an empty select
+    // is an invisible overlay (only its label shows), so the box itself
+    // can't be seen flashing (2026-11-04; the row's pulse is phone-only CSS).
     function flashField(el) {
       if (!el) return;
-      el.classList.remove("fop-flash");
-      void el.offsetWidth;
-      el.classList.add("fop-flash");
+      var row = el.closest && el.closest(".fop-head .fop-field");
+      [el, row].forEach(function (x) {
+        if (!x) return;
+        x.classList.remove("fop-flash");
+        void x.offsetWidth;
+        x.classList.add("fop-flash");
+      });
+      setTimeout(function () { if (row) row.classList.remove("fop-flash"); }, 900);
       el.addEventListener("animationend", function done() {
         el.classList.remove("fop-flash");
         el.removeEventListener("animationend", done);
@@ -5099,6 +5388,8 @@
         ship_via: h.shipVia,
         ship_date: h.shipDate,
         required_date: h.requiredDate,
+        // Every other ship branch's ship via and dates (2026-11-04).
+        branches: branchShipPayload(),
         po: h.po,
         release: h.release,
         internal_notes: h.internalNotes,
@@ -5388,6 +5679,7 @@
         case "add-line": if (!linesLocked()) addLine(); break;
         case "remove-line": if (!linesLocked()) removeLine(r); break;
         case "edit-product": focusCell(r, 0); break;
+        case "ship-tab": openShipTab(el.getAttribute("data-branch-tab")); break;
         case "edit-variation": { var vs = root.querySelector("#fop-cf-variationSku"); if (vs) { vs.focus(); vs.select(); } break; }
         case "open-comment": {
           var cs = el.closest('[data-cell="comment"]');
@@ -5503,7 +5795,7 @@
       if (t.id === "fop-customer-search") { acSearch(t, "customer", null); return; }
       if (t.classList.contains("fop-notes")) {
         autosizeNotes(t);
-        state.header[t.getAttribute("data-head")] = t.value;
+        shipTargetOf(t)[t.getAttribute("data-head")] = t.value;
         // A bid's notes count as a change for Update Bid; shipping
         // instructions also feed the "SEE INSTRUCTION" ship via check on
         // every mode, including a new order, so this always refreshes.
@@ -5544,18 +5836,18 @@
         return;
       }
       var key = t.getAttribute("data-head");
+      // The ship branch (one row): the header's lines move (moveShipRow).
+      if (key === "shipBranch" && t.closest("[data-ship-row]")) {
+        moveShipRow(t.value);
+        return;
+      }
       if (key) {
-        state.header[key] = t.value;
+        shipTargetOf(t)[key] = t.value;
         if (key === "email") {
           // Lowercase on leaving the box.
           state.header.email = t.value = t.value.trim().toLowerCase();
           var en = root.querySelector('[data-cell="email-note"]');
           if (en) en.textContent = emailNote();
-        }
-        // A ship branch picked in the header: every line ships from it again.
-        if (key === "shipBranch") {
-          state.lines.forEach(function (l) { l.branch = ""; });
-          refreshAllRows();
         }
         if (key === "shipVia") { refreshAllRows(); refreshRequiredMarks(); }
         if (key === "orderStatus") {
@@ -5929,12 +6221,12 @@
           case "KeyQ": e.preventDefault(); if (confirmLeave()) exitToOrders(); return;
           case "KeyB": e.preventDefault(); requestPlace(state.existing ? "update" : "bid"); return;
           case "KeyO": e.preventDefault(); requestPlace(state.existing ? "convert" : "order"); return;
-          case "KeyH": e.preventDefault(); focusEl("#fop-head [data-head]"); return;
+          case "KeyH": e.preventDefault(); focusEl('#fop-head [data-head="shipVia"]'); return;
           case "KeyL": e.preventDefault(); focusCell(state.focus.r, state.focus.c); return;
           case "KeyS": e.preventDefault(); toggleStock(); return;
           // Details layout: the focused line's Line details dialog.
           case "KeyD": if (detailsLayout) { e.preventDefault(); openDetails(state.focus.r); } return;
-          case "KeyI": e.preventDefault(); focusEl('[data-head="shippingInstructions"]'); return;
+          case "KeyI": e.preventDefault(); focusEl(root.querySelector('#fop-head-ship .is-active [data-head="shippingInstructions"]') ? '#fop-head-ship .is-active [data-head="shippingInstructions"]' : '[data-head="shippingInstructions"]'); return;
           case "KeyN": e.preventDefault(); focusEl('[data-head="internalNotes"]'); return;
         }
       }
@@ -5949,9 +6241,9 @@
 
       // Backspace on Ship via clears it (a native select has no other way
       // to blank a picked value).
-      if (e.key === "Backspace" && t.tagName === "SELECT" && t.getAttribute("data-head") === "shipVia" && !t.disabled && state.header.shipVia) {
+      if (e.key === "Backspace" && t.tagName === "SELECT" && t.getAttribute("data-head") === "shipVia" && !t.disabled && shipTargetOf(t).shipVia) {
         e.preventDefault();
-        state.header.shipVia = t.value = "";
+        shipTargetOf(t).shipVia = t.value = "";
         refreshAllRows();
         refreshRequiredMarks();
         refreshTotals();

@@ -324,6 +324,32 @@ html[data-theme="light"] .fop-credit:focus .fop-party__lbl2 { color: var(--white
 .fop-head__grid > .fop-field--end { grid-column: 5 / span 2; }
 .fop-field--half, .fop-head__grid > .fop-field--half { grid-column: span 3; }
 .fop-field--full, .fop-head__grid > .fop-field--full { grid-column: 1 / -1; }
+/* Shipping per branch (2026-11-04): one grid per ship branch (ship
+   branch, ship via, ship date, required date, then that branch's shipping
+   instructions across the full width) above the shared fields, set off by
+   a bar. Several branches: a tab each (below) and only the open one's
+   grid. Phones keep the header's one-field-per-row list. */
+.fop-head__ship { border-bottom: 6px solid var(--line); margin-bottom: 14px; }
+.fop-head__grid--ship { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.fop-head__grid--ship > .fop-field { grid-column: auto; }
+.fop-head__grid--ship > .fop-field--full { grid-column: 1 / -1; }
+.fop-head__grid--tabbed { padding-top: 14px; }
+html .fop-head__grid--tabbed:not(.is-active) { display: none; }
+.fop-head__ship-note { padding: 0 16px 12px; font-size: 12px; color: var(--muted); }
+.fop-confirm-ship { display: contents; }
+/* Several branches: each branch on a full-width line of its own. */
+.fop-confirm-meta > .fop-confirm-ship > .fop-confirm-meta__wide { grid-column: 1 / -1; }
+@media (min-width: 768px) {
+  /* The shared fields: four columns like the ship rows (2026-11-04), a
+     short row leaves the rest blank; the notes take half each and always
+     start a row. */
+  .fop-head__grid--main { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .fop-head__grid--main > .fop-field { grid-column: auto; }
+  .fop-head__grid--main > .fop-field--row { grid-column: 1; }
+  .fop-head__grid--main > .fop-field--half { grid-column: span 2; }
+  .fop-head__grid--main > .fop-field--half.fop-field--row { grid-column: 1 / span 2; }
+  .fop-head__grid--main > .fop-field--full { grid-column: 1 / -1; }
+}
 
 /* ── Line chart ── */
 .fop-grid { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); font-variant-numeric: tabular-nums; }
@@ -1522,6 +1548,47 @@ html[data-theme="light"] .fop-head:not(.fop-head--locked) .fop-date-alt { backgr
 html .fop-head--locked .fop-input,
 html .fop-head .fop-input:disabled,
 html .fop-head--locked .fop-date-alt[readonly] { background-color: transparent; cursor: default; }
+/* A branch row's ship branch while there are several rows (2026-11-04):
+   boxed like the dropdown but grayed out, so it reads as not clickable. */
+html .fop-head .fop-input.fop-input--fixed {
+  width: 100%; margin-left: 0; border-color: var(--line); background-color: var(--surface-head);
+  color: var(--muted); -webkit-text-fill-color: var(--muted); cursor: not-allowed;
+}
+html[data-theme="light"] .fop-head .fop-input.fop-input--fixed { background-color: #eaf0f6; border-color: var(--border); }
+/* Branch tabs (2026-11-04; desktop too since the same day): one tab per
+   branch in the generation tabs' look (.fop-tab), with the line count and a
+   red dot while the branch misses something. Phones also drop the open
+   row's Ship branch field (the tab names the branch). */
+.fop-ship-tabs { padding: 0 16px; border-bottom: 1px solid var(--steel); }
+.fop-ship-tab { display: inline-flex; align-items: center; gap: 6px; }
+html .fop-ship-tab.fop-tab--active { background: var(--card-bg); }
+.fop-ship-tab__sub { font-weight: 400; font-size: 12px; color: var(--muted); }
+.fop-ship-tab__dot { width: 7px; height: 7px; border-radius: 50%; background: var(--error); }
+.fop-ship-tab__dot[hidden] { display: none; }
+/* Switching branch tabs: the new tab's values slide 8px in from the side
+   moved toward and fade in, 90ms (labels stay), so the switch is visible.
+   The text colour fades, not opacity: on phones an empty select is an
+   opacity-0 overlay that must stay hidden. None when the system asks for
+   less motion. */
+@keyframes fop-tab-in-r { from { transform: translateX(8px); color: transparent; -webkit-text-fill-color: transparent; } }
+@keyframes fop-tab-in-l { from { transform: translateX(-8px); color: transparent; -webkit-text-fill-color: transparent; } }
+.fop-tab-in--r .fop-input { animation: fop-tab-in-r 90ms ease-out; }
+.fop-tab-in--l .fop-input { animation: fop-tab-in-l 90ms ease-out; }
+@media (prefers-reduced-motion: reduce) { .fop-tab-in--r .fop-input, .fop-tab-in--l .fop-input { animation: none; } }
+@media (max-width: 767px) {
+  .fop-head__ship { margin-bottom: 0; }
+  .fop-ship-tabs { padding: 10px 12px 0; }
+  html .fop-head__grid--tabbed > .fop-field:first-child { display: none; }
+  .fop-head__grid--tabbed { padding-top: 0; }
+  html .fop-head__ship .fop-head__grid > .fop-field:last-child { border-bottom: 0; }
+  .fop-head__ship-note { padding: 10px 12px; border-top: 1px solid var(--line); }
+  /* A blocked header field: its whole row pulses (flashField()). */
+  @keyframes fop-flash-row {
+    0%, 100% { background-color: transparent; box-shadow: none; }
+    50% { background-color: rgba(240, 196, 106, .22); box-shadow: inset 3px 0 0 var(--warning); }
+  }
+  html .fop-head .fop-field.fop-flash { animation: fop-flash-row .4s ease-in-out 2; }
+}
 @media (max-width: 767px) {
   /* Phones: HubSpot's mobile property list, a thin line under each
      property (two per row where they fit). */
