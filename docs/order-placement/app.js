@@ -556,6 +556,7 @@
       var bt = (state.customer && state.customer.bill_to) || {};
       return {
         shipBranch: defaultShipBranch(state.shipTo),
+        priceBranch: defaultPriceBranch(),  // newPriceBranch(); the rep can pick another
         shipVia: "",
         orderStatus: "",         // picked in the Place Order dialog; blank until then
         shipDate: isoDate(0),
@@ -2148,19 +2149,30 @@
     // inside sales, order date and print status, in that order (read-only,
     // from e-order-placement/order). Print status is Eclipse's one-letter
     // code as stored.
-    // Price branch of a new order (2026-10-23): the writer's home branch
-    // (HubSpot e_user_default_branch, FB_USER.default_branch), sent as
-    // price_branch. A rep with none falls back to the bill-to's Eclipse home
-    // branch, which create-order also uses when no price_branch is sent.
-    function newPriceBranch() {
+    // Default price branch of a new order (2026-10-23): the writer's home
+    // branch (HubSpot e_user_default_branch, FB_USER.default_branch). A rep
+    // with none falls back to the bill-to's Eclipse home branch, which
+    // create-order also uses when no price_branch is sent.
+    function defaultPriceBranch() {
       var bt = (state.customer && state.customer.bill_to) || {};
       return branchIdOf(user.default_branch) || branchIdOf(bt.home_branch);
     }
 
-    // Top right of the header, read-only: an existing order's own price
-    // branch, else newPriceBranch().
+    // Price branch sent with a new order (price_branch): the one picked in
+    // the header (2026-11-03, on request), else the default.
+    function newPriceBranch() {
+      return branchIdOf(state.header && state.header.priceBranch) || defaultPriceBranch();
+    }
+
+    // Top right of the header. A new order: a select of every branch in
+    // branch-number order, starting on the writer's home branch. An existing
+    // order: its own price branch, read-only (update-bid never changes it).
     function priceBranchField() {
-      var id = state.existing ? branchIdOf(state.existing.price_branch) : newPriceBranch();
+      if (!state.existing) {
+        var opts = BRANCHES.map(function (b) { return [b[0] + " - " + b[1], b[0]]; });
+        return field("Price branch", selectHtml("priceBranch", opts, newPriceBranch(), "Select…"), "fop-field--end");
+      }
+      var id = branchIdOf(state.existing.price_branch);
       var known = BRANCHES.filter(function (b) { return b[0] === id; })[0];
       var text = id ? id + (known ? " - " + known[1] : "") : "";
       return field("Price branch", '<input class="fop-input" value="' + esc(text) + '" disabled>', "fop-field--end");
@@ -5079,8 +5091,9 @@
         bill_to_id: c.bill_to.e_customer_id,
         ship_to_id: state.shipTo.e_customer_id,
         ship_branch: h.shipBranch,
-        // The writer's home branch, never the ship branch, so changing the
-        // ship branch never changes pricing.
+        // The header's price branch (the writer's home branch unless the rep
+        // picked another), never the ship branch, so changing the ship
+        // branch never changes pricing.
         price_branch: newPriceBranch(),
         order_status: mode === "bid" ? "Bid" : h.orderStatus,
         ship_via: h.shipVia,
