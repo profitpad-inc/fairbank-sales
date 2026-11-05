@@ -1262,10 +1262,13 @@ html[data-theme="light"] .fop-status--partial { color: #a14d00; border-color: rg
     box-shadow: 0 10px 28px var(--shadow), 0 0 0 1px rgba(9, 21, 41, .4);
   }
   .fop-fab .fop-key { display: none; }
+  /* "+ New ship-to" floats in the bottom left the same way (2026-11-05,
+     on request). Ghost look, so New order stays the main button. */
+  html .fop-fab.fop-fab--left { right: auto; left: 16px; box-shadow: 0 10px 28px var(--shadow), 0 0 0 1px var(--steel); }
   /* Keyboard-only hints (orders list, ship-to picker): no keyboard on a phone. */
   .fop-hint--keys { display: none; }
   /* Its row holds nothing else when there is no ship-to checkbox: no gap. */
-  .fop-row:has(> .fop-fab:only-child) { display: contents; }
+  .fop-row:has(> .fop-fab):not(:has(> :not(.fop-fab))) { display: contents; }
   .fop-order { padding: 9px 10px; }
 
   /* Stock & qty breaks box (side layout) under the header. */

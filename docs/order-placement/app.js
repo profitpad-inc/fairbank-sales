@@ -2214,7 +2214,8 @@
         '<div class="fop-row">' +
         // Phones: floats fixed in the bottom right of the screen (.fop-fab).
         '<button class="fop-btn fop-fab" data-action="new-from-list">New order <span class="fop-key fop-key--dark">' + altKey("O") + '</span></button>' +
-        newShipToBtnHtml("fop-btn fop-btn--ghost", "fop-key") +
+        // Phones: floats fixed in the bottom left, no key hint (.fop-fab--left).
+        newShipToBtnHtml("fop-btn fop-btn--ghost fop-fab fop-fab--left", "fop-key") +
         (st ? '<label class="fop-check"><input type="checkbox" data-action="orders-shipto-only"' + (state.ordersShipToOnly ? "" : " checked") + "> " +
           "Show orders from other ShipTos</label>" : "") +
         "</div>" +
@@ -2808,14 +2809,14 @@
         // The box holds the bare number; showQty lays "50 ft" over it
         // (unit in grey) while it is not focused.
         '<span class="fop-qty__box">' +
-        '<input class="fop-input fop-grid-in fop-num" data-r="' + r + '" data-c="1" inputmode="numeric" ' +
+        '<input class="fop-input fop-grid-in fop-num" data-r="' + r + '" data-c="1" inputmode="numeric" autocomplete="off" ' +
         'value="' + esc(line.qty) + '" aria-label="Quantity, line ' + (r + 1) + '"' + qro + ">" +
         '<span class="fop-qty__show" aria-hidden="true"></span></span>' +
         (qro ? "" : '<button class="fop-step" tabindex="-1" data-action="qty-inc" data-r="' + r + '" aria-label="Increase">+</button>') +
         "</div></div>" +
         '<div class="fop-cell fop-cell--price" role="cell">' +
         '<label class="fop-mlabel">Unit price</label>' +
-        '<input class="fop-input fop-grid-in fop-num' + (edited ? " fop-input--override" : "") + '" data-r="' + r + '" data-c="2" ' +
+        '<input class="fop-input fop-grid-in fop-num' + (edited ? " fop-input--override" : "") + '" data-r="' + r + '" data-c="2" autocomplete="off" ' +
         'inputmode="decimal" value="' + esc(priceText(line)) + '" aria-label="Unit price, line ' + (r + 1) + '"' + ro + ">" +
         "</div>" +
         '<div class="fop-cell fop-cell--cost fop-num" role="cell" data-cell="cost">' + costHtml(line) + "</div>" +
