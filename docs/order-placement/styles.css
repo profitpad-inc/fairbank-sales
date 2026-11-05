@@ -355,7 +355,7 @@ html .fop-head__grid--tabbed:not(.is-active) { display: none; }
 .fop-grid { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); font-variant-numeric: tabular-nums; }
 .fop-line {
   display: grid; align-items: center;
-  grid-template-columns: 36px 150px minmax(160px, 1fr) 120px 110px 100px 110px 80px 64px 36px;
+  grid-template-columns: 36px 150px minmax(160px, 1fr) 120px 110px 100px 110px 100px 64px 36px;
   border-top: 1px solid var(--line);
 }
 .fop-line:first-child, .fop-lines-lbl + .fop-line { border-top: 0; }
@@ -500,7 +500,7 @@ html .fop-head__grid--tabbed:not(.is-active) { display: none; }
 }
 .fop-chip__br { color: var(--muted); }
 /* Qty break chips end in plain text (no stock badge), so even padding. */
-.fop-chip--break { padding-right: 8px; }
+.fop-chip.fop-chip--break { padding-right: 10px; } /* .fop-chip below reset it to 4px; 10px since 2026-11-05, on request */
 .fop-strip__lbl {
   align-self: center; min-width: 76px;
   font-size: 13px; font-weight: 600; color: var(--muted);
@@ -763,7 +763,7 @@ span.flatpickr-weekday {
 .fop-side__desc { font-weight: 400; color: var(--white); }
 .fop-side__empty { padding: 4px 0 2px; }
 /* No "All" column in the side layout. */
-.fop-grid--noall .fop-line { grid-template-columns: 36px 150px minmax(160px, 1fr) 120px 110px 100px 110px 80px 36px; }
+.fop-grid--noall .fop-line { grid-template-columns: 36px 150px minmax(160px, 1fr) 120px 110px 100px 110px 100px 36px; }
 @media (max-width: 767px) {
   .fop-grid--noall .fop-line { grid-template-columns: 1fr 1fr; }
 }
@@ -1033,7 +1033,7 @@ html[data-theme="light"] .fop-status--partial { color: #a14d00; border-color: rg
 
 /* Details layout: no All column; the last column holds the Details button
    and the × side by side. */
-.fop-grid--details .fop-line { grid-template-columns: 36px 150px minmax(160px, 1fr) 120px 110px 100px 110px 80px 64px; }
+.fop-grid--details .fop-line { grid-template-columns: 36px 150px minmax(160px, 1fr) 120px 110px 100px 110px 100px 64px; }
 .fop-grid--details .fop-cell--del { display: flex; justify-content: flex-end; align-items: center; gap: 2px; padding-left: 0; padding-right: 4px; }
 @media (max-width: 767px) {
   .fop-grid--details .fop-line { grid-template-columns: 1fr 1fr; }
@@ -1332,7 +1332,7 @@ html[data-theme="light"] .fop-status--partial { color: #a14d00; border-color: rg
     font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
   }
   .fop-stockstrip .fop-chip { gap: 5px; padding: 1px 3px 1px 7px; font-size: 13px; }
-  .fop-stockstrip .fop-chip--break { padding-right: 7px; }
+  .fop-stockstrip .fop-chip--break { padding-right: 9px; }
   .fop-stockstrip .fop-stock { min-width: 24px; padding: 0 5px; }
 
   .fop-stockstrip--cmt-closed .fop-strip__lbl,
@@ -1578,6 +1578,8 @@ html .fop-ship-tab.fop-tab--active { background: var(--card-bg); }
 @media (max-width: 767px) {
   .fop-head__ship { margin-bottom: 0; }
   .fop-ship-tabs { padding: 10px 12px 0; }
+  /* Phones: no line count on the ship tabs (2026-11-05, on request). */
+  .fop-ship-tab__sub { display: none; }
   html .fop-head__grid--tabbed > .fop-field:first-child { display: none; }
   .fop-head__grid--tabbed { padding-top: 0; }
   html .fop-head__ship .fop-head__grid > .fop-field:last-child { border-bottom: 0; }
@@ -1883,7 +1885,6 @@ button.fop-chip--pick { font: inherit; color: inherit; cursor: pointer; }
 .fop-app .fop-chip--more { justify-content: center; min-width: 30px; padding: 2px 8px; font-weight: 700; color: var(--muted); }
 .fop-app .fop-chip--more[aria-expanded="true"], .fop-app .fop-chip--more:hover { color: var(--gold-lt); }
 .fop-app .fop-chip--empty { border-style: dashed; }
-.fop-line-br { display: block; margin-top: 2px; font-size: 13px; color: var(--gold-lt); }
 .fop-branch-hint { display: block; margin-top: 4px; font-size: 12px; line-height: 1.35; color: var(--muted); }
 .fop-branch-hint:empty { display: none; }
 
@@ -1963,4 +1964,74 @@ html[data-theme="light"] .fop-tabst--open { color: #1f6fbf; border-color: rgba(3
   .fop-nc__f2, .fop-nc__f3, .fop-nc__f4 { grid-column: 1 / -1; }
   .fop-nc__rowin { flex-wrap: wrap; }
   .fop-nc__rowin .fop-input { flex: 1 1 100%; }
+}
+
+/* Branch colours (2026-11-05): with several ship branches, each ship tab
+   has a pastel (app.js BRANCH_COLORS, set as --br-c) with dark text, and
+   the product id tile and Br: Inv branch number (.fop-br-num) of every
+   line on that branch share it. Whole-row fills (a left-edge gradient,
+   then solid) were tried and dropped on request. */
+html .fop-br-c, html[data-theme="light"] .fop-br-c { background: var(--br-c); color: #1d2a3d; border-color: rgba(29, 42, 61, .18); }
+html .fop-ship-tab.fop-br-c .fop-ship-tab__sub { color: #4a5a70; }
+html .fop-ship-tab.fop-br-c:hover { background: var(--br-c); filter: brightness(.97); }
+html .fop-ship-tab.fop-br-c.fop-tab--active, html[data-theme="light"] .fop-ship-tab.fop-br-c.fop-tab--active { background: var(--br-c); color: #1d2a3d; border-color: var(--steel); border-bottom: 2px solid var(--gold); }
+html .fop-pid.fop-br-c:hover { border-color: var(--gold); }
+/* Br: Inv with a coloured branch number ("16: 32") stays on one line: a
+   tighter tile, a snug colon, a narrower count (2026-11-05, it wrapped). */
+.fop-br-num { display: inline-block; padding: 1px 4px; border: 1px solid; border-radius: 4px; font-weight: 600; line-height: inherit; vertical-align: middle; }
+.fop-br-colon { margin: 0 3px; vertical-align: middle; }
+.fop-cell--stock:has(.fop-br-num) { white-space: nowrap; }
+.fop-cell--stock:has(.fop-br-num) .fop-stock { min-width: 24px; padding: 1px 4px; vertical-align: middle; }
+
+/* Phones, editable lines (2026-11-05, on request): every line but the
+   selected one (.fop-line--sel, state.focus.r) folds into a locked order's
+   compact look: description first, the product id tile top right, then
+   qty, unit price, unit cost and ext in one row, each label above its
+   value; no steppers, boxes, ×, stock strips or comment. All the lines sit
+   in one "Lines" card with thin dividers, like a locked order. A tap on a
+   compact line selects and unfolds it (app.js). The empty entry line and
+   custom lines keep the full card. No overflow: hidden on the card, so the
+   product search list can still drop out of it. */
+@media (max-width: 767px) {
+  .fop-grid:not(.fop-grid--locked) {
+    gap: 0; background: var(--card-bg);
+    border: 1px solid var(--border); border-radius: 10px;
+  }
+  .fop-grid:not(.fop-grid--locked) .fop-line { background: none; border: 0; border-radius: 0; }
+  .fop-grid:not(.fop-grid--locked) .fop-line:not(.fop-line--head) ~ .fop-line { border-top: 1px solid var(--line); }
+  .fop-grid:not(.fop-grid--locked) .fop-lines-lbl { display: flex; align-items: center; min-height: 24px; padding: 10px 12px 0; }
+
+  html .fop-grid:not(.fop-grid--locked) .fop-line[data-row]:has(.fop-cell--tiled):not(.fop-line--sel):not(:focus-within) {
+    position: relative; cursor: pointer;
+    grid-template-columns: minmax(0, .8fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr);
+    grid-template-areas:
+      "desc  desc  desc  desc"
+      "qty   price cost  ext"
+      "avail avail total total";
+  }
+  html .fop-grid .fop-line[data-row]:has(.fop-cell--tiled):not(.fop-line--sel):not(:focus-within) .fop-cell.fop-cell--product {
+    grid-area: auto; position: absolute; top: 10px; right: 12px; display: flex; align-items: center; min-height: 24px; padding: 0;
+  }
+  html .fop-grid .fop-line[data-row]:has(.fop-cell--tiled):not(.fop-line--sel):not(:focus-within) .fop-cell--product .fop-mlabel,
+  html .fop-grid .fop-line[data-row]:has(.fop-cell--tiled):not(.fop-line--sel):not(:focus-within) .fop-cell--product .fop-ac,
+  html .fop-grid .fop-line[data-row]:has(.fop-cell--tiled):not(.fop-line--sel):not(:focus-within) .fop-cell--del,
+  html .fop-grid .fop-line[data-row]:has(.fop-cell--tiled):not(.fop-line--sel):not(:focus-within) .fop-step,
+  html .fop-grid .fop-line[data-row]:has(.fop-cell--tiled):not(.fop-line--sel):not(:focus-within) [data-cell="strip"],
+  html .fop-grid .fop-line[data-row]:has(.fop-cell--tiled):not(.fop-line--sel):not(:focus-within) [data-cell="breaks"],
+  html .fop-grid .fop-line[data-row]:has(.fop-cell--tiled):not(.fop-line--sel):not(:focus-within) [data-cell="comment"] { display: none; }
+  html .fop-grid .fop-line[data-row]:has(.fop-cell--tiled):not(.fop-line--sel):not(:focus-within) .fop-pid { display: inline-block; margin: 0; }
+  html .fop-grid .fop-line[data-row]:has(.fop-cell--tiled):not(.fop-line--sel):not(:focus-within) .fop-cell--desc { padding-top: 4px; padding-right: 84px; }
+  html .fop-grid .fop-line[data-row]:has(.fop-cell--tiled):not(.fop-line--sel):not(:focus-within) .fop-cell--qty,
+  html .fop-grid .fop-line[data-row]:has(.fop-cell--tiled):not(.fop-line--sel):not(:focus-within) .fop-cell--price,
+  html .fop-grid .fop-line[data-row]:has(.fop-cell--tiled):not(.fop-line--sel):not(:focus-within) .fop-cell--cost,
+  html .fop-grid .fop-line[data-row]:has(.fop-cell--tiled):not(.fop-line--sel):not(:focus-within) .fop-cell--ext { padding: 4px; font-size: 15px; }
+  html .fop-grid .fop-line[data-row]:has(.fop-cell--tiled):not(.fop-line--sel):not(:focus-within) .fop-cell--qty .fop-mlabel,
+  html .fop-grid .fop-line[data-row]:has(.fop-cell--tiled):not(.fop-line--sel):not(:focus-within) .fop-cell--price .fop-mlabel,
+  html .fop-grid .fop-line[data-row]:has(.fop-cell--tiled):not(.fop-line--sel):not(:focus-within) .fop-cell--cost .fop-mlabel,
+  html .fop-grid .fop-line[data-row]:has(.fop-cell--tiled):not(.fop-line--sel):not(:focus-within) .fop-cell--ext .fop-mlabel { display: block; margin-bottom: 3px; }
+  html .fop-grid .fop-line[data-row]:has(.fop-cell--tiled):not(.fop-line--sel):not(:focus-within) .fop-qty { display: block; }
+  html .fop-grid .fop-line[data-row]:has(.fop-cell--tiled):not(.fop-line--sel):not(:focus-within) .fop-grid-in {
+    height: auto; padding: 0; font-size: 15px; text-align: left;
+    background: none; border-color: transparent; border-radius: 0; box-shadow: none;
+  }
 }

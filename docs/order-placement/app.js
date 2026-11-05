@@ -1158,6 +1158,77 @@
       return id ? id + (known ? " - " + known[1] : "") : "";
     }
 
+    // Branch colours (2026-11-05, on request from a sales rep): while the
+    // order ships from several branches, each ship tab gets a colour, and
+    // the product id tile and the Br: Inv branch number of every line on
+    // that branch share it (styles.css .fop-br-c; whole-row fills, solid or
+    // fading, were tried and dropped on request).
+    // One branch: no colours.
+    // Stable (on request): a branch keeps the colour it first got for the
+    // whole page session, whatever happens to the tab order or the branch
+    // count. A new branch takes the first colour no branch has had this
+    // session, else the first no shown branch is using (more than seven
+    // branches: they repeat). Two shown branches never share one: if a
+    // returning branch's colour went to another branch while it was away,
+    // the branch that got it later moves to a free colour (2026-11-05, Yuma
+    // and El Reno matched).
+    var BRANCH_COLORS = ["#FBDDD8", "#FBEDCE", "#DAEFE1", "#CEF8F5", "#D1E8F5", "#E5E1FA", "#FBDBE9"];
+    var branchColorOf = {};   // branch id -> colour index
+    var branchColorSeq = {};  // branch id -> when it got that colour
+    var branchColorN = 0;
+    function branchColor(b) {
+      var rows = shipRows();
+      if (rows.length < 2 || rows.indexOf(b) < 0) return "";
+      // Oldest colour first, so the earlier holder keeps it.
+      var order = rows.slice().sort(function (x, y) {
+        var sx = branchColorSeq[x], sy = branchColorSeq[y];
+        if (sx == null && sy == null) return rows.indexOf(x) - rows.indexOf(y);
+        if (sx == null) return 1;
+        if (sy == null) return -1;
+        return sx - sy;
+      });
+      var taken = {};
+      order.forEach(function (x) {
+        var c = branchColorOf[x];
+        if (c == null || taken[c]) {
+          var owned = {};
+          Object.keys(branchColorOf).forEach(function (k) { if (k !== x) owned[branchColorOf[k]] = true; });
+          var pick = -1, k;
+          for (k = 0; k < BRANCH_COLORS.length && pick < 0; k++) if (!taken[k] && !owned[k]) pick = k;
+          for (k = 0; k < BRANCH_COLORS.length && pick < 0; k++) if (!taken[k]) pick = k;
+          if (pick < 0) pick = branchColorN % BRANCH_COLORS.length;
+          branchColorOf[x] = c = pick;
+          branchColorSeq[x] = ++branchColorN;
+        }
+        taken[c] = true;
+      });
+      return BRANCH_COLORS[branchColorOf[b]];
+    }
+    // The colour of a line ("" for custom, freight and empty lines).
+    function lineColor(line) {
+      if (!line || line.custom || !line.productId || isFreightLine(line)) return "";
+      return branchColor(lineBranch(line));
+    }
+    // style attribute carrying a colour (--br-c).
+    function colorAttr(c) {
+      return c ? ' style="--br-c:' + c + '"' : "";
+    }
+    // Repaints every line's tile and Br: Inv (the branch set or a line's
+    // branch changed).
+    function paintBranchColors() {
+      state.lines.forEach(function (l, r) {
+        var el = rowEl(r);
+        if (!el || l.custom) return;
+        var c = lineColor(l);
+        el.querySelectorAll(".fop-pid, .fop-line__id").forEach(function (t) {
+          t.classList.toggle("fop-br-c", !!c);
+          if (c) t.style.setProperty("--br-c", c); else t.style.removeProperty("--br-c");
+        });
+        var av = el.querySelector('[data-cell="avail"]');
+        if (av) av.innerHTML = availHtml(l);
+      });
+    }
+
     // ── Shipping per branch (2026-11-04) ───────────────────────────────────
     // Every ship branch the lines use is its own Eclipse generation, so each
     // gets its own ship via, ship date, required date and shipping
@@ -2246,10 +2317,10 @@
       return out;
     }
 
-    // "Line 2" / "Lines 2, 3, 5, 8" under a branch's Ship branch box.
+    // "Line number 2" / "Line numbers 2, 3, 5, 8" under a branch's Ship branch box.
     function branchLinesText(b) {
       var n = branchLineNums(b);
-      return (n.length === 1 ? "Line " : "Lines ") + n.join(", ");
+      return (n.length === 1 ? "Line number " : "Line numbers ") + n.join(", ");
     }
 
     function shipRowsKey() {
@@ -2266,6 +2337,8 @@
       if (box.getAttribute("data-key") === key) { refreshShipTabDots(); return; }
       box.setAttribute("data-key", key);
       box.innerHTML = shipRowsHtml();
+      // The branch set or a line's branch changed: the tiles' colours follow.
+      paintBranchColors();
       initDatePickers();
       refreshRequiredMarks();
     }
@@ -2571,9 +2644,11 @@
       return '<div class="fop-tabs fop-ship-tabs" role="tablist" aria-label="Ship branches">' + rows.map(function (b) {
         var known = BRANCHES.filter(function (x) { return x[0] === String(b); })[0];
         var n = sentLines().filter(function (l) { return lineBranch(l) === b; }).length;
-        return '<button type="button" class="fop-tab fop-ship-tab' + (b === tab ? " fop-tab--active" : "") + '" role="tab" data-action="ship-tab" data-branch-tab="' + esc(b) + '"' +
+        var c = branchColor(b);
+        return '<button type="button" class="fop-tab fop-ship-tab' + (b === tab ? " fop-tab--active" : "") + (c ? " fop-br-c" : "") + '"' + colorAttr(c) + ' role="tab" data-action="ship-tab" data-branch-tab="' + esc(b) + '"' +
           ' aria-selected="' + (b === tab) + '" aria-controls="fop-ship-panel-' + esc(b) + '" title="' + esc(branchName(b) + ", " + n + " line" + (n === 1 ? "" : "s")) + '">' +
-          esc(known ? known[1] : b) + ' <span class="fop-ship-tab__sub">· ' + n + " line" + (n === 1 ? "" : "s") + "</span>" +
+          // "16 Salinas" (2026-11-05, on request; before, the name alone).
+          esc(known ? b + " " + known[1] : b) + ' <span class="fop-ship-tab__sub">· ' + n + " line" + (n === 1 ? "" : "s") + "</span>" +
           '<span class="fop-ship-tab__dot" aria-label="Missing ship via or date"' + (shipRowIncomplete(b) && !linesLocked() ? "" : " hidden") + "></span></button>";
       }).join("") + "</div>";
     }
@@ -2700,14 +2775,16 @@
       var qro = ro || (isFreightLine(line) ? " readonly" : "");
       var edited = line.priceOverride && !line.keepPrice;
       return (
-        '<div class="fop-line' + (r % 2 ? " fop-line--alt" : "") + (ro ? " fop-line--ro" : "") + '" data-row="' + r + '" role="row">' +
+        // fop-line--sel: the selected line (state.focus.r). Phones show every
+        // other editable line compact, like a locked order's (styles.css).
+        '<div class="fop-line' + (r % 2 ? " fop-line--alt" : "") + (ro ? " fop-line--ro" : "") + (r === state.focus.r ? " fop-line--sel" : "") + '" data-row="' + r + '" role="row">' +
         '<div class="fop-cell fop-cell--num" role="cell">' + (r + 1) + "</div>" +
         '<div class="fop-cell fop-cell--product' + (!ro && line.productId ? " fop-cell--tiled" : "") + '" role="cell">' +
         '<label class="fop-mlabel">Product</label>' +
         // An editable line with a product shows its id as a tile (like the
         // customer id tiles); a click, or focus reaching the box (arrows,
         // Tab), turns it back into the product box (tileProduct).
-        (ro ? "" : '<button type="button" class="fop-badge fop-pid" tabindex="-1" data-action="edit-product" data-r="' + r + '" ' +
+        (ro ? "" : '<button type="button" class="fop-badge fop-pid' + (lineColor(line) ? " fop-br-c" : "") + '"' + colorAttr(lineColor(line)) + ' tabindex="-1" data-action="edit-product" data-r="' + r + '" ' +
           'title="Change product" aria-label="Change product, line ' + (r + 1) + '">' + esc(pidText(line)) + "</button>") +
         '<div class="fop-ac">' +
         '<input class="fop-input fop-grid-in" data-r="' + r + '" data-c="0" autocomplete="off" spellcheck="false" ' +
@@ -2715,7 +2792,7 @@
         '<div class="fop-ac__list" role="listbox"></div></div>' +
         // Phones: a read-only line shows its product id in a tile top right
         // instead of the (read-only) product box.
-        (ro && line.productId ? '<span class="fop-badge fop-line__id">' + esc(pidText(line)) + "</span>" : "") +
+        (ro && line.productId ? '<span class="fop-badge fop-line__id' + (lineColor(line) ? " fop-br-c" : "") + '"' + colorAttr(lineColor(line)) + ">" + esc(pidText(line)) + "</span>" : "") +
         "</div>" +
         '<div class="fop-cell fop-cell--desc" role="cell" data-cell="desc">' + descHtml(line) + "</div>" +
         '<div class="fop-cell fop-cell--qty" role="cell">' +
@@ -3095,15 +3172,7 @@
       var autoLow = !line.priceOverride && a != null && m != null && a < m;
       var raised = (line.priceRaised || autoLow) && m != null
         ? '<span class="fop-warn-text fop-block">Price raised to the minimum, ' + (floorIsBreak(line) ? "the lowest quantity break" : floorText()) + " (" + unitMoney(m) + ")</span>" : "";
-      return esc(line.description || "") + err + raised + lineBranchHtml(line) + eclipseCommentsHtml(line);
-    }
-
-    // A line shipping from another branch than the header's says so under
-    // its description (every width, so phones see it too).
-    function lineBranchHtml(line) {
-      var b = lineBranch(line);
-      if (!b || b === state.header.shipBranch) return "";
-      return '<span class="fop-line-br">Ships from ' + esc(branchName(b)) + "</span>";
+      return esc(line.description || "") + err + raised + eclipseCommentsHtml(line);
     }
 
     // A loaded line's Eclipse comments under its description, each on its
@@ -3158,8 +3227,15 @@
       // Other lines of this product from the same branch count too.
       var need = branchNeed(line, b);
       var shared = need > (Number(line.qty) || 1) ? ' title="' + need + " on this order from branch " + esc(branchName(b)) + '"' : "";
-      return '<span class="fop-mlabel">At branch </span>' + (other ? '<span class="fop-muted" title="At branch ' + esc(branchName(b)) + '">' + esc(b) + ": </span>" : "") +
+      return '<span class="fop-mlabel">At branch </span>' + (other ? '<span class="fop-muted" title="At branch ' + esc(branchName(b)) + '">' + brNumHtml(b) + (branchColor(b) ? '<span class="fop-br-colon">:</span>' : ": ") + "</span>" : "") +
         '<span class="fop-stock ' + stockClass(s.atBranch, need) + '"' + shared + ">" + s.atBranch + "</span>";
+    }
+
+    // The branch id in Br: Inv, in the branch's colour (a small tile) while
+    // the order ships from several branches.
+    function brNumHtml(b) {
+      var c = branchColor(b);
+      return c ? '<span class="fop-br-num fop-br-c"' + colorAttr(c) + ">" + esc(b) + "</span>" : esc(b);
     }
 
     function totalStockHtml(line) {
@@ -4274,6 +4350,7 @@
 
     function viewOrder() {
       stripRow = inlineLayout ? state.focus.r : -1;
+      selRow = state.focus.r;
       // A locked order (invoiced, cancelled, non-bid) skips blank lines (the
       // empty entry line) and says so when it has none at all.
       var hideBlank = linesLocked();
@@ -4311,7 +4388,7 @@
         // Invoiced / cancelled: no Br / All columns, so the numbers sit against
         // the right edge (.fop-grid--nostock).
         (noStock() ? "" : '<div class="fop-cell fop-cell--stock">Br: Inv</div>' +
-          (inlineLayout ? '<div class="fop-cell fop-cell--stock">All</div>' : "")) + '<div class="fop-cell fop-cell--del"></div>' +
+          (inlineLayout ? '<div class="fop-cell fop-cell--stock">All Inv</div>' : "")) + '<div class="fop-cell fop-cell--del"></div>' +
         "</div>" + linesHtml + "</div>" +
         // Under the lines: grid buttons left, the totals summary box right.
         '<div class="fop-gridfoot"><div class="fop-row fop-gridtools">' +
@@ -4757,6 +4834,23 @@
     }
 
     // Inline layout: move the strips to the newly focused line.
+    // Phones (2026-11-05, on request): lines other than the selected one
+    // fold into a locked order's compact look, all in one "Lines" card
+    // (styles.css, .fop-line--sel). This keeps the class on the selected
+    // row and re-lays the qty overlays ("2 ea"), whose box changes shape.
+    var selRow = -1;
+    function markSelectedRow() {
+      var r = state.focus.r;
+      if (r === selRow) return;
+      var old = selRow;
+      selRow = r;
+      root.querySelectorAll(".fop-line--sel").forEach(function (el) { el.classList.remove("fop-line--sel"); });
+      var el = rowEl(r);
+      if (el) el.classList.add("fop-line--sel");
+      if (old >= 0) showQty(old);
+      if (r >= 0) showQty(r);
+    }
+
     function moveStrips() {
       if (!inlineLayout || stripRow === state.focus.r) return;
       var old = stripRow;
@@ -5692,6 +5786,33 @@
     // Phones keep Close / Esc only.
     var backdropDown = null;
     root.addEventListener("mousedown", function (e) { backdropDown = e.target; });
+
+    // Inventory tiles (pick-branch, branch-menu) with a qty or price box
+    // focused: the press keeps focus in the box. Leaving the box saves it
+    // (change), which redraws the tiles, so the pressed tile was gone by the
+    // click and the click was lost: the rep had to click twice (2026-11-05).
+    // The click saves the box first instead (commitFocusedBox()).
+    root.addEventListener("mousedown", function (e) {
+      var a = document.activeElement;
+      if (e.target.closest && e.target.closest('[data-action="pick-branch"], [data-action="branch-menu"]') &&
+        a && a !== document.body && root.contains(a) && /^(INPUT|TEXTAREA)$/.test(a.tagName)) e.preventDefault();
+    });
+    function commitFocusedBox() {
+      var a = document.activeElement;
+      if (a && a !== document.body && root.contains(a) && /^(INPUT|TEXTAREA)$/.test(a.tagName)) a.blur();
+    }
+    // Phones: a tap on a compact line (not on a button or box) selects it
+    // and unfolds it, without opening the keyboard.
+    root.addEventListener("click", function (e) {
+      if (state.view !== "order" || linesLocked() || !(window.matchMedia && window.matchMedia("(max-width: 767px)").matches)) return;
+      var row = e.target.closest && e.target.closest(".fop-grid .fop-line[data-row]");
+      if (!row || row.classList.contains("fop-line--sel") || e.target.closest("button, input, textarea, select, a")) return;
+      var r = Number(row.getAttribute("data-row"));
+      if (!state.lines[r]) return;
+      state.focus = { r: r, c: 1 };
+      markSelectedRow();
+      moveStrips();
+    });
     root.addEventListener("click", function (e) {
       var t = e.target;
       if (state.view !== "order" || t !== backdropDown || !t.classList.contains("fop-modal") ||
@@ -5755,8 +5876,8 @@
         }
         case "update-bid": requestPlace("update"); break;
         case "convert-bid": requestPlace("convert"); break;
-        case "pick-branch": pickBranch(r, el.getAttribute("data-branch")); break;
-        case "branch-menu": state.branchMenu = state.branchMenu === r ? null : r; render(); break;
+        case "pick-branch": var pb = el.getAttribute("data-branch"); commitFocusedBox(); pickBranch(r, pb); break;
+        case "branch-menu": commitFocusedBox(); state.branchMenu = state.branchMenu === r ? null : r; render(); break;
         case "new-from-list": newOrderFromList(); break;
         case "change-log": openChangeLog(); break;
         case "close-log": closeChangeLog(); break;
@@ -6001,6 +6122,7 @@
       var t = e.target;
       if (t.classList && t.classList.contains("fop-grid-in")) {
         state.focus = { r: Number(t.getAttribute("data-r")), c: Number(t.getAttribute("data-c")) };
+        markSelectedRow();
         if (state.focus.c === 0) tileProduct(state.focus.r, false);
         if (state.focus.c === 1) showQty(state.focus.r);
         if (sideLayout && state.focus.r !== sideRow) refreshSide();
