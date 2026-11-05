@@ -590,8 +590,26 @@
         .map(function (v) { return [v, v]; });
     }
 
+    // Prices are looked up for the ship-to (2026-11-05, on request; it was
+    // the bill-to), else the bill-to while no ship-to is picked.
     function pricingCustomerId() {
-      return (state.customer && state.customer.bill_to && state.customer.bill_to.e_customer_id) || state.customerId;
+      return (state.shipTo && state.shipTo.e_customer_id) ||
+        (state.customer && state.customer.bill_to && state.customer.bill_to.e_customer_id) || state.customerId;
+    }
+
+    // quoteCache holds one customer's prices. When the pricing customer
+    // changes (another ship-to picked), it is emptied and every line's
+    // product is priced again; answers still in flight for the old one are
+    // dropped (pumpQueue). render() calls this first.
+    var quoteCacheCust = "";
+    function syncPricingCustomer() {
+      var c = String(pricingCustomerId() || "");
+      if (c === quoteCacheCust) return;
+      var had = quoteCacheCust;
+      quoteCacheCust = c;
+      if (!had) return;
+      quoteCache = {};
+      (state.lines || []).forEach(function (l) { if (!l.custom && l.productId) fetchQuote(l.productId); });
     }
 
     // ── Data loading ───────────────────────────────────────────────────────
@@ -957,12 +975,16 @@
       while (inFlight < 3 && inquiryQueue.length) {
         (function (pid) {
           inFlight++;
-          getJson(API.inquiry, { e_customer_id: pricingCustomerId(), e_product_id: pid })
+          var cust = String(pricingCustomerId() || "");
+          // An answer for a pricing customer that is no longer current is dropped.
+          var stale = function () { return quoteCacheCust && cust !== quoteCacheCust; };
+          getJson(API.inquiry, { e_customer_id: cust, e_product_id: pid })
             .then(function (data) {
+              if (stale()) return;
               var err = inquiryError(data);
               quoteCache[pid] = err ? { error: err } : { data: data };
             })
-            .catch(function (err) { quoteCache[pid] = { error: err.message }; })
+            .catch(function (err) { if (!stale()) quoteCache[pid] = { error: err.message }; })
             .then(function () {
               inFlight--;
               refreshLinesFor(pid);
@@ -1753,6 +1775,7 @@
 
     function render() {
       var html;
+      syncPricingCustomer();
       switch (state.view) {
         case "customer": html = viewCustomerSearch(); break;
         case "loading": html = viewLoading(state.loadingMsg || "Loading customer…"); break;
@@ -1768,7 +1791,12 @@
       // The tab strip's scroll, so a tab click slides from where it was.
       var oldTabs = root.querySelector(".fop-tabs");
       if (oldTabs) tabsWas = { order: tabsOrderId(), left: oldTabs.scrollLeft };
+      var ae = document.activeElement;
+      gridFocusBefore = !!(ae && ae.classList && ae.classList.contains("fop-grid-in") && root.contains(ae));
       root.innerHTML = html;
+      // While a dialog is open the page behind it doesn't scroll: on phones
+      // a swipe in the dialog scrolled the page instead (2026-11-05).
+      document.documentElement.classList.toggle("fop-modal-open", !!root.querySelector(".fop-modal"));
       var newSide = root.querySelector('[data-cell="side"]');
       if (newSide) newSide.scrollTop = sideTop;
       scrollActiveTab();
@@ -2063,7 +2091,11 @@
           if (dq) { dq.focus(); dq.select(); }
           else { var dx = root.querySelector("[data-action=close-details]"); if (dx) dx.focus(); }
         } else if (state.focus.r >= 0) {
-          if (!skipRefocus) focusCell(state.focus.r, state.focus.c);
+          // Phones and touch screens: only back into a line's box when focus
+          // was in one before the redraw. Closing the place / bid dialog put
+          // focus in the last line's qty and raised the keyboard (2026-11-05).
+          var touchNow = !!(window.matchMedia && window.matchMedia("(max-width: 767px), (hover: none) and (pointer: coarse)").matches);
+          if (!skipRefocus && (!touchNow || gridFocusBefore)) focusCell(state.focus.r, state.focus.c);
         }
       } else if (state.view === "done") {
         var nb = root.querySelector("[data-action=new-order]");
@@ -2181,9 +2213,10 @@
       // (2026-10-19, on request). Display only; the list is not filtered.
       var only = (c.ship_tos || []).length === 1 ? c.ship_tos[0] : null;
       var st = state.shipTo || (state.view === "orders" ? only : null);
-      // Prices are quoted against the bill-to, so its price class is the
-      // level the rep is selling at.
-      var level = '<span class="fop-level" title="Price level">' + esc(bt.price_class || "Price level unknown") + "</span>";
+      // The ship-to's price class (2026-11-05, on request; it was the
+      // bill-to's). No ship-to shown yet: the bill-to's.
+      var lvl = st ? st.price_class : bt.price_class;
+      var level = '<span class="fop-level" title="Price level">' + esc(lvl || "Price level unknown") + "</span>";
       var change = st && (c.ship_tos || []).length > 1 && state.view === "order" && !state.existing
         ? '<button class="fop-linkbtn" data-action="change-shipto">Change</button>' : "";
       return (
@@ -4505,7 +4538,8 @@
       var list = confirmStatuses();
       var noPickUp = pickUpReason();
       return '<div class="fop-field fop-confirm-status"><label class="fop-label" for="fop-confirm-status">Order status ' +
-        '<span class="fop-muted">(↑↓ or ' + (noPickUp ? 2 : 1) + "–" + list.length + ")</span></label>" +
+        // Keyboard hint: hidden on phones (.fop-hint--keys, 2026-11-05, on request).
+        '<span class="fop-muted fop-hint--keys">(↑↓ or ' + (noPickUp ? 2 : 1) + "–" + list.length + ")</span></label>" +
         '<select class="fop-input" id="fop-confirm-status" data-head="orderStatus">' +
         // Starts on "Select…"; placing with it blank flashes the box.
         '<option value="" disabled' + (h.orderStatus ? "" : " selected") + ">Select…</option>" +
@@ -4650,7 +4684,7 @@
         (isBid ? "" : creditReviewHtml()) +
         '<div class="fop-confirm-meta">' +
         "<div><span>Ship-to</span> " + esc(state.shipTo.name) + " (" + esc(state.shipTo.e_customer_id) + ")</div>" +
-        "<div><span>Price level</span> " + esc(state.customer.bill_to.price_class || "Unknown") + "</div>" +
+        // No Price level row (removed 2026-11-05, on request).
         '<div class="fop-confirm-ship" data-cell="confirm-ship">' + confirmShipHtml() + "</div>" +
         (h.po ? "<div><span>PO</span> " + esc(h.po) + "</div>" : "") +
         "</div>" +
@@ -5841,6 +5875,7 @@
     // doesn't put focus back in the line's qty box, which brought the
     // keyboard up again (2026-11-05, on request). afterRender() reads it.
     var noRefocus = false;
+    var gridFocusBefore = false; // render(): was focus in a line's box?
     function keepKeyboardDown() {
       noRefocus = !!(window.matchMedia && window.matchMedia("(max-width: 767px), (hover: none) and (pointer: coarse)").matches);
     }
