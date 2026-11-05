@@ -352,7 +352,10 @@
           "name": "Eclipse account"
         }
       },
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 500
     },
     {
       "parameters": {
@@ -392,7 +395,10 @@
           "name": "Eclipse account"
         }
       },
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 500
     },
     {
       "parameters": {

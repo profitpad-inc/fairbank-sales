@@ -1409,7 +1409,9 @@ html .fop-app *:not(svg):not(path),
 html .flatpickr-calendar,
 html .flatpickr-calendar *,
 html .fop-header,
-html .fop-header * {
+html .fop-header *,
+html .fop-feedback,
+html .fop-feedback * {
   font-family: 'Lexend Deca', 'Barlow', sans-serif !important;
   letter-spacing: normal !important;
   text-transform: none !important;
@@ -2053,3 +2055,40 @@ html .fop-pid.fop-br-c:hover { border-color: var(--gold); }
     background: none; border-color: transparent; border-radius: 0; box-shadow: none;
   }
 }
+
+/* Line margin under the Ext (2026-11-05, on request: "need to show the
+   margin somewhere on the lines, only on desktop"). marginHtml() in app.js.
+   Phones never show it. */
+.fop-line-margin { display: block; margin-top: 2px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.fop-line-margin--neg { color: var(--danger-text); }
+@media (max-width: 767px) {
+  .fop-line-margin { display: none; }
+}
+
+/* Branch tiles under a selected custom line (2026-11-05): no stock count,
+   so the tile is padded evenly. customStripHtml() in app.js. */
+.fop-chip--nocount { padding: 2px 8px; }
+.fop-stockstrip--custom { margin-bottom: 10px; }
+
+/* Feedback note under the app (2026-11-05, on request), built by
+   initHeader() in app.js, so it is on every page with the top bar. */
+.fop-feedback {
+  padding: 0 16px 24px; text-align: center;
+  font-family: 'Barlow', sans-serif; font-size: 13px; color: var(--muted);
+}
+/* Fainter than --muted (2026-11-05, on request): lighter on the light
+   theme, darker on the dark one. */
+.fop-feedback { opacity: .7; }
+.fop-app:has(+ .fop-feedback) { padding-bottom: 32px; }
+@media (max-width: 767px) {
+  /* Phones: the order page's action bar is fixed to the bottom, so the
+     note carries the room for it that #app used to (--fop-bar-h, set by
+     syncBarSpace; 96px also clears the orders list's New order button). */
+  .fop-app:has(+ .fop-feedback) { padding-bottom: 16px; }
+  .fop-feedback { padding: 0 12px calc(var(--fop-bar-h, 96px) + 8px); }
+}
+/* Hidden while the page is still loading (2026-11-05, on request: "if the
+   page is loading, wait until it's loaded before showing that"): #app is
+   empty, or holds only the full-page spinner (viewLoading(), .fop-center). */
+.fop-app:empty + .fop-feedback,
+.fop-app:has(> .fop-center) + .fop-feedback { display: none; }

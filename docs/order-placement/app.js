@@ -1160,12 +1160,14 @@
     // header's ship branch. Lines on different branches are placed (or saved
     // on a bid) as one generation per branch.
 
+    // Custom lines take their branch from the Custom line dialog (2026-11-05,
+    // on request: "select a branch for custom lines"); before, they always
+    // shipped from the header's.
     function lineBranch(line) {
-      return (line && !line.custom && !isFreightLine(line) && line.branch) || (state.header ? state.header.shipBranch : "") || "";
+      return (line && !isFreightLine(line) && line.branch) || (state.header ? state.header.shipBranch : "") || "";
     }
 
-    // Branches the lines ship from, in line order (custom lines ship from
-    // the header's).
+    // Branches the lines ship from, in line order.
     function orderBranches() {
       var out = [];
       sentLines().forEach(function (l) {
@@ -1176,8 +1178,50 @@
     }
 
     function branchName(id) {
+      var nm = branchNameOf(id);
+      return id ? id + (nm ? " - " + nm : "") : "";
+    }
+
+    // A branch's name: BRANCHES, else the name seen on a stock row (13 and
+    // 18 are not in BRANCHES), else "".
+    function branchNameOf(id) {
       var known = BRANCHES.filter(function (b) { return b[0] === String(id); })[0];
-      return id ? id + (known ? " - " + known[1] : "") : "";
+      return known ? known[1] : branchSeenNames[String(id)] || "";
+    }
+
+    // ── Branches only some reps may use (2026-11-05, on request: "branch 13
+    // is only for user RAMSTE", "branch 18 is only for user VASRAU") ───────
+    // Row branch_users of the fairbank_sales_settings table, read with the
+    // ship vias through e-order-placement/settings:
+    // { "<branch id>": [e_user_id, ...] }. A listed branch is left out of
+    // the ship branch and price branch lists, the inventory tiles and the +
+    // list for everyone else (a line or order already on it keeps it).
+    // The listed reps get it in those lists even when BRANCHES lacks it.
+    // Until the GET answers, every branch in BRANCHES is offered as before.
+    var branchUsers = null;
+    var branchSeenNames = {};
+
+    function branchOpen(id) {
+      var list = branchUsers && branchUsers[branchIdOf(id)];
+      if (!Array.isArray(list)) return true;
+      var me = String(user.e_user_id || "").trim().toUpperCase();
+      return !!me && list.some(function (u) { return String(u).trim().toUpperCase() === me; });
+    }
+
+    // [id, name] of every branch this rep may pick, by branch number.
+    function myBranches() {
+      var out = BRANCHES.filter(function (b) { return branchOpen(b[0]); });
+      Object.keys(branchUsers || {}).forEach(function (id) {
+        if (branchOpen(id) && !out.some(function (b) { return b[0] === id; })) out.push([id, branchNameOf(id)]);
+      });
+      return out.sort(function (a, b) { return Number(a[0]) - Number(b[0]); });
+    }
+
+    // "13 - SOME TOWN (SOME TOWN, ST)" on a stock row → "Some Town".
+    function learnBranchName(id, warehouse) {
+      if (!id || branchSeenNames[id] || BRANCHES.some(function (b) { return b[0] === id; })) return;
+      var nm = String(warehouse || "").replace(/^\d+\s*-\s*/, "").replace(/\s*\(.*$/, "").trim();
+      if (nm) branchSeenNames[id] = nm.toLowerCase().replace(/\b[a-z]/g, function (c) { return c.toUpperCase(); });
     }
 
     // Branch colours (2026-11-05, on request from a sales rep): while the
@@ -1333,7 +1377,9 @@
     // header's ship branch (and the lines follow it again).
     function pickBranch(r, id) {
       var line = state.lines[r];
-      if (!line || line.custom || isFreightLine(line) || linesLocked() || !id) return;
+      // Custom lines too (2026-11-05): their tiles under the line.
+      if (!line || isFreightLine(line) || linesLocked() || !id) return;
+      if (!branchOpen(id) && id !== lineBranch(line)) return;
       line.branch = id === state.header.shipBranch ? "" : id;
       state.branchMenu = null;
       // The freight line follows the header, so it never holds the header
@@ -1350,7 +1396,8 @@
           delete h.branches[first];
         }
         h.shipBranch = first;
-        state.lines.forEach(function (l) { l.branch = ""; });
+        // A custom line keeps a branch picked in its dialog.
+        state.lines.forEach(function (l) { if (!l.custom || l.branch === first) l.branch = ""; });
       }
       state.focus = { r: r, c: state.focus.c };
       render();
@@ -1507,8 +1554,20 @@
         r: line && line.custom ? r : -1, at: at,
         draft: line && line.custom ? customDraftFrom(line.custom) : emptyCustomDraft(), errors: {},
       };
+      // Ship branch (2026-11-05): the line's own, else the header's.
+      state.customModal.draft.branch = line && line.custom ? lineBranch(line) : (state.header && state.header.shipBranch) || "";
       // The variation's own pricing, for the "Original" hints.
       if (state.customModal.draft.variationSku) fetchQuote(state.customModal.draft.variationSku);
+      render();
+    }
+
+    // Qty typed (or stepped) on a custom line: a whole number of 1 or more,
+    // else the box goes back to the line's qty.
+    function setCustomQty(r, raw) {
+      var line = state.lines[r];
+      if (!line || !line.custom || linesLocked()) return;
+      var n = Number(String(raw).trim());
+      if (n >= 1 && Math.round(n) === n) line.custom.qty = n;
       render();
     }
 
@@ -1521,10 +1580,14 @@
       var m = state.customModal;
       var res = customLineFrom(m.draft);
       if (!res.line) { m.errors = res.errors; render(); return; }
-      if (m.r >= 0) state.lines[m.r].custom = res.line;
+      // "" = ship from the header's branch (and follow it when it changes).
+      var br = branchIdOf(m.draft.branch);
+      if (br === (state.header && state.header.shipBranch)) br = "";
+      if (m.r >= 0) { state.lines[m.r].custom = res.line; state.lines[m.r].branch = br; }
       else {
         var line = newLine();
         line.custom = res.line;
+        line.branch = br;
         state.lines.splice(m.at, 0, line);
         // Focus stays on (or moves to) the next regular line.
         var nr = nextGridRow(m.at, 1);
@@ -1687,6 +1750,12 @@
 
     function loadShipViaSettings() {
       getJson(API.settings, {}).then(function (d) {
+        // Branches only some reps may use (row branch_users).
+        var bu = d && d.branch_users && d.branch_users.branches;
+        if (bu && typeof bu === "object") {
+          branchUsers = bu;
+          if (state.view === "order" && !state.customModal) render();
+        }
         var m = d && d.ship_vias_by_branch && d.ship_vias_by_branch.branches;
         if (!m || typeof m !== "object") return;
         shipViasByBranch = m;
@@ -1793,6 +1862,7 @@
       if (oldTabs) tabsWas = { order: tabsOrderId(), left: oldTabs.scrollLeft };
       var ae = document.activeElement;
       gridFocusBefore = !!(ae && ae.classList && ae.classList.contains("fop-grid-in") && root.contains(ae));
+      cqtyFocusBefore = !!(ae && ae.hasAttribute && ae.hasAttribute("data-cqty") && root.contains(ae));
       root.innerHTML = html;
       // While a dialog is open the page behind it doesn't scroll: on phones
       // a swipe in the dialog scrolled the page instead (2026-11-05).
@@ -2095,7 +2165,15 @@
           // was in one before the redraw. Closing the place / bid dialog put
           // focus in the last line's qty and raised the keyboard (2026-11-05).
           var touchNow = !!(window.matchMedia && window.matchMedia("(max-width: 767px), (hover: none) and (pointer: coarse)").matches);
-          if (!skipRefocus && (!touchNow || gridFocusBefore)) focusCell(state.focus.r, state.focus.c);
+          // A selected custom line stays selected (its branch tiles open):
+          // focusCell would step over it into the next regular line's box,
+          // which closed the tiles on a click on the + (2026-11-05). Its qty
+          // box gets focus back only if it had it before the redraw.
+          var selCustom = state.lines[state.focus.r] && state.lines[state.focus.r].custom;
+          if (selCustom) {
+            var cq = cqtyFocusBefore && root.querySelector('[data-cqty="' + state.focus.r + '"]');
+            if (cq && !skipRefocus) cq.focus({ preventScroll: true });
+          } else if (!skipRefocus && (!touchNow || gridFocusBefore)) focusCell(state.focus.r, state.focus.c);
         }
       } else if (state.view === "done") {
         var nb = root.querySelector("[data-action=new-order]");
@@ -2422,13 +2500,15 @@
 
     // Ship branch options with distance from the ship-to, closest first.
     // Without ship-to coordinates the list keeps branch-number order.
+    // Only the branches this rep may use (myBranches(); a current value
+    // outside it still shows, selectHtml keeps unknown values).
     function branchOptions() {
-      var list = BRANCHES.map(function (b) {
+      var list = myBranches().map(function (b) {
         return { id: b[0], name: b[1], mi: shipToMiles(b[0]) };
       });
       list.sort(byShipToDistance);
       return list.map(function (b) {
-        return [b.id + " - " + b.name + (b.mi != null ? " · " + Math.round(b.mi).toLocaleString("en-US") + " mi" : ""), b.id];
+        return [b.id + (b.name ? " - " + b.name : "") + (b.mi != null ? " · " + Math.round(b.mi).toLocaleString("en-US") + " mi" : ""), b.id];
       });
     }
 
@@ -2472,7 +2552,7 @@
     // order: its own price branch, read-only (update-bid never changes it).
     function priceBranchField(cls) {
       if (!state.existing) {
-        var opts = BRANCHES.map(function (b) { return [b[0] + " - " + b[1], b[0]]; });
+        var opts = myBranches().map(function (b) { return [b[0] + (b[1] ? " - " + b[1] : ""), b[0]]; });
         return field("Price branch", selectHtml("priceBranch", opts, newPriceBranch(), "Select…"), cls);
       }
       var id = branchIdOf(state.existing.price_branch);
@@ -2943,16 +3023,88 @@
         "</button></div>" +
         '<div class="fop-cell fop-cell--desc" role="cell">' + esc(cl.name) +
         (sub.length ? '<span class="fop-muted fop-block">' + esc(sub.join(" · ")) + "</span>" : "") + "</div>" +
-        '<div class="fop-cell fop-cell--qty fop-num fop-custom-num" role="cell"><span class="fop-mlabel">Qty </span>' + cl.qty + "</div>" +
+        // Qty is edited right on the line (2026-11-05, on request: "need to
+        // modify the quantity on custom lines"); the box is not a grid box,
+        // so the arrow keys still step over the line.
+        '<div class="fop-cell fop-cell--qty fop-custom-qty" role="cell"><label class="fop-mlabel" for="fop-cqty-' + r + '">Qty</label>' +
+        '<div class="fop-qty">' +
+        '<button class="fop-step" tabindex="-1" data-action="cqty-dec" data-r="' + r + '" aria-label="Decrease">−</button>' +
+        '<span class="fop-qty__box"><input class="fop-input fop-num" id="fop-cqty-' + r + '" data-cqty="' + r + '" inputmode="numeric" autocomplete="off" ' +
+        'value="' + esc(cl.qty) + '" aria-label="Quantity, custom line ' + (r + 1) + '"></span>' +
+        '<button class="fop-step" tabindex="-1" data-action="cqty-inc" data-r="' + r + '" aria-label="Increase">+</button>' +
+        "</div></div>" +
         '<div class="fop-cell fop-cell--price fop-num fop-custom-num" role="cell"><span class="fop-mlabel">Unit price </span>' + unitMoney(cl.price) + "</div>" +
         '<div class="fop-cell fop-cell--cost fop-num" role="cell" title="Estimated COGS"><span class="fop-mlabel">Est. COGS </span>' + money(cl.cogs) + "</div>" +
-        '<div class="fop-cell fop-cell--ext fop-num" role="cell"><span class="fop-mlabel">Ext </span>' + money(cl.price * cl.qty) + "</div>" +
-        (noStock() ? "" : '<div class="fop-cell fop-cell--stock" role="cell" data-cell="avail"></div>' +
+        '<div class="fop-cell fop-cell--ext fop-num" role="cell"><span class="fop-mlabel">Ext </span>' + money(cl.price * cl.qty) + marginHtml(cl.price, cl.cogs) + "</div>" +
+        // Br: Inv shows the branch the line ships from (picked in the
+        // dialog; no stock for a custom line).
+        (noStock() ? "" : '<div class="fop-cell fop-cell--stock fop-num" role="cell" data-cell="avail">' +
+          (lineBranch(state.lines[r]) ? '<span class="fop-mlabel">Ships from </span><span class="fop-muted" title="Ships from ' + esc(branchName(lineBranch(state.lines[r]))) + '">' +
+            brNumHtml(lineBranch(state.lines[r])) + "</span>" : "") + "</div>" +
           (inlineLayout ? '<div class="fop-cell fop-cell--stock" role="cell" data-cell="total"></div>' : "")) +
         '<div class="fop-cell fop-cell--del" role="cell">' +
         '<button class="fop-icon-btn" tabindex="-1" data-action="remove-line" data-r="' + r + '" aria-label="Remove line ' + (r + 1) + '">×</button>' +
-        "</div></div>"
+        "</div>" +
+        '<div class="fop-stockstrip fop-stockstrip--solo fop-stockstrip--custom" data-cell="cstrip"' + (customStripShown(r) ? "" : " hidden") + ">" +
+        customStripHtml(state.lines[r], r) + "</div>" +
+        "</div>"
       );
+    }
+
+    // Branch tiles under a custom line (2026-11-05, on request: "once they
+    // hit save they should also be able to do it in the lines table, just
+    // like any other product (just don't show a # for inventory, and no qty
+    // breaks)"). Shown while the line is selected (a click on it; a click
+    // away closes it, like the strips under a product line), in every
+    // layout, since a custom line has no side box section or Details
+    // dialog. Tiles: every branch the rep may use, closest first, no + list.
+    // No stock counts, no qty breaks.
+    function customStripShown(r) {
+      return r === state.focus.r && !lineClosed && !linesLocked() && !!state.lines[r] && !!state.lines[r].custom;
+    }
+
+    function customStripHtml(line, r) {
+      if (!line || !line.custom) return "";
+      var ship = lineBranch(line);
+      // Every branch this rep may use (plus the line's own), no + list:
+      // a custom line has no stock anywhere, so there is nothing to sort
+      // tiles from the rest by (2026-11-05, on request).
+      var ids = myBranches().map(function (b) { return b[0]; });
+      if (ship && ids.indexOf(ship) < 0) ids.push(ship);
+      var rows = ids.map(function (id) { return { id: id, name: branchNameOf(id) }; });
+      rows.sort(byShipToDistance);
+      return '<span class="fop-strip__lbl">Ship branch</span>' + rows.map(function (x) {
+        var on = x.id === ship;
+        return '<button type="button" class="fop-chip fop-chip--pick fop-chip--nocount' + (on ? " fop-chip--ship" : "") + '" tabindex="-1" data-action="pick-branch" data-r="' + r +
+          '" data-branch="' + esc(x.id) + '" aria-pressed="' + on + '" title="' + (on ? "Ships from " : "Ship this line from ") + esc(x.id + " " + x.name) + '">' +
+          '<span class="fop-chip__br">' + esc(x.id) + (x.name ? " " + esc(x.name) : "") + "</span></button>";
+      }).join("");
+    }
+
+    // Show only the selected custom line's branch tiles.
+    function refreshCustomStrips() {
+      root.querySelectorAll('[data-cell="cstrip"]').forEach(function (el) {
+        var row = el.closest("[data-custom]");
+        el.hidden = !(row && customStripShown(Number(row.getAttribute("data-custom"))));
+      });
+    }
+
+    // Custom line dialog: the branch the line ships from (2026-11-05, on
+    // request: "select a branch for custom lines"). Same list as the
+    // header's Ship branch (closest first, only branches this rep may use).
+    // A line on another branch than the header's gets its own generation,
+    // like a product line moved on its inventory tiles.
+    function customBranchFieldHtml(d) {
+      var opts = branchOptions();
+      var v = String(d.branch || "");
+      var known = opts.some(function (o) { return String(o[1]) === v; });
+      return '<div class="fop-field fop-custom-form__wide"><label class="fop-label" for="fop-cf-branch">Ship branch</label>' +
+        '<select class="fop-input" id="fop-cf-branch" data-cf="branch">' +
+        (v ? "" : '<option value="" selected>Same as the order</option>') +
+        (v && !known ? '<option value="' + esc(v) + '" selected>' + esc(branchName(v)) + "</option>" : "") +
+        opts.map(function (o) {
+          return '<option value="' + esc(o[1]) + '"' + (String(o[1]) === v ? " selected" : "") + ">" + esc(o[0]) + "</option>";
+        }).join("") + "</select></div>";
     }
 
     // "Custom line" dialog: add or edit one custom line.
@@ -2982,6 +3134,7 @@
         input("qty", "Quantity", 'inputmode="numeric"') +
         input("price", "Unit price", 'inputmode="decimal" placeholder="0.00"', "", "orig-price") +
         input("cogs", "Unit COGS (estimate)", 'inputmode="decimal" placeholder="0.00"', "", "orig-cogs") +
+        customBranchFieldHtml(d) +
         '<div class="fop-custom-form__wide fop-custom-margin" data-cell="custom-margin">' + customMarginHtml(d) + "</div>" +
         '<div class="fop-field fop-custom-form__wide"><label class="fop-label" for="fop-cf-customizations">Customizations <span class="fop-muted">(one per line, e.g. 3" rear fill)</span></label>' +
         '<textarea class="fop-input fop-notes" id="fop-cf-customizations" data-cf="customizations" rows="3">' + esc(d.customizations) + "</textarea></div>" +
@@ -3160,12 +3313,15 @@
       var rows = s.rows.map(function (x) {
         var id = branchIdOf(x.warehouse);
         var known = BRANCHES.filter(function (b) { return b[0] === id; })[0];
+        learnBranchName(id, x.warehouse);
         return { id: id, name: known ? known[1] : String(x.warehouse || "").replace(/^\d+\s*-\s*/, ""), qty: parseInt(x.warehouseQty, 10) || 0 };
-      }).filter(function (x) { return x.qty > 0 || (ship && x.id === ship); });
+      }).filter(function (x) {
+        // A branch kept for other reps shows only when the line is on it.
+        return (x.qty > 0 && branchOpen(x.id)) || (ship && x.id === ship);
+      });
       // A ship branch with no stock row at all still gets its tile.
       if (ship && !rows.some(function (x) { return x.id === ship; })) {
-        var sk = BRANCHES.filter(function (b) { return b[0] === ship; })[0];
-        rows.push({ id: ship, name: sk ? sk[1] : "", qty: 0 });
+        rows.push({ id: ship, name: branchNameOf(ship), qty: 0 });
       }
       // Closest to the ship-to first (2026-10-22), not by quantity.
       rows.sort(byShipToDistance);
@@ -3184,18 +3340,20 @@
     // The + after the inventory tiles lists the branches without a tile
     // (no stock there), so a line can ship from one anyway. A click on one
     // picks it like a tile (pickBranch); the + closes the list again.
-    function branchMoreHtml(shown, r) {
-      var rest = BRANCHES.filter(function (b) {
+    // noCount: a custom line's tiles (no stock, so no "0").
+    function branchMoreHtml(shown, r, noCount) {
+      var rest = myBranches().filter(function (b) {
         return !shown.some(function (x) { return x.id === b[0]; });
       }).sort(function (a, b) { return byShipToDistance({ id: a[0] }, { id: b[0] }); });
       if (!rest.length) return "";
       var open = state.branchMenu === r;
       return '<button type="button" class="fop-chip fop-chip--pick fop-chip--more" tabindex="-1" data-action="branch-menu" data-r="' + r +
-        '" aria-expanded="' + open + '" title="' + (open ? "Hide the other branches" : "Ship from a branch with no stock") + '">' + (open ? "−" : "+") + "</button>" +
+        '" aria-expanded="' + open + '" title="' + (open ? "Hide the other branches" : noCount ? "Ship from another branch" : "Ship from a branch with no stock") + '">' + (open ? "−" : "+") + "</button>" +
         (open ? rest.map(function (b) {
-          return '<button type="button" class="fop-chip fop-chip--pick fop-chip--empty" tabindex="-1" data-action="pick-branch" data-r="' + r +
-            '" data-branch="' + esc(b[0]) + '" title="Ship this line from ' + esc(b[0] + " " + b[1]) + ' (no stock)">' +
-            '<span class="fop-chip__br">' + esc(b[0]) + " " + esc(b[1]) + '</span><span class="fop-stock ' + stockClass(0, 1) + '">0</span></button>';
+          return '<button type="button" class="fop-chip fop-chip--pick fop-chip--empty' + (noCount ? " fop-chip--nocount" : "") + '" tabindex="-1" data-action="pick-branch" data-r="' + r +
+            '" data-branch="' + esc(b[0]) + '" title="Ship this line from ' + esc(b[0] + (b[1] ? " " + b[1] : "")) + (noCount ? "" : " (no stock)") + '">' +
+            '<span class="fop-chip__br">' + esc(b[0]) + (b[1] ? " " + esc(b[1]) : "") + "</span>" +
+            (noCount ? "" : '<span class="fop-stock ' + stockClass(0, 1) + '">0</span>') + "</button>";
         }).join("") : "");
     }
 
@@ -3251,7 +3409,18 @@
         var q = quoteOf(line);
         return q && q.loading ? '<span class="fop-dots">···</span>' : "-";
       }
-      return '<span class="fop-mlabel">Ext </span>' + money(p * (Number(line.qty) || 0));
+      return '<span class="fop-mlabel">Ext </span>' + money(p * (Number(line.qty) || 0)) + marginHtml(p, lineCost(line));
+    }
+
+    // Margin under the Ext, desktop only (2026-11-05, on request: "need to
+    // show the margin somewhere on the lines, only on desktop"; styles.css
+    // hides .fop-line-margin under 768px). Margin on price: (price - cost)
+    // / price. Nothing while the cost is unknown or the price is 0.
+    function marginHtml(price, cost) {
+      if (!(price > 0) || !isFinite(cost)) return "";
+      var m = (price - cost) / price * 100;
+      return '<span class="fop-line-margin' + (m < 0 ? " fop-line-margin--neg" : "") + '" title="Margin: (unit price - unit cost) / unit price">' +
+        m.toFixed(1) + "% margin</span>";
     }
 
     function stockClass(have, need) {
@@ -4910,16 +5079,18 @@
       lineClosed = true;
       if (stripRow >= 0) refreshStrips(stripRow);
       markSelectedRow();
+      refreshCustomStrips();
     }
     function openLine() {
       if (!lineClosed) return;
       lineClosed = false;
       markSelectedRow();
+      refreshCustomStrips();
       if (stripRow === state.focus.r) refreshStrips(stripRow);
     }
     document.addEventListener("mousedown", function (e) {
       if (state.view !== "order" || lineClosed || !document.contains(e.target)) return;
-      var row = rowEl(state.focus.r);
+      var row = rowEl(state.focus.r) || root.querySelector('.fop-line[data-custom="' + state.focus.r + '"]');
       if (row && row.contains(e.target)) return;
       closeLine();
     });
@@ -5876,6 +6047,7 @@
     // keyboard up again (2026-11-05, on request). afterRender() reads it.
     var noRefocus = false;
     var gridFocusBefore = false; // render(): was focus in a line's box?
+    var cqtyFocusBefore = false; // render(): was focus in a custom line's qty box?
     function keepKeyboardDown() {
       noRefocus = !!(window.matchMedia && window.matchMedia("(max-width: 767px), (hover: none) and (pointer: coarse)").matches);
     }
@@ -5927,6 +6099,20 @@
 
       // Inline layout: clicking a line's description selects that line and
       // puts the cursor in its line comment.
+      // A click on a custom line (not on its buttons or qty box) selects it
+      // and shows its branch tiles (customStripHtml), every layout.
+      var cRow = state.view === "order" && e.target.closest(".fop-line[data-custom]");
+      if (cRow && !e.target.closest("button, input, [data-action]")) {
+        var cr = Number(cRow.getAttribute("data-custom"));
+        if (state.focus.r !== cr || lineClosed) {
+          state.focus = { r: cr, c: 0 };
+          lineClosed = false;
+          markSelectedRow();
+          refreshCustomStrips();
+        }
+        return;
+      }
+
       var descCell = inlineLayout && state.view === "order" && e.target.closest('.fop-line[data-row] [data-cell="desc"]');
       if (descCell) { focusLineComment(Number(descCell.closest(".fop-line").getAttribute("data-row"))); return; }
 
@@ -5980,6 +6166,8 @@
         case "reload-order": loadExistingOrder(state.orderId); break;
         case "qty-dec": setQty(r, (Number(state.lines[r].qty) || 1) - 1); break;
         case "qty-inc": setQty(r, (Number(state.lines[r].qty) || 0) + 1); break;
+        case "cqty-dec": setCustomQty(r, (state.lines[r].custom ? state.lines[r].custom.qty : 1) - 1); break;
+        case "cqty-inc": setCustomQty(r, (state.lines[r].custom ? state.lines[r].custom.qty : 0) + 1); break;
         case "place-bid": requestPlace("bid"); break;
         case "place-order": requestPlace("order"); break;
         case "cancel-place": state.confirm = null; state.placeError = null; render(); break;
@@ -6102,6 +6290,7 @@
     root.addEventListener("change", function (e) {
       var t = e.target;
       if (state.customModal && t.hasAttribute("data-cf")) { onCustomField(t, true); return; }
+      if (t.hasAttribute("data-cqty")) { setCustomQty(Number(t.getAttribute("data-cqty")), t.value); return; }
       if (state.cancelAsk && t.hasAttribute("data-lost")) { onCancelLostField(t); return; }
       if (state.detailsModal && t.hasAttribute("data-dm")) {
         var dr = state.detailsModal.r;
@@ -6212,10 +6401,18 @@
         state.focus = { r: Number(t.getAttribute("data-r")), c: Number(t.getAttribute("data-c")) };
         openLine();
         markSelectedRow();
+        refreshCustomStrips();
         if (state.focus.c === 0) tileProduct(state.focus.r, false);
         if (state.focus.c === 1) showQty(state.focus.r);
         if (sideLayout && state.focus.r !== sideRow) refreshSide();
         moveStrips();
+      }
+      // A custom line's qty box selects that line (its branch tiles show).
+      if (t.hasAttribute && t.hasAttribute("data-cqty")) {
+        state.focus = { r: Number(t.getAttribute("data-cqty")), c: 1 };
+        lineClosed = false;
+        markSelectedRow();
+        refreshCustomStrips();
       }
       if (ac && t !== ac.input) acClose();
     });
@@ -6356,7 +6553,7 @@
         else if (e.key === "Escape") { e.preventDefault(); closeCustomModal(); }
         else if (e.key === "Enter" && (e.ctrlKey || e.metaKey || (!inBox && !onBtn))) { e.preventDefault(); saveCustomModal(); }
         else if (e.key === "Tab") {
-          var cf = Array.prototype.slice.call(root.querySelectorAll(".fop-modal input, .fop-modal textarea, .fop-modal button"))
+          var cf = Array.prototype.slice.call(root.querySelectorAll(".fop-modal input, .fop-modal select, .fop-modal textarea, .fop-modal button"))
             .filter(function (x) { return !x.closest("[hidden]"); });
           if (cf.length) {
             e.preventDefault();
@@ -6420,6 +6617,18 @@
             e.preventDefault();
             btns[(idx + (e.shiftKey ? -1 : 1) + btns.length) % btns.length].focus();
           }
+        }
+        return;
+      }
+
+      // A custom line's qty box: Enter saves it; ↑↓ step it.
+      if (t.hasAttribute && t.hasAttribute("data-cqty") && /^(Enter|ArrowUp|ArrowDown)$/.test(e.key) && !e.altKey && !e.ctrlKey && !e.metaKey) {
+        var cr = Number(t.getAttribute("data-cqty"));
+        if (e.key === "Enter") { e.preventDefault(); setCustomQty(cr, t.value); }
+        else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+          e.preventDefault();
+          var cq = state.lines[cr] && state.lines[cr].custom;
+          if (cq) { setCustomQty(cr, cq.qty + (e.key === "ArrowUp" ? 1 : -1)); var nb = root.querySelector('[data-cqty="' + cr + '"]'); if (nb) { nb.focus(); nb.select(); } }
         }
         return;
       }
@@ -6611,6 +6820,12 @@
       "</div></div>" +
       "</div>";
     root.parentNode.insertBefore(header, root);
+    // Feedback note at the bottom of every page that has this header
+    // (2026-11-05, on request). Outside #app, so render() never touches it.
+    var footer = document.createElement("footer");
+    footer.className = "fop-feedback";
+    footer.textContent = "Got feedback? Send an email to chris.becher@profitpad.com and cc darrinc@fairbankequipment.com with the details. Please include a screenshot.";
+    root.parentNode.insertBefore(footer, root.nextSibling);
     bindThemeBtn(header.querySelector(".fop-umenu__theme"));
     header.querySelector(".fop-umenu__out").addEventListener("click", function () { window.fbSignOut(); });
 

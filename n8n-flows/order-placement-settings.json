@@ -36,7 +36,7 @@
       "position": [224, 0],
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT setting_id, data FROM fairbank_sales_settings WHERE setting_id IN ('ship_vias_by_branch');",
+        "query": "SELECT setting_id, data FROM fairbank_sales_settings WHERE setting_id IN ('ship_vias_by_branch', 'branch_users');",
         "options": {}
       },
       "alwaysOutputData": true,

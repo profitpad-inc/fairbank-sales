@@ -100,7 +100,10 @@
           "name": "Eclipse account"
         }
       },
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 500
     },
     {
       "parameters": {
@@ -176,7 +179,10 @@
           "name": "Eclipse account"
         }
       },
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 500
     },
     {
       "parameters": {
@@ -270,7 +276,10 @@
         }
       },
       "onError": "continueRegularOutput",
-      "executeOnce": true
+      "executeOnce": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 500
     },
     {
       "parameters": {

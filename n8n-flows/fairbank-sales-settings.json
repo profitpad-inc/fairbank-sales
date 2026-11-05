@@ -100,7 +100,10 @@
           "id": "PVIgwtzRL74PSVft",
           "name": "eclipse"
         }
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 500
     },
     {
       "id": "2c3fdb53-1106-4aa6-b232-e2aee160eebf",
@@ -199,6 +202,27 @@
           "name": "fairbank warehouse"
         }
       }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Branches only some Eclipse users (e_user_id) may use in order placement.\n-- { branches: { \"<branch id>\": [e_user_id, ...] } }. A branch not listed is open to everyone.\n-- Edit this and run setup again to change it.\nINSERT INTO fairbank_sales_settings (setting_id, data)\nVALUES ('branch_users', '{\"branches\": {\"13\": [\"RAMSTE\"], \"18\": [\"VASRAU\"]}}'::jsonb)\nON CONFLICT (setting_id) DO UPDATE SET data = EXCLUDED.data\nRETURNING setting_id, data;",
+        "options": {}
+      },
+      "name": "upsert branch_users",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        -224
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "wiJjdZBJJ71KnbxL",
+          "name": "fairbank warehouse"
+        }
+      },
+      "notes": "Branches only some Eclipse users (e_user_id) may use. Edit here and run setup again."
     }
   ],
   "connections": {
@@ -212,6 +236,11 @@
           },
           {
             "node": "Get many branches",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "upsert branch_users",
             "type": "main",
             "index": 0
           }
