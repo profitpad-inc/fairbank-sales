@@ -6985,7 +6985,10 @@
       var backUrl = opUrl(lockedBillTo ? { e_customer_id: lockedBillTo } : {});
       return '<div class="fop-wrap fop-nc">' +
         '<div class="fop-top"><div><div class="fop-kicker">Order Placement</div><h1 class="fop-h1">' + (lockedBillTo ? "New ship-to" : "New customer") + "</h1></div>" +
-        '<div class="fop-row"><a class="fop-btn fop-btn--ghost fop-btn--sm" href="' + esc(backUrl) + '">' + (lockedBillTo ? "Back to the customer" : "Back") + "</a></div></div>" +
+        // Alt+Q (Control+Q on a Mac) follows it (2026-11-05, on request); no
+        // hint on phones (.fop-top .fop-key).
+        '<div class="fop-row"><a class="fop-btn fop-btn--ghost fop-btn--sm" data-action="nc-back" href="' + esc(backUrl) + '">' + (lockedBillTo ? "Back to the customer" : "Back") +
+        ' <span class="fop-key">' + altKey("Q") + "</span></a></div></div>" +
         (thenOrder ? '<div class="fop-alert fop-alert--info">This bill-to has no ship-to yet. Add one, then the order starts on it.</div>' : "") +
         (st.optionsError ? '<div class="fop-alert fop-alert--error">Could not load the state and industry lists from HubSpot: ' + esc(st.optionsError) +
           ' <button type="button" class="fop-linkbtn" data-action="nc-reload-options">Try again</button></div>' : "") +
@@ -7323,6 +7326,10 @@
       }
     });
     root.addEventListener("keydown", function (e) {
+      if (isShortcutMod(e) && e.code === "KeyQ") {
+        var back = root.querySelector("[data-action=nc-back]");
+        if (back) { e.preventDefault(); window.location.href = back.href; return; }
+      }
       if (e.target.id === "nc-address" && addr.open && addr.items.length) {
         var opts = root.querySelectorAll("#nc-addr-list .fop-ac__item");
         if (e.key === "ArrowDown" || e.key === "ArrowUp") {
