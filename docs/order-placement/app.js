@@ -2020,6 +2020,8 @@
         var first = root.querySelector("[data-shipto]");
         if (first) first.focus();
       } else if (state.view === "order") {
+        var skipRefocus = noRefocus;
+        noRefocus = false;
         if (state.quoteModal) {
           fitQuoteFrame();
           // The email box (no scroll, so the quote shows from its top). Not on
@@ -2042,8 +2044,12 @@
           if (cr) cr.focus();
           else if (keep && !root.querySelector(".fop-modal").contains(document.activeElement)) keep.focus();
         } else if (state.confirm) {
+          // Phones and touch screens: no focus on open, since focusing the
+          // order status dropdown popped its picker up straight away
+          // (2026-11-05, on request).
           var ok = root.querySelector("#fop-confirm-status") || root.querySelector("[data-action=confirm-place]");
-          if (ok) ok.focus();
+          var touch = !!(window.matchMedia && window.matchMedia("(max-width: 767px), (hover: none) and (pointer: coarse)").matches);
+          if (ok && !touch) ok.focus();
         } else if (state.customModal) {
           // First field with an error, else the name.
           var errKey = ["name", "qty", "price", "cogs", "variationSku"].filter(function (k) { return state.customModal.errors[k]; })[0];
@@ -2057,7 +2063,7 @@
           if (dq) { dq.focus(); dq.select(); }
           else { var dx = root.querySelector("[data-action=close-details]"); if (dx) dx.focus(); }
         } else if (state.focus.r >= 0) {
-          focusCell(state.focus.r, state.focus.c);
+          if (!skipRefocus) focusCell(state.focus.r, state.focus.c);
         }
       } else if (state.view === "done") {
         var nb = root.querySelector("[data-action=new-order]");
@@ -5831,6 +5837,13 @@
       if (e.target.closest && e.target.closest('[data-action="pick-branch"], [data-action="branch-menu"]') &&
         a && a !== document.body && root.contains(a) && /^(INPUT|TEXTAREA)$/.test(a.tagName)) e.preventDefault();
     });
+    // Phones and touch screens: the redraw after an inventory tile tap
+    // doesn't put focus back in the line's qty box, which brought the
+    // keyboard up again (2026-11-05, on request). afterRender() reads it.
+    var noRefocus = false;
+    function keepKeyboardDown() {
+      noRefocus = !!(window.matchMedia && window.matchMedia("(max-width: 767px), (hover: none) and (pointer: coarse)").matches);
+    }
     function commitFocusedBox() {
       var a = document.activeElement;
       if (a && a !== document.body && root.contains(a) && /^(INPUT|TEXTAREA)$/.test(a.tagName)) a.blur();
@@ -5916,8 +5929,8 @@
         }
         case "update-bid": requestPlace("update"); break;
         case "convert-bid": requestPlace("convert"); break;
-        case "pick-branch": var pb = el.getAttribute("data-branch"); commitFocusedBox(); pickBranch(r, pb); break;
-        case "branch-menu": commitFocusedBox(); state.branchMenu = state.branchMenu === r ? null : r; render(); break;
+        case "pick-branch": var pb = el.getAttribute("data-branch"); commitFocusedBox(); keepKeyboardDown(); pickBranch(r, pb); noRefocus = false; break;
+        case "branch-menu": commitFocusedBox(); keepKeyboardDown(); state.branchMenu = state.branchMenu === r ? null : r; render(); break;
         case "new-from-list": newOrderFromList(); break;
         case "change-log": openChangeLog(); break;
         case "close-log": closeChangeLog(); break;
