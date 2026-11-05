@@ -1233,11 +1233,11 @@ html[data-theme="light"] .fop-status--partial { color: #a14d00; border-color: rg
   .fop-grid .fop-cell--cost.fop-num { text-align: left; }
   .fop-grid .fop-cell--ext.fop-num { text-align: right; }
   .fop-grid .fop-cell--cost, .fop-grid .fop-cell--ext { font-size: 14px; padding-top: 6px; }
-  .fop-grid .fop-input { padding: 9px 10px; }
+  .fop-grid .fop-input { padding: 6px 10px; } /* 9px top and bottom until 2026-11-05, on request; qty and steppers 36px tall, were 42px */
   /* Read-only lines (existing orders): values sit flush left, no box. */
   .fop-grid .fop-grid-in[readonly] { padding-left: 0; padding-right: 0; height: auto; text-align: left; }
-  .fop-step { flex-basis: 40px; height: 42px; }
-  .fop-qty .fop-input { height: 42px; }
+  .fop-step { flex-basis: 40px; height: 36px; }
+  .fop-qty .fop-input { height: 36px; }
 
   /* Inline strip: each label (Inventory, Quantity breaks, Line comment) on
      its own line above its chips, so the chips get the full width. */
@@ -1577,10 +1577,11 @@ html .fop-ship-tab.fop-tab--active { background: var(--card-bg); }
 @media (prefers-reduced-motion: reduce) { .fop-tab-in--r .fop-input, .fop-tab-in--l .fop-input { animation: none; } }
 @media (max-width: 767px) {
   .fop-head__ship { margin-bottom: 0; }
-  .fop-ship-tabs { padding: 10px 12px 0; }
+  .fop-ship-tabs { padding: 10px 12px 0 4px; }
   /* Phones: no line count on the ship tabs (2026-11-05, on request). */
   .fop-ship-tab__sub { display: none; }
   html .fop-head__grid--tabbed > .fop-field:first-child { display: none; }
+  html .fop-head__grid--tabbed > .fop-ship-lines { display: block; padding: 10px 12px 0; font-size: 13px; line-height: 1.35; color: var(--muted); }
   .fop-head__grid--tabbed { padding-top: 0; }
   html .fop-head__ship .fop-head__grid > .fop-field:last-child { border-bottom: 0; }
   .fop-head__ship-note { padding: 10px 12px; border-top: 1px solid var(--line); }
@@ -1887,6 +1888,7 @@ button.fop-chip--pick { font: inherit; color: inherit; cursor: pointer; }
 .fop-app .fop-chip--empty { border-style: dashed; }
 .fop-branch-hint { display: block; margin-top: 4px; font-size: 12px; line-height: 1.35; color: var(--muted); }
 .fop-branch-hint:empty { display: none; }
+.fop-ship-lines { display: none; }
 
 /* Update Bid / Convert to Order dialog: header changes and the generations
    a conversion covers. */
@@ -2009,6 +2011,13 @@ html .fop-pid.fop-br-c:hover { border-color: var(--gold); }
       "qty   price cost  ext"
       "avail avail total total";
   }
+  /* A line with no product yet (the entry line, or one being retyped):
+     only the product box and × until a product is picked (2026-11-05, on
+     request). */
+  html .fop-grid .fop-line--noprod .fop-cell--qty,
+  html .fop-grid .fop-line--noprod .fop-cell--price,
+  html .fop-grid .fop-line--noprod .fop-cell--cost,
+  html .fop-grid .fop-line--noprod .fop-cell--ext { display: none; }
   html .fop-grid .fop-line[data-row]:has(.fop-cell--tiled):not(.fop-line--sel):not(:focus-within) .fop-cell.fop-cell--product {
     grid-area: auto; position: absolute; top: 10px; right: 12px; display: flex; align-items: center; min-height: 24px; padding: 0;
   }

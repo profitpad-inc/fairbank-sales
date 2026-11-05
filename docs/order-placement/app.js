@@ -2719,6 +2719,10 @@
             ? field("Ship branch", '<input class="fop-input fop-input--fixed" value="' + esc(branchLabel(b)) + '" disabled>' +
                 '<span class="fop-branch-hint">' + esc(branchLinesText(b)) + "</span>", "fop-field--mfull")
             : field("Ship branch", selectHtml("shipBranch", branches, b, "Select…"), "fop-field--mfull", "shipBranch")) +
+          // Phones hide the Ship branch box (the tab names the branch), so
+          // its line numbers go above Ship via instead (2026-11-05, on
+          // request). Desktop hides this one.
+          (multi ? '<div class="fop-ship-lines">' + esc(branchLinesText(b)) + "</div>" : "") +
           field("Ship via", shipViaSelectHtml(s.shipVia, b), "fop-field--mfull", "shipVia") +
           field("Ship date", '<input class="fop-input fop-date" data-date="shipDate"' + ba + ' value="' + esc(s.shipDate) + '"' + lockAttr("shipDate") + ">", "", "shipDate") +
           field("Required date", '<input class="fop-input fop-date" data-date="requiredDate"' + ba + ' value="' + esc(s.requiredDate) + '"' + lockAttr("requiredDate") + ">", "", "requiredDate") +
@@ -2777,7 +2781,9 @@
       return (
         // fop-line--sel: the selected line (state.focus.r). Phones show every
         // other editable line compact, like a locked order's (styles.css).
-        '<div class="fop-line' + (r % 2 ? " fop-line--alt" : "") + (ro ? " fop-line--ro" : "") + (r === state.focus.r ? " fop-line--sel" : "") + '" data-row="' + r + '" role="row">' +
+        '<div class="fop-line' + (r % 2 ? " fop-line--alt" : "") + (ro ? " fop-line--ro" : "") + (r === state.focus.r && !lineClosed ? " fop-line--sel" : "") +
+          // Phones hide qty and price until a product is picked (styles.css).
+          (!ro && !line.productId ? " fop-line--noprod" : "") + '" data-row="' + r + '" role="row">' +
         '<div class="fop-cell fop-cell--num" role="cell">' + (r + 1) + "</div>" +
         '<div class="fop-cell fop-cell--product' + (!ro && line.productId ? " fop-cell--tiled" : "") + '" role="cell">' +
         '<label class="fop-mlabel">Product</label>' +
@@ -2833,7 +2839,7 @@
     function stripShown(r) {
       var line = state.lines[r];
       // Invoiced / cancelled: no stock, and their lines take no comment.
-      return inlineLayout && r === state.focus.r && !!line && !line.custom && !!line.productId &&
+      return inlineLayout && r === state.focus.r && !lineClosed && !!line && !line.custom && !!line.productId &&
         (!noStock() || commentEditable(line));
     }
 
@@ -4767,6 +4773,7 @@
       var el = rowEl(r);
       var line = state.lines[r];
       if (!el || !line || line.custom) return;
+      el.classList.toggle("fop-line--noprod", !linesLocked() && !line.productId);
       if (sideLayout) refreshSide();
       el.querySelector('[data-cell="desc"]').innerHTML = descHtml(line);
       el.querySelector('[data-cell="cost"]').innerHTML = costHtml(line);
@@ -4840,7 +4847,7 @@
     // row and re-lays the qty overlays ("2 ea"), whose box changes shape.
     var selRow = -1;
     function markSelectedRow() {
-      var r = state.focus.r;
+      var r = lineClosed ? -1 : state.focus.r;
       if (r === selRow) return;
       var old = selRow;
       selRow = r;
@@ -4850,6 +4857,31 @@
       if (old >= 0) showQty(old);
       if (r >= 0) showQty(r);
     }
+
+    // Clicking away from the selected line (anywhere outside its row, both
+    // layouts, 2026-11-05, on request) closes it: its stock / qty break
+    // strips and comment fold away, and on phones it goes compact.
+    // state.focus.r stays, so keyboard shortcuts still know the line; focus
+    // coming back into a line (or a tap on it, phones) opens it again.
+    var lineClosed = false;
+    function closeLine() {
+      if (lineClosed) return;
+      lineClosed = true;
+      if (stripRow >= 0) refreshStrips(stripRow);
+      markSelectedRow();
+    }
+    function openLine() {
+      if (!lineClosed) return;
+      lineClosed = false;
+      markSelectedRow();
+      if (stripRow === state.focus.r) refreshStrips(stripRow);
+    }
+    document.addEventListener("mousedown", function (e) {
+      if (state.view !== "order" || lineClosed || !document.contains(e.target)) return;
+      var row = rowEl(state.focus.r);
+      if (row && row.contains(e.target)) return;
+      closeLine();
+    });
 
     function moveStrips() {
       if (!inlineLayout || stripRow === state.focus.r) return;
@@ -4866,6 +4898,7 @@
       var line = state.lines[r];
       if (!line || line.custom) return;
       state.focus = { r: r, c: state.focus.c };
+      openLine();
       moveStrips();
       var el = rowEl(r);
       var ta = el && el.querySelector("[data-comment]");
@@ -5806,11 +5839,17 @@
     root.addEventListener("click", function (e) {
       if (state.view !== "order" || linesLocked() || !(window.matchMedia && window.matchMedia("(max-width: 767px)").matches)) return;
       var row = e.target.closest && e.target.closest(".fop-grid .fop-line[data-row]");
-      if (!row || row.classList.contains("fop-line--sel") || e.target.closest("button, input, textarea, select, a")) return;
+      if (!row || e.target.closest("button, input, textarea, select, a")) return;
       var r = Number(row.getAttribute("data-row"));
       if (!state.lines[r]) return;
+      if (row.classList.contains("fop-line--sel")) {
+        // An open line: a tap on its product name opens the product box,
+        // like a tap on the id tile (2026-11-05, on request).
+        if (e.target.closest(".fop-cell--desc") && state.lines[r].productId && !state.lines[r].custom) focusCell(r, 0);
+        return;
+      }
       state.focus = { r: r, c: 1 };
-      markSelectedRow();
+      openLine();
       moveStrips();
     });
     root.addEventListener("click", function (e) {
@@ -6122,6 +6161,7 @@
       var t = e.target;
       if (t.classList && t.classList.contains("fop-grid-in")) {
         state.focus = { r: Number(t.getAttribute("data-r")), c: Number(t.getAttribute("data-c")) };
+        openLine();
         markSelectedRow();
         if (state.focus.c === 0) tileProduct(state.focus.r, false);
         if (state.focus.c === 1) showQty(state.focus.r);
