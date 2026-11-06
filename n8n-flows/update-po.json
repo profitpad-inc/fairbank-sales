@@ -1,0 +1,873 @@
+{
+  "name": "e-order-placement: update PO",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "e-order-placement/update-po",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        },
+        "authentication": "jwtAuth"
+      },
+      "id": "6c9904d2-a59e-5e58-911b-819967c92ffc",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "e0e9c3fb-d7a9-5e4d-bd09-a8540bd30a6d",
+      "credentials": {
+        "jwtAuth": {
+          "id": "6sDOPAJdRYI8fpxX",
+          "name": "Fairbank session (JWT)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Body: { e_sorder_id, writer, po?, shipping_instructions?, internal_notes? }.\n// Sets the PO number, shipping instructions and internal notes of that\n// generation (2026-11-06, on request: any order that is not invoiced or\n// cancelled; instructions and notes added the same day). A field left out\n// (null) keeps Eclipse's value; blank clears it (a blank PO was tested and\n// works). At least one field must be sent.\nconst parseId = (raw) => {\n  const m = String(raw || '').trim().toUpperCase().match(/^S?(\\d+)(?:\\.(\\d{1,4}))?$/);\n  if (!m) return null;\n  const oid = 'S' + m[1];\n  const genId = String(Number(m[2] || 1));\n  return { oid, genId, eSorderId: oid + '.' + genId.padStart(4, '0') };\n};\nconst b = $input.first().json.body || {};\nconst fail = (msg) => [{ json: { ok: false, statusCode: 400, body: { success: false, error: msg, step: 'validate' } } }];\nconst id = parseId(b.e_sorder_id);\nif (!id) return fail('Missing or invalid e_sorder_id (expected S1234567.0001).');\nif (!b.writer) return fail('Missing writer (e_user_id)');\nconst text = (v) => (v == null ? null : String(v).trim());\nconst want = { po: text(b.po), instructions: text(b.shipping_instructions), notes: text(b.internal_notes) };\nif (want.po == null && want.instructions == null && want.notes == null) return fail('Nothing to update: send po, shipping_instructions or internal_notes.');\nif (want.po != null && want.po.length > 30) return fail('The PO can be 30 characters at most.');\nreturn [{ json: { ok: true, ...id, writer: String(b.writer).toUpperCase(), want } }];\n"
+      },
+      "id": "400edede-dcd9-5c16-9efb-77ea957582b3",
+      "name": "Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "43ff775a-4767-5f1f-824b-4650ab2120bb",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c80a7dd8-ea2a-5e19-bb9e-99657a62ce10",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "get",
+        "salesOrderId": "={{ $json.oid }}"
+      },
+      "id": "412a6d66-cfda-54d9-b661-620f6cee9029",
+      "name": "Eclipse: get order",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        720,
+        0
+      ],
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "eclipse"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 500
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Invoice and Cancel are final; any other status (Bid included) can take a\n// new PO, shipping instructions and internal notes. Only the fields that\n// differ from the generation are changed; none → 200 unchanged straight away.\nconst v = $('Validate').first().json;\nconst env = $input.first().json;\nconst fail = (statusCode, error, step) => [{ json: { ok: false, statusCode, body: { success: false, error, step } } }];\nif (env.error) return fail(502, 'Eclipse GET /SalesOrders?id=' + v.oid + ' failed: ' + env.error + ' ' + JSON.stringify(env.message || '').substring(0, 500), 'getSalesOrder');\nconst so = (Array.isArray(env.results) ? env.results[0] : env) || {};\nif (!Array.isArray(so.generations) || !so.generations.length) return fail(404, 'Eclipse order ' + v.oid + ' not found.', 'getSalesOrder');\nconst gen = so.generations.find((g) => String(Number(g.generationId)) === v.genId);\nif (!gen) return fail(404, 'Order ' + v.oid + ' has no generation ' + v.genId + '.', 'getSalesOrder');\nconst status = String(gen.status || '');\nif (status === 'Invoice') return fail(409, v.eSorderId + ' is invoiced and can no longer be changed.', 'checkStatus');\nif (status === 'Cancel') return fail(409, v.eSorderId + ' is cancelled and can no longer be changed.', 'checkStatus');\nconst trim = (s) => String(s == null ? '' : s).trim();\nconst cur = { po: trim(gen.poNumber), instructions: trim(gen.shippingInstructions), notes: trim(gen.internalNotes) };\nconst changes = {};\nfor (const k of ['po', 'instructions', 'notes']) {\n  if (v.want[k] != null && v.want[k] !== cur[k]) changes[k] = { from: cur[k], to: v.want[k] };\n}\nif (!Object.keys(changes).length) {\n  return [{ json: { ok: false, statusCode: 200, body: { success: true, unchanged: true, e_sorder_id: v.eSorderId, order_id: v.oid } } }];\n}\nconst has = { po: !!changes.po, instructions: !!changes.instructions, notes: !!changes.notes };\nreturn [{ json: { ok: true, eSorderId: v.eSorderId, status, changes, has } }];\n"
+      },
+      "id": "ec67448c-9df2-5d73-ab7a-69a6df29aea9",
+      "name": "Check status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "0bd0f293-c478-5886-abf8-f965d8549448",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "56d22ea1-7b2f-5b67-b25f-3298c2e51107",
+      "name": "Changed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "updatePONumber",
+        "poNumberOrderId": "={{ $('Check status').first().json.eSorderId }}",
+        "poNumberValue": "={{ $('Check status').first().json.changes.po.to }}"
+      },
+      "id": "2cbc63bd-1f7f-5d8d-878d-8de4e0ce2205",
+      "name": "Eclipse: update PO",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        1680,
+        0
+      ],
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "eclipse"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const c = $('Check status').first().json;\nconst r = $input.first().json;\nif (r.error) {\n  return [{ json: { ok: false, statusCode: 502, body: { success: false, step: 'updatePONumber', changes: c.changes,\n    error: 'Eclipse PUT PO number failed on ' + c.eSorderId + ': ' + r.error + ' ' + JSON.stringify(r.message || '').substring(0, 500) +\n      ' Some changes may already be saved; reload the order to see where it stands.' } } }];\n}\nreturn [{ json: { ok: true } }];\n"
+      },
+      "id": "a5fdb933-3ec3-5bd8-9fc9-979c261b4e2a",
+      "name": "Check PO",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// A change log comment on the generation: what changed (the PO's old and new\n// value; instructions and notes by name only, they can be long), who changed\n// it and from where (same wording as the other order placement flows).\nconst v = $('Validate').first().json;\nconst c = $('Check status').first().json;\nconst parts = [];\nif (c.changes.po) parts.push('PO changed from \"' + (c.changes.po.from || '(blank)') + '\" to \"' + (c.changes.po.to || '(blank)') + '\"');\nif (c.changes.instructions) parts.push('shipping instructions changed');\nif (c.changes.notes) parts.push('internal notes changed');\nconst text = parts.join(', ');\nconst comment = text.charAt(0).toUpperCase() + text.slice(1) + ' by ' + v.writer + ' from the HubSpot Order Placement Webtool';\nreturn [{ json: { orderId: c.eSorderId, comment } }];\n"
+      },
+      "id": "8e941d39-6f7d-5f31-a16c-101583577d8d",
+      "name": "Emit changelog",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4320,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "addOrderChangeLogComment",
+        "changeLogCommentOrderId": "={{ $json.orderId }}",
+        "changeLogComment": "={{ $json.comment }}"
+      },
+      "id": "5bd5b120-acc3-5a5c-a2eb-97d257342b9d",
+      "name": "Eclipse: add change log comment",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        4320,
+        432
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "eclipse"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// A failed comment never fails the update (the changes are saved); it is\n// kept here for troubleshooting. The deal sync reads e_sorder_ids.\nconst id = $('Check status').first().json.eSorderId;\nconst r = $input.first().json;\nreturn [{ json: { e_sorder_ids: [id], changelog_error: r.error ? id + ': ' + r.error : '' } }];\n"
+      },
+      "id": "3cdb9248-4ed1-590a-bca0-fe5293500c57",
+      "name": "Check changelog",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4320,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://n8n.fairbankequipment.com/webhook/update-hs-deal",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ e_sorder_ids: $json.e_sorder_ids }) }}",
+        "options": {}
+      },
+      "id": "cb7a0907-f08f-5aba-925b-09149982fff8",
+      "name": "Trigger HubSpot deal sync",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4560,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const c = $('Check status').first().json;\nlet r = $('Trigger HubSpot deal sync').first().json || {};\n// A non-JSON content type lands the body in `data` as text; parse it.\nif (!r.orders && typeof r.data === 'string') { try { r = JSON.parse(r.data); } catch (e) {} }\n// update-hs-deal answers { message, source, orders: [{ <hs_deal_id>: <e_sorder_id> }] }.\nconst pairs = [];\nfor (const o of (Array.isArray(r.orders) ? r.orders : [])) {\n  for (const [dealId, soId] of Object.entries(o || {})) pairs.push([String(dealId), String(soId)]);\n}\nconst base = (id) => String(id || '').split('.')[0].toUpperCase();\nconst hit = pairs.find((p) => p[1] === c.eSorderId) || pairs.find((p) => base(p[1]) === base(c.eSorderId)) || (pairs.length === 1 ? pairs[0] : null);\nconst hubspotSync = r.error ? { ok: false, error: String(r.error) } : { ok: true, orders: r.orders || null };\nreturn [{ json: { statusCode: 200, body: {\n  success: true,\n  e_sorder_id: c.eSorderId,\n  order_id: c.eSorderId.split('.')[0],\n  status: c.status,\n  changes: c.changes,\n  hs_deal_id: hit ? hit[0] : '',\n  hubspot_sync: hubspotSync,\n} } }];\n"
+      },
+      "id": "7f2bfb0c-f022-50a9-b244-6292dfd07826",
+      "name": "Final",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4800,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode || 200 }}"
+        }
+      },
+      "id": "9eba471e-2455-58b4-8b98-6b95f4efe876",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "f40a6dae-a686-5ec0-919e-f42d8c669c32",
+              "leftValue": "={{ $('Check status').first().json.has.po }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8b5d3677-9070-56f4-b550-b7e0effa6f79",
+      "name": "Has po?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "ab24a968-b0cf-5e8f-8b72-ba93e0a46a55",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "1ba4126c-1c31-5270-b75c-6880098cba25",
+      "name": "PO ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "90ec6392-5663-5fcb-9cb4-2c482cb0223d",
+              "leftValue": "={{ $('Check status').first().json.has.instructions }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "26a92e3f-03c6-562e-a4f5-dba8df7aa772",
+      "name": "Has instructions?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "updateShippingInstructions",
+        "shippingInstructionsOrderId": "={{ $('Check status').first().json.eSorderId }}",
+        "shippingInstructionsValue": "={{ $('Check status').first().json.changes.instructions.to }}"
+      },
+      "id": "82976b7e-ed0f-55dd-951e-aa9cf76b0b32",
+      "name": "Eclipse: update shipping instructions",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        2640,
+        0
+      ],
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "eclipse"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const c = $('Check status').first().json;\nconst r = $input.first().json;\nif (r.error) {\n  return [{ json: { ok: false, statusCode: 502, body: { success: false, step: 'updateShippingInstructions', changes: c.changes,\n    error: 'Eclipse PUT shipping instructions failed on ' + c.eSorderId + ': ' + r.error + ' ' + JSON.stringify(r.message || '').substring(0, 500) +\n      ' Some changes may already be saved; reload the order to see where it stands.' } } }];\n}\nreturn [{ json: { ok: true } }];\n"
+      },
+      "id": "0123acfc-ed12-556c-9d09-0f1216c9cfab",
+      "name": "Check instructions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "b81c4b41-9839-5e20-9004-27af228f7af8",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4ee632fb-1b4d-5378-a14b-cc25a21bdf3a",
+      "name": "Instructions ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "44d451b8-aa80-552d-88fb-eb25cffa752b",
+              "leftValue": "={{ $('Check status').first().json.has.notes }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "66f5f1c5-511b-587d-b67b-9eda48696b57",
+      "name": "Has notes?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3360,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "salesOrder",
+        "operation": "updateInternalNotes",
+        "internalNotesOrderId": "={{ $('Check status').first().json.eSorderId }}",
+        "internalNotesValue": "={{ $('Check status').first().json.changes.notes.to }}"
+      },
+      "id": "5b509a21-3e90-528d-a775-2929f3e9f9d7",
+      "name": "Eclipse: update internal notes",
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        3600,
+        0
+      ],
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "eclipse"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const c = $('Check status').first().json;\nconst r = $input.first().json;\nif (r.error) {\n  return [{ json: { ok: false, statusCode: 502, body: { success: false, step: 'updateInternalNotes', changes: c.changes,\n    error: 'Eclipse PUT internal notes failed on ' + c.eSorderId + ': ' + r.error + ' ' + JSON.stringify(r.message || '').substring(0, 500) +\n      ' Some changes may already be saved; reload the order to see where it stands.' } } }];\n}\nreturn [{ json: { ok: true } }];\n"
+      },
+      "id": "99307b95-2205-5795-8c34-95f01bfeabf7",
+      "name": "Check notes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3840,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "7e29c90e-05ea-5f67-92db-e8ad62e05884",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "6a9f6d7a-870a-54d5-af72-fd9e8877827a",
+      "name": "Notes ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        4080,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: get order",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: get order": {
+      "main": [
+        [
+          {
+            "node": "Check status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check status": {
+      "main": [
+        [
+          {
+            "node": "Changed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Changed?": {
+      "main": [
+        [
+          {
+            "node": "Has po?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has po?": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: update PO",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Has instructions?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: update PO": {
+      "main": [
+        [
+          {
+            "node": "Check PO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check PO": {
+      "main": [
+        [
+          {
+            "node": "PO ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PO ok?": {
+      "main": [
+        [
+          {
+            "node": "Has instructions?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has instructions?": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: update shipping instructions",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Has notes?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: update shipping instructions": {
+      "main": [
+        [
+          {
+            "node": "Check instructions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check instructions": {
+      "main": [
+        [
+          {
+            "node": "Instructions ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Instructions ok?": {
+      "main": [
+        [
+          {
+            "node": "Has notes?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has notes?": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: update internal notes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Emit changelog",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: update internal notes": {
+      "main": [
+        [
+          {
+            "node": "Check notes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check notes": {
+      "main": [
+        [
+          {
+            "node": "Notes ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notes ok?": {
+      "main": [
+        [
+          {
+            "node": "Emit changelog",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emit changelog": {
+      "main": [
+        [
+          {
+            "node": "Eclipse: add change log comment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eclipse: add change log comment": {
+      "main": [
+        [
+          {
+            "node": "Check changelog",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check changelog": {
+      "main": [
+        [
+          {
+            "node": "Trigger HubSpot deal sync",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger HubSpot deal sync": {
+      "main": [
+        [
+          {
+            "node": "Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

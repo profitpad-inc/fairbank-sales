@@ -26,6 +26,9 @@
 //   e-order-placement/order         reads an existing order (one generation)
 //   e-order-placement/update-bid    changes a bid (lines, header, status)
 //   e-order-placement/cancel-order  sets an order's status to Cancel
+//   e-order-placement/update-po     changes the PO, shipping instructions
+//                                   and internal notes of an order that is
+//                                   not a bid, invoiced or cancelled
 //   e-order-placement/customer      one call per customer: the customer,
 //                                   its bill-to and ship-tos (Eclipse) plus
 //                                   HubSpot record ids and coordinates
@@ -53,6 +56,7 @@
     order: N8N + "e-order-placement/order",
     updateBid: N8N + "e-order-placement/update-bid",
     cancelOrder: N8N + "e-order-placement/cancel-order",
+    updatePo: N8N + "e-order-placement/update-po",
     pickUpNow: N8N + "e-order-placement/pick-up-now",
     customer: N8N + "e-order-placement/customer",
     customerOrders: N8N + "e-order-placement/customer-orders",
@@ -529,16 +533,36 @@
     }
 
     // Existing order: the customers are always locked. A Bid unlocks its
-    // lines, the shipping fields of its header and outside sales (BID_HEAD,
-    // sent by Update Bid); PO, release and every field of any other order
-    // stay locked.
+    // lines, the shipping fields of its header, PO and outside sales
+    // (BID_HEAD, sent by Update Bid). Any other order that is not invoiced or
+    // cancelled unlocks only its PO, shipping instructions and internal notes
+    // (ORDER_HEAD, sent by Update Order; 2026-11-06, on request). Release
+    // stays locked.
     // headLocked(key): that header field; headLocked(): the whole header.
-    var BID_HEAD = ["shipVia", "shipBranch", "shipDate", "requiredDate", "shippingInstructions", "internalNotes", "outsideSales"];
+    var BID_HEAD = ["shipVia", "shipBranch", "shipDate", "requiredDate", "shippingInstructions", "internalNotes", "outsideSales", "po"];
     function headLocked(key) {
       var ex = state.existing;
       if (!ex) return false;
-      if (!ex.editable) return true;
+      if (!ex.editable) return !(ex.cancellable && key != null && ORDER_HEAD.indexOf(key) >= 0);
       return key != null && BID_HEAD.indexOf(key) < 0;
+    }
+    var ORDER_HEAD = ["po", "shippingInstructions", "internalNotes"];
+    // An order that is not a bid, invoiced or cancelled (Update Order).
+    function orderFieldsOnly() {
+      var ex = state.existing;
+      return !!(ex && !ex.editable && ex.cancellable);
+    }
+    // Its ORDER_HEAD fields that differ from Eclipse: [{ key, label, from, to }].
+    function orderFieldChanges() {
+      var ex = state.existing, h = state.header;
+      if (!orderFieldsOnly()) return [];
+      var t = function (v) { return String(v == null ? "" : v).trim(); };
+      return [
+        { key: "po", label: "PO", from: ex.po, to: h.po },
+        { key: "shippingInstructions", label: "Shipping instructions", from: ex.shipping_instructions, to: h.shippingInstructions },
+        { key: "internalNotes", label: "Internal notes", from: ex.internal_notes, to: h.internalNotes },
+      ].filter(function (c) { return t(c.from) !== t(c.to); })
+        .map(function (c) { return { key: c.key, label: c.label, from: t(c.from), to: t(c.to) }; });
     }
     function linesLocked() { return !!state.existing && !state.existing.editable; }
 
@@ -785,7 +809,9 @@
     // One call returns every generation (Eclipse GET on the base order id);
     // the tabs then switch between them without another request. An id
     // without a suffix (S2659464) opens the lowest generation.
-    function loadExistingOrder(id) {
+    // pre: the order already read (the customer search's order lookup), so
+    // it is not read again.
+    function loadExistingOrder(id, pre) {
       state.orderId = String(id).trim().toUpperCase();
       state.view = "loading";
       state.loadingMsg = "Loading order " + state.orderId + "…";
@@ -799,7 +825,7 @@
       hsQuotes = {};
       render();
 
-      getJson(API.order, { e_sorder_id: state.orderId }, LOAD_TIMEOUT_MS)
+      (pre ? Promise.resolve(pre) : getJson(API.order, { e_sorder_id: state.orderId }, LOAD_TIMEOUT_MS))
         .then(function (o) {
           state.order = o;
           return openGen(o.generation_id);
@@ -842,6 +868,7 @@
 
     function hasUnsavedEdits() {
       saveGenEdits();
+      if (orderFieldChanges().length) return true;
       return Object.keys(state.genEdits).some(function (k) { return state.genEdits[k].dirty; });
     }
 
@@ -963,36 +990,67 @@
       var pid = String(productId);
       if (quoteCache[pid] && !quoteCache[pid].error) return;
       quoteCache[pid] = { loading: true };
-      inquiryQueue.push(pid);
-      pumpQueue();
+      if (inquiryQueue.indexOf(pid) < 0) inquiryQueue.push(pid);
+      // Products asked for in the same pass (a loaded order, a customer
+      // change, URL products) go out together on the next tick.
+      if (!pumpTimer) pumpTimer = setTimeout(function () { pumpTimer = null; pumpQueue(); }, 0);
     }
 
-    // At most 3 pricing lookups in flight; each one is a separate call to
-    // the product-inquiry flow (it prices one product per request).
+    // Pricing lookups (2026-11-06, on request): the product-inquiry flow
+    // prices several products in one call (e_product_id=60144,246) and lists
+    // them under products, so queued products go in batches of up to
+    // INQUIRY_BATCH, at most 3 calls in flight. Products in inquirySingles
+    // are asked for one per call: a batch the flow could not answer per
+    // product (a flow without the products list answers for the first
+    // product only, and one bad product id can fail the whole Eclipse call).
+    var INQUIRY_BATCH = 25;
     var inquiryQueue = [];
+    var inquirySingles = [];
     var inFlight = 0;
+    var pumpTimer = null;
     function pumpQueue() {
-      while (inFlight < 3 && inquiryQueue.length) {
-        (function (pid) {
-          inFlight++;
-          var cust = String(pricingCustomerId() || "");
-          // An answer for a pricing customer that is no longer current is dropped.
-          var stale = function () { return quoteCacheCust && cust !== quoteCacheCust; };
-          getJson(API.inquiry, { e_customer_id: cust, e_product_id: pid })
-            .then(function (data) {
-              if (stale()) return;
-              var err = inquiryError(data);
-              quoteCache[pid] = err ? { error: err } : { data: data };
-            })
-            .catch(function (err) { if (!stale()) quoteCache[pid] = { error: err.message }; })
-            .then(function () {
-              inFlight--;
-              refreshLinesFor(pid);
-              if (state.customModal && String(state.customModal.draft.variationSku) === pid) refreshCustomOrig();
-              pumpQueue();
-            });
-        })(inquiryQueue.shift());
+      while (inFlight < 3 && (inquirySingles.length || inquiryQueue.length)) {
+        sendInquiry(inquirySingles.length ? [inquirySingles.shift()] : inquiryQueue.splice(0, INQUIRY_BATCH));
       }
+    }
+
+    function sendInquiry(pids) {
+      inFlight++;
+      var cust = String(pricingCustomerId() || "");
+      // An answer for a pricing customer that is no longer current is dropped.
+      var stale = function () { return quoteCacheCust && cust !== quoteCacheCust; };
+      var settle = function (pid, entry) { if (quoteCache[pid] && quoteCache[pid].loading) quoteCache[pid] = entry; };
+      getJson(API.inquiry, { e_customer_id: cust, e_product_id: pids.join(",") })
+        .then(function (data) {
+          if (stale()) return;
+          var list = Array.isArray(data.products) ? data.products : null;
+          if (pids.length > 1) {
+            var allFailed = list && list.length && list.every(function (d) { return inquiryError(d); });
+            if (!list || (allFailed && data.error_message)) {
+              inquirySingles = inquirySingles.concat(pids);
+              pids = [];
+              return;
+            }
+          }
+          var byId = {};
+          (list || [Object.assign({}, data, { e_product_id: pids[0] })]).forEach(function (d) { byId[String(d.e_product_id)] = d; });
+          pids.forEach(function (pid) {
+            var d = byId[pid];
+            var err = d ? inquiryError(d) : "Pricing lookup failed.";
+            settle(pid, err ? { error: err } : { data: d });
+          });
+        })
+        .catch(function (err) {
+          if (!stale()) pids.forEach(function (pid) { settle(pid, { error: err.message }); });
+        })
+        .then(function () {
+          inFlight--;
+          pids.forEach(function (pid) {
+            refreshLinesFor(pid);
+            if (state.customModal && String(state.customModal.draft.variationSku) === pid) refreshCustomOrig();
+          });
+          pumpQueue();
+        });
     }
 
     // ── Pricing / stock derivations ────────────────────────────────────────
@@ -1624,7 +1682,7 @@
       return {
         ship_via: h.shipVia, ship_branch: h.shipBranch, ship_date: h.shipDate, required_date: h.requiredDate,
         shipping_instructions: h.shippingInstructions, internal_notes: h.internalNotes,
-        outside_sales: h.outsideSales,
+        outside_sales: h.outsideSales, po: String(h.po || "").trim(),
         // The other branch rows (lines moved off the bid's branch).
         branches: branchShipPayload(),
       };
@@ -1645,6 +1703,7 @@
       add("Shipping instructions", ex.shipping_instructions, h.shippingInstructions);
       add("Internal notes", ex.internal_notes, h.internalNotes);
       add("Outside sales", ex.outside_sales, h.outsideSales);
+      add("PO", ex.po, h.po);
       // The other branch rows: their lines go to that branch's generation
       // (an existing bid one, or a new one) with these values.
       shipRows().forEach(function (b) {
@@ -1803,6 +1862,15 @@
         if (!viaAllowed(b, s.shipVia)) return { msg: viaLabel(s.shipVia) + " is not available at branch " + branchName(b) + ": pick another ship via.", branch: b, key: "shipVia" };
         if (!s.shipDate) return { msg: "Pick a ship date" + on(b) + ".", branch: b, key: "shipDate" };
         if (!s.requiredDate) return { msg: "Pick a required date" + on(b) + ".", branch: b, key: "requiredDate" };
+        // Neither date can be before today (2026-11-06, on request: a bid
+        // keeps its old dates, so Update Bid checks them too). keys: every
+        // past date in the row, all flashed.
+        var today = isoDate(0);
+        var past = ["shipDate", "requiredDate"].filter(function (k) { return s[k] < today; });
+        if (past.length) {
+          var what = past.length > 1 ? "Ship date and required date are" : past[0] === "shipDate" ? "Ship date is" : "Required date is";
+          return { msg: what + " before today" + on(b) + ": pick " + (past.length > 1 ? "new dates." : "a new date."), branch: b, key: past[0], keys: past };
+        }
         if (s.requiredDate < s.shipDate) return { msg: "Required date cannot be before ship date" + on(b) + ".", branch: b, key: "requiredDate" };
       }
       return null;
@@ -1948,14 +2016,28 @@
       // dates as Eclipse has them (e.g. a cancelled ship date in 2241); there
       // is nothing to fix, so no red outline.
       if (linesLocked()) return false;
+      // A bid as Eclipse has it can already have its dates the wrong way
+      // round: red only once the rep has changed something (2026-11-06, on
+      // request), like the past ship date (pastShipDateOn).
+      if (state.existing && !bidChanges().any) return false;
       return !!(h && h.requiredDate && h.shipDate && h.requiredDate < h.shipDate);
+    }
+
+    // A bid with changes on the page whose ship date (that branch row's) is
+    // before today: the ship date box turns red (2026-11-06, on request),
+    // since Update Bid won't save until it moves (shipProblem()).
+    function pastShipDateOn(s) {
+      var ex = state.existing;
+      if (!ex || !ex.editable || !bidChanges().any) return false;
+      return !!(s && s.shipDate && s.shipDate < isoDate(0));
     }
 
     function refreshDateError() {
       datePickers.forEach(function (fp) {
-        if (fp.input.getAttribute("data-date") === "requiredDate" && fp.altInput) {
-          fp.altInput.classList.toggle("fop-input--err", dateErrorOn(shipTargetOf(fp.input)));
-        }
+        if (!fp.altInput || !fp.input.closest("#fop-head")) return;
+        var key = fp.input.getAttribute("data-date");
+        if (key === "requiredDate") fp.altInput.classList.toggle("fop-input--err", dateErrorOn(shipTargetOf(fp.input)));
+        if (key === "shipDate") fp.altInput.classList.toggle("fop-input--err", pastShipDateOn(shipTargetOf(fp.input)));
       });
     }
 
@@ -2204,15 +2286,15 @@
 
     function viewCustomerSearch() {
       return (
-        '<div class="fop-wrap fop-wrap--narrow">' + titleHtml("Order Placement", "Choose a customer") +
+        '<div class="fop-wrap fop-wrap--narrow">' + titleHtml("Order Placement", "Choose a customer or order") +
         '<div class="fop-card">' +
-        '<label class="fop-label" for="fop-customer-search">Customer name or Eclipse ID</label>' +
+        '<label class="fop-label" for="fop-customer-search">Customer name, Eclipse ID or order number</label>' +
         '<div class="fop-ac">' +
         '<input id="fop-customer-search" class="fop-input" autocomplete="off" spellcheck="false" ' +
         'placeholder="Type at least 2 characters…" role="combobox" aria-expanded="false" aria-controls="fop-customer-list">' +
         '<div class="fop-ac__list" id="fop-customer-list" role="listbox"></div>' +
         "</div>" +
-        '<div class="fop-hint">↑ ↓ to move, Enter to pick. Prefix with a dot (.12345) to search by ID.</div>' +
+        '<div class="fop-hint">↑ ↓ to move, Enter to pick. Prefix with a dot (.12345) to search by ID. Start with an S (S2741194) to find an order.</div>' +
         "</div>" +
         '<div class="fop-row fop-xlinks"><a class="fop-xlink" href="../product-lookup/">Find an order by product</a>' +
         '<a class="fop-xlink" href="' + esc(newCustomerUrl()) + '">New customer</a></div>' +
@@ -3804,6 +3886,11 @@
           ">Update Bid <span class=\"fop-key\">" + altKey("B") + "</span></button>" +
           '<button class="fop-btn" data-action="convert-bid"' + (convReason ? ' aria-disabled="true" title="' + esc(convReason) + '"' : "") +
           '><span class="fop-lbl-full">Convert to Order</span><span class="fop-lbl-short">To Order</span> <span class="fop-key fop-key--dark">' + altKey("O") + "</span></button>";
+      } else if (orderFieldsOnly()) {
+        // Not a bid, invoiced or cancelled: only PO, shipping instructions
+        // and internal notes can change.
+        var ordReason = orderUpdateBlockedReason();
+        html += '<button class="fop-btn" data-action="update-order"' + (ordReason ? ' aria-disabled="true" title="' + esc(ordReason) + '"' : "") + ">Update Order</button>";
       }
       return html;
     }
@@ -3813,9 +3900,9 @@
       var ex = state.existing;
       if (!ex) return "";
       var msg = ex.editable
-        ? "On a bid the lines, ship via, ship branch, dates and notes can be changed (Update Bid), and Convert to Order makes it an order."
-        : "This order is " + statusLabel(ex.status) + ", so it can't be edited here." +
-          (ex.cancellable ? " It can still be cancelled." : "");
+        ? "On a bid the lines, PO, ship via, ship branch, dates and notes can be changed (Update Bid), and Convert to Order makes it an order."
+        : ex.cancellable ? "This order is " + statusLabel(ex.status) + ", so only its PO, shipping instructions and internal notes can be changed here (Update Order). It can still be cancelled."
+        : "This order is " + statusLabel(ex.status) + ", so it can't be edited here.";
       var n = state.notice;
       return (n ? '<div class="fop-alert fop-alert--success">' + esc(n.text) + "</div>" +
           (n.warning ? '<div class="fop-alert fop-alert--warning">' + esc(n.warning) + "</div>" : "") +
@@ -4827,6 +4914,7 @@
 
     function confirmHtml() {
       if (state.confirm.mode === "update" || state.confirm.mode === "convert") return updateConfirmHtml();
+      if (state.confirm.mode === "po") return orderConfirmHtml();
       var h = state.header;
       var isBid = confirmIsBid();
       var t = orderTotal();
@@ -4944,6 +5032,25 @@
       );
     }
 
+    // Update Order on an order that is not a bid: each changed field, old → new.
+    function orderConfirmHtml() {
+      var ex = state.existing;
+      return (
+        '<div class="fop-modal" role="dialog" aria-modal="true" aria-labelledby="fop-confirm-title">' +
+        '<div class="fop-modal__box">' +
+        '<h2 class="fop-h2" id="fop-confirm-title">Update order ' + esc(ex.e_sorder_id) + "?</h2>" +
+        '<ul class="fop-confirm-head">' + orderFieldChanges().map(function (c) {
+          return "<li><span>" + esc(c.label) + "</span> " + esc(c.from || "--") + " → " + esc(c.to || "--") + "</li>";
+        }).join("") + "</ul>" +
+        placeErrorHtml(state.placeError) +
+        '<div class="fop-row fop-row--end">' +
+        '<button class="fop-btn fop-btn--ghost" data-action="cancel-place"' + (state.placing ? " disabled" : "") + ">Back <span class=\"fop-key\">Esc</span></button>" +
+        '<button class="fop-btn" data-action="confirm-place"' + (state.placing ? " disabled" : "") + ">" +
+        (state.placing ? "Updating…" : 'Update Order <span class="fop-key fop-key--dark">Enter</span>') +
+        "</button></div></div></div>"
+      );
+    }
+
     function viewDone() {
       var r = state.result || {};
       var c = state.customer || {};
@@ -4952,11 +5059,12 @@
       // the HubSpot sync failed or had not made the deal yet.
       var dealId = r.hs_deal_id || "";
       var soId = esc(r.e_sorder_id || r.order_id || "(no id returned)");
-      var title = { bid: "Bid placed", order: "Order placed", update: "Bid updated", cancel: r.what === "bid" ? "Bid cancelled" : "Order cancelled" }[r.mode];
+      var title = { bid: "Bid placed", order: "Order placed", update: "Bid updated", po: "Order updated", cancel: r.what === "bid" ? "Bid cancelled" : "Order cancelled" }[r.mode];
       var msg = r.mode === "update"
         ? (r.unchanged ? "Eclipse sales order <b>" + soId + "</b> already matched; nothing was changed."
           : "Eclipse sales order <b>" + soId + "</b> was updated.")
         : r.mode === "cancel" ? "Eclipse sales order <b>" + soId + "</b> was cancelled."
+        : r.mode === "po" ? "Eclipse sales order <b>" + soId + "</b> was updated."
         : "Eclipse sales order <b>" + soId + "</b> was created for " + esc(state.shipTo ? state.shipTo.name : "") + ".";
       return (
         '<div class="fop-wrap fop-wrap--narrow">' + titleHtml("Order Placement", title) +
@@ -4966,7 +5074,7 @@
           : "") +
         '<div class="fop-row">' +
         (r.mode === "update" ? '<button class="fop-btn fop-btn--ghost" data-action="reload-order">Back to bid</button>' : "") +
-        (r.mode === "cancel" ? '<button class="fop-btn fop-btn--ghost" data-action="reload-order">Back to order</button>' : "") +
+        (r.mode === "cancel" || r.mode === "po" ? '<button class="fop-btn fop-btn--ghost" data-action="reload-order">Back to order</button>' : "") +
         '<button class="fop-btn" data-action="new-order">New order, same ship-to <span class="fop-key fop-key--dark">' + altKey("O") + '</span></button>' +
         '<button class="fop-btn fop-btn--ghost" data-action="change-customer">Change customer</button>' +
         (dealId ? '<a class="fop-btn fop-btn--ghost" href="' + HS_DEAL + encodeURIComponent(dealId) + '" target="_blank" rel="noopener">HS Deal ' + EXT_ICON + "</a>" : "") +
@@ -5136,11 +5244,15 @@
       var ord = root.querySelector("[data-action=place-order]");
       var upd = root.querySelector("[data-action=update-bid]");
       var conv = root.querySelector("[data-action=convert-bid]");
+      var upo = root.querySelector("[data-action=update-order]");
+      if (upo) setSoftDisabled(upo, orderUpdateBlockedReason());
       if (bid) setSoftDisabled(bid, placeBlockedReason("bid"));
       if (ord) setSoftDisabled(ord, placeBlockedReason("order"));
       if (upd) setSoftDisabled(upd, placeBlockedReason("update"));
       if (conv) setSoftDisabled(conv, placeBlockedReason("convert"));
       refreshQuoteBtn();
+      // A past ship date turns red once the bid has a change.
+      refreshDateError();
       // Lines on several branches: the hint under Ship branch.
       refreshShipRows();
     }
@@ -5309,12 +5421,16 @@
         acClose();
         ac = { input: input, list: list, kind: kind, r: r, items: [], active: 0 };
       }
+      // The customer box switches between customers and an order lookup.
+      ac.kind = kind;
       ac.items = items || [];
       ac.active = 0;
       if (message) {
         list.innerHTML = '<div class="fop-ac__msg">' + esc(message) + "</div>";
       } else {
         list.innerHTML = ac.items.map(function (it, i) {
+          if (kind === "order") return '<div class="fop-ac__item' + (i === 0 ? " fop-ac__item--active" : "") + '" data-ac="' + i + '" role="option">' +
+            '<span class="fop-badge">' + esc(it.e_sorder_id) + "</span> " + esc(orderHitLabel(it)) + "</div>";
           var badge = kind === "customer" ? it.e_customer_id : it.e_product_id;
           var label = kind === "customer" ? it.name : it.description;
           return '<div class="fop-ac__item' + (i === 0 ? " fop-ac__item--active" : "") + '" data-ac="' + i + '" role="option">' +
@@ -5338,6 +5454,7 @@
       var kind = ac.kind, r = ac.r, item = ac.items[i];
       acClose();
       if (kind === "customer") loadCustomer(item.e_customer_id);
+      else if (kind === "order") loadExistingOrder(item.e_sorder_id, item.order);
       else if (kind === "variation") pickVariation(item);
       else setProduct(r, item);
     }
@@ -5372,11 +5489,53 @@
       return hit.concat(items.filter(function (p) { return String(p.e_product_id) !== FREIGHT_PRODUCT_ID; }));
     }
 
+    // Customer search: an S and at least 5 digits (S2741194, S2741194.001,
+    // S2729661.0004) looks up an order instead of customers (2026-11-06,
+    // on request). A trailing dot is dropped while typing the generation.
+    var ORDER_SEARCH = /^S\d{5,}(\.\d*)?$/i;
+    function orderSearchId(q) {
+      return ORDER_SEARCH.test(q) ? q.toUpperCase().replace(/\.$/, "") : "";
+    }
+
+    // One generation in the order lookup's list: status, ship-to, total.
+    function orderHitLabel(g) {
+      var total = g.order_total != null ? g.order_total : g.sales_total;
+      return [statusLabel(g.status), g.ship_to_name, total != null ? money(total) : ""]
+        .filter(Boolean).join(" · ");
+    }
+
+    // Every generation of the order (e-order-placement/order), the typed
+    // generation first. Each item carries the whole order, so a pick opens
+    // it without reading it again.
+    function searchOrder(id) {
+      return getJson(API.order, { e_sorder_id: id }, LOAD_TIMEOUT_MS).then(function (o) {
+        var gens = (o.generations || []).map(function (g) { return Object.assign({ order: o }, g); });
+        var want = /\.\d+$/.test(id) ? Number(id.split(".")[1]) : null;
+        return gens.filter(function (g) { return g.generation_id === want; })
+          .concat(gens.filter(function (g) { return g.generation_id !== want; }));
+      }).catch(function (err) {
+        // The flow answers 404 for an order or generation Eclipse does not have.
+        if (err && err.status === 404) return [];
+        throw err;
+      });
+    }
+
     var acSearch = debounce(function (input, kind, r) {
       var q = input.value.trim();
       // Focus already left (a pick, or a click elsewhere before the delay ran).
       if (document.activeElement !== input) return;
       if (q.length < 2) { acClose(); return; }
+      var oid = kind === "customer" && orderSearchId(q);
+      if (oid) {
+        acRender(input, "order", null, [], "Looking up order " + oid + "…");
+        searchOrder(oid).then(function (items) {
+          if (document.activeElement !== input || input.value.trim() !== q) return;
+          acRender(input, "order", null, items, items.length ? null : "No order " + oid + " found");
+        }).catch(function (err) {
+          if (document.activeElement === input && input.value.trim() === q) acRender(input, "order", null, [], "Order lookup failed: " + err.message);
+        });
+        return;
+      }
       acRender(input, kind, r, [], "Searching…");
       var req = kind === "customer"
         ? getJson(API.inquiry, { e_customer_name: q }).then(function (d) { return d.e_customers || []; })
@@ -5408,8 +5567,10 @@
       if (at) {
         if (shipRows().length > 1) openShipTab(at.branch);
         var row = root.querySelector('#fop-head [data-ship-row="' + at.branch + '"]');
-        var box = row && (row.querySelector('[data-head="' + at.key + '"]') || row.querySelector('[data-date="' + at.key + '"]'));
-        flashField(box && box._flatpickr && box._flatpickr.altInput ? box._flatpickr.altInput : box);
+        (at.keys || [at.key]).forEach(function (key) {
+          var box = row && (row.querySelector('[data-head="' + key + '"]') || row.querySelector('[data-date="' + key + '"]'));
+          flashField(box && box._flatpickr && box._flatpickr.altInput ? box._flatpickr.altInput : box);
+        });
         return;
       }
       var field =
@@ -5427,7 +5588,7 @@
 
     function requestPlace(mode) {
       if (state.placing) return;
-      var blocked = placeBlockedReason(mode);
+      var blocked = mode === "po" ? orderUpdateBlockedReason() : placeBlockedReason(mode);
       if (blocked) {
         flashBlockedField(blocked);
         return;
@@ -5488,6 +5649,7 @@
             // Pick Up Now brings its own text (then updates it while printing).
             text: data.noticeText ? data.noticeText : data.mode === "cancel" ? what + (data.e_sorder_id || id) + " cancelled."
               : placed ? (data.mode === "bid" ? "Bid " : "Order ") + (data.e_sorder_id || id) + " placed." + splitNote(data)
+              : data.mode === "po" ? (data.unchanged ? "Nothing to update; the order already matched Eclipse." : "Order updated" + savedAt(o) + ".")
               : data.mode === "convert" ? "Bid converted to an order (" + statusLabel(data.status) + ")" + savedAt(o) + "." + movedNote(data)
               : data.unchanged ? "Nothing to update; the bid already matched Eclipse." : "Bid updated" + savedAt(o) + "." + movedNote(data),
             // create-order: a generation for another branch could not be
@@ -5620,6 +5782,45 @@
           state.ordersList = null;  // the list shows the old status
           // Back on the order, now shown as cancelled (the dialog stays on
           // "Cancelling…" until it has loaded).
+          return reopenAfterSave(data.e_sorder_id || ex.e_sorder_id, data);
+        })
+        .catch(function (err) {
+          state.placeError = placeErrorFrom(err);
+        })
+        .then(function () {
+          state.placing = false;
+          render();
+        });
+    }
+
+    // Update Order: why it can't be sent yet, or null. A "SEE INSTRUCTION"
+    // ship via still needs shipping instructions.
+    function orderUpdateBlockedReason() {
+      if (!orderFieldsOnly()) return "Only an order that is not invoiced or cancelled can be changed here.";
+      if (!orderFieldChanges().length) return "No changes to save.";
+      if (seeInstructionReason()) return seeInstructionReason();
+      if (!user.e_user_id) return "Sign in again: no Eclipse user on this session.";
+      return null;
+    }
+
+    // update-po: the PO, shipping instructions and internal notes of this
+    // generation (the flow changes only the ones that differ), then back on
+    // the order, reloaded from Eclipse.
+    function updateOrderFields() {
+      var ex = state.existing, h = state.header;
+      var t = function (v) { return String(v == null ? "" : v).trim(); };
+      state.placing = true;
+      state.placeError = null;
+      render();
+      postJson(API.updatePo, {
+        e_sorder_id: ex.e_sorder_id, writer: user.e_user_id,
+        po: t(h.po), shipping_instructions: t(h.shippingInstructions), internal_notes: t(h.internalNotes),
+      })
+        .then(function (data) {
+          data.mode = "po";
+          data.what = "order";
+          state.result = data;
+          state.ordersList = null;  // the list shows the old PO
           return reopenAfterSave(data.e_sorder_id || ex.e_sorder_id, data);
         })
         .catch(function (err) {
@@ -5820,6 +6021,7 @@
       var mode = state.confirm.mode;
       var h = state.header;
       if (mode === "update") { updateBid(); return; }
+      if (mode === "po") { updateOrderFields(); return; }
       // An order needs a status picked in the dialog; blank flashes the box.
       if ((mode === "order" || mode === "convert") && !h.orderStatus) {
         var st = root.querySelector("#fop-confirm-status");
@@ -6149,6 +6351,7 @@
           break;
         }
         case "update-bid": requestPlace("update"); break;
+        case "update-order": requestPlace("po"); break;
         case "convert-bid": requestPlace("convert"); break;
         case "pick-branch": var pb = el.getAttribute("data-branch"); commitFocusedBox(); keepKeyboardDown(); pickBranch(r, pb); noRefocus = false; break;
         case "branch-menu": commitFocusedBox(); keepKeyboardDown(); state.branchMenu = state.branchMenu === r ? null : r; render(); break;
@@ -6228,6 +6431,9 @@
       if (state.quoteModal && t.id === "fop-quote-email") { onEmailInput(t, e); return; }
       if (state.customModal && t.hasAttribute("data-cf")) { onCustomField(t); return; }
       if (state.cancelAsk && t.hasAttribute("data-lost")) { onCancelLostField(t); return; }
+      // An existing order's PO: live, so Update Bid / Update Order turn on as
+      // the rep types.
+      if (state.existing && t.getAttribute("data-head") === "po") { state.header.po = t.value; refreshTotals(); return; }
       if (state.logModal && t.hasAttribute("data-log-note")) {
         state.logNote.text = t.value;
         autosize(t);
@@ -6639,6 +6845,7 @@
           e.preventDefault();
           if (ac && ac.items.length) acPick(ac.active);
           else if (/^\.?\d+$/.test(t.value.trim())) loadCustomer(t.value.trim().replace(/^\./, ""));
+          else if (orderSearchId(t.value.trim())) { acClose(); loadExistingOrder(orderSearchId(t.value.trim())); }
         } else if (e.key === "Escape") acClose();
         return;
       }

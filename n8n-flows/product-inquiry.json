@@ -1,0 +1,647 @@
+{
+  "name": "Product Inquiry Tool Webhook",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "fairbank-product-inquiry",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -176,
+        288
+      ],
+      "id": "5ae6cc80-43c5-485f-9ec3-cdf4a8e94a1f",
+      "name": "Webhook",
+      "webhookId": "274f9db9-ad44-435d-896f-ea0c31ebf85b"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "e7c91f30-47a7-4615-8429-5a2e1a50d029",
+                    "leftValue": "={{ $('Webhook').item.json.query.e_product_id }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "string",
+                      "operation": "exists",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "fa074bd2-79b2-4364-a5bd-b0c65667dcc4",
+                    "leftValue": "={{ $('Webhook').item.json.query.e_product_name }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "string",
+                      "operation": "exists",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "0dab22ff-956d-4558-bccc-1dd76a590054",
+                    "leftValue": "={{ $('Webhook').item.json.query.e_customer_name }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "string",
+                      "operation": "exists",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "allMatchingOutputs": false
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        272,
+        160
+      ],
+      "id": "2892b86f-e79d-4f0c-86b3-5b812d263fb6",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "e7c91f30-47a7-4615-8429-5a2e1a50d029",
+                    "leftValue": "={{ \n$json.headers.origin?.includes(\"43793456.hubspotpreview-na1.com\") || \n$json.headers.origin?.includes(\"sales.fairbankequipment.com\") || \n$json.headers.origin?.includes(\"43793456.hs-sites.com\") || \n$json.headers.origin?.includes(\"profitpad-inc.github.io\") || \n$json.headers['tempauth']?.includes(\"claude19oct2026\") || $json.headers['x-forwarded-for'] === \"134.231.39.79\" || $json.headers['x-forwarded-for'] === \"134.231.51.33\"\n}}",
+                    "rightValue": "https://43793456.hs-sites.com",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        48,
+        288
+      ],
+      "id": "9d73787d-fd14-4ac3-a323-6bb22ae8e590",
+      "name": "from hs-sites?"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"error\": \"Unauthenticated.\"\n}",
+        "options": {
+          "responseCode": 401,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "={{ ['https://profitpad-inc.github.io', 'https://sales.fairbankequipment.com', 'http://localhost'].includes($('Webhook').item.json.headers.origin) ? $('Webhook').item.json.headers.origin : '' }}"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        272,
+        384
+      ],
+      "id": "8669f588-f7fb-47de-8301-b4a784fd54b1",
+      "name": "Respond Unauthenticated"
+    },
+    {
+      "parameters": {
+        "content": "[HS Product Inquiry Tool](https://43793456.hs-sites.com/product-inquiry?e_customer_id=7770)\n\n[Edit HS Landing Page](https://app.hubspot.com/pages/43793456/editor/212771041073/content)\n\n[HS Design Manager](https://app.hubspot.com/design-manager/43793456/modules/212771043720)\n\n[HS Inquiry Custom Event](https://app.hubspot.com/events/43793456/manage/68953537/overview)\n[Usage Report](https://app.hubspot.com/reports-dashboard/43793456/view/22502192/349737749)",
+        "height": 208,
+        "width": 272
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -176,
+        -64
+      ],
+      "typeVersion": 1,
+      "id": "ec1c9d73-068d-4613-9224-5bc99e5252dd",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "resource": "product",
+        "operation": "getProductInventoryPricingInquiry",
+        "pricingCustomerId": "={{ $json.query.e_customer_id }}",
+        "pricingProductId": "={{ $json.query.e_product_id }}",
+        "pricingReturnAllMode": "allInOne"
+      },
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        496,
+        -16
+      ],
+      "id": "e3359306-65e2-49c9-978a-dc25b0cc568f",
+      "name": "E get Inventory & Price",
+      "retryOnFail": true,
+      "waitBetweenTries": 500,
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "eclipse"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "dataToSave": {
+          "values": [
+            {
+              "key": "path",
+              "value": "0 - inventory_price"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executionData",
+      "typeVersion": 1.1,
+      "position": [
+        720,
+        -16
+      ],
+      "id": "04375d2f-9ccd-4d0c-92f7-f498c0607268",
+      "name": "Execution Data"
+    },
+    {
+      "parameters": {
+        "jsCode": "// One Eclipse inventory and pricing call for every product in e_product_id\n// (comma separated, e.g. \"60144,246\"; the Eclipse node is in allInOne mode,\n// so its output is { metadata, results: [...] } or { error }).\n// The top level keeps the old single-product answer (the first product,\n// e_product_id as sent) for the product-inquiry page; products lists every\n// requested product in the order asked, with the same fields.\nconst q = $('Webhook').first().json.query || {};\nconst env = $('E get Inventory & Price').first().json || {};\nconst ids = String(q.e_product_id || '').split(',').map((s) => s.trim()).filter(Boolean);\nconst r2 = (m) => (m && m.value != null && isFinite(Number(m.value)) ? Math.round(Number(m.value) * 100) / 100 : null);\nconst str = (m) => { const v = r2(m); return v == null ? 'error' : String(v); };\n\n// Eclipse error text without its \"400 - \" prefix, as a string the page can\n// JSON.parse (it was inserted raw into the old response body).\nlet errorMessage = '';\nif (env.error && env.error.message) {\n  const raw = String(env.error.message).slice(6, 10000);\n  try {\n    const parsed = JSON.parse(raw);\n    errorMessage = typeof parsed === 'string' ? parsed : raw;\n  } catch (e) {\n    errorMessage = raw;\n  }\n}\n\nconst shape = (p) => ({\n  e_customer_id: String(q.e_customer_id || ''),\n  e_product_id: String(p.productId),\n  unit_price: str(p.unitPrice),\n  unit_cost: str(p.productCost),\n  unit_cogs: str(p.productCOGS),\n  list_price: str(p.listPrice),\n  quantity_breaks: Array.isArray(p.quantityBreaks) && p.quantityBreaks.length\n    ? p.quantityBreaks.map((i) => ({ startQuantity: i.startQuantity, unitPrice: r2(i.unitPrice) }))\n    : [{ startQuantity: 0, unitPrice: r2(p.unitPrice) }],\n  stock_info: Array.isArray(p.stockInfo) ? p.stockInfo : 'error',\n  error_message: '',\n});\nconst failed = (id, msg) => ({\n  e_customer_id: String(q.e_customer_id || ''),\n  e_product_id: String(id),\n  unit_price: 'error', unit_cost: 'error', unit_cogs: 'error', list_price: 'error',\n  quantity_breaks: [],\n  stock_info: 'error',\n  error_message: msg,\n});\n\nconst byId = {};\nfor (const p of (Array.isArray(env.results) ? env.results : [])) byId[String(p.productId)] = p;\nconst products = ids.map((id) => byId[id] ? shape(byId[id])\n  : failed(id, errorMessage || ('Product ' + id + ' was not in the Eclipse pricing inquiry.')));\n\nconst first = products[0] || failed('', errorMessage || 'Missing e_product_id.');\nreturn {\n  \"body\": { ...first, e_product_id: String(q.e_product_id || ''), error_message: errorMessage || first.error_message, products }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        944,
+        -16
+      ],
+      "id": "6f3b2a1e-5c4d-4e8f-9a0b-1c2d3e4f5a61",
+      "name": "Shape Inquiry"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "={{ ['https://profitpad-inc.github.io', 'https://sales.fairbankequipment.com', 'http://localhost'].includes($('Webhook').item.json.headers.origin) ? $('Webhook').item.json.headers.origin : '' }}"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1168,
+        -16
+      ],
+      "id": "bf113746-072b-4884-b0a7-df31117b76a8",
+      "name": "Respond to Inquiry"
+    },
+    {
+      "parameters": {
+        "jsCode": "// One HubSpot custom event per priced product.\nconst env = $('E get Inventory & Price').first().json || {};\nreturn (Array.isArray(env.results) ? env.results : []).map((p) => ({ json: p }));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1392,
+        -16
+      ],
+      "id": "7a4c3b2d-6e5f-4a9b-8c1d-2e3f4a5b6c72",
+      "name": "Event Items"
+    },
+    {
+      "parameters": {
+        "resource": "customEvents",
+        "operation": "sendEventOccurrence",
+        "eventName": "pe43793456_customer_price_inquiry",
+        "identifyBy": "custom",
+        "eventProperties": {
+          "propertyValues": [
+            {
+              "name": "e_customer_id",
+              "value": "={{ $('Webhook').item.json.query.e_customer_id }}"
+            },
+            {
+              "name": "e_product_id",
+              "value": "={{ $json.productId }}"
+            },
+            {
+              "name": "e_product_name",
+              "value": "={{ $json.productDescription }}"
+            },
+            {
+              "name": "unit_price_for_1_",
+              "value": "={{ $json.unitPrice.value }}"
+            },
+            {
+              "name": "total_stock",
+              "value": "={{ $json.totalWarehouseQty }}"
+            }
+          ]
+        },
+        "sendEventOptions": {}
+      },
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        1616,
+        -16
+      ],
+      "id": "9e1e63d9-d6fa-4b04-9153-b3ad1fc618d1",
+      "name": "Send Custom Event",
+      "credentials": {
+        "hubspotApi": {
+          "id": "4HKK5aFFmTGesa3H",
+          "name": "fairbank"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "product",
+        "pageSize": 50,
+        "fieldsFilterMode": "selected",
+        "fieldsToInclude": "id,uoms,description",
+        "additionalOptions": {
+          "id": "={{ $if($('Webhook').item.json.query.e_product_name.includes(\".\"), $('Webhook').item.json.query.e_product_name.replace(\".\", \"\"), \"\") }}",
+          "keyword": "={{ $('Webhook').item.json.query.e_product_name }}"
+        }
+      },
+      "type": "CUSTOM.eclipseApi",
+      "typeVersion": 1,
+      "position": [
+        496,
+        176
+      ],
+      "id": "9f144317-f94c-40eb-a1db-b6a9429f0784",
+      "name": "E get search Products",
+      "retryOnFail": true,
+      "waitBetweenTries": 500,
+      "credentials": {
+        "eclipseApi": {
+          "id": "PVIgwtzRL74PSVft",
+          "name": "eclipse"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "dataToSave": {
+          "values": [
+            {
+              "key": "path",
+              "value": "1 - search_products"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executionData",
+      "typeVersion": 1.1,
+      "position": [
+        720,
+        176
+      ],
+      "id": "3c29ed31-69e6-4103-a27f-0a72ed3b43a0",
+      "name": "Execution Data1"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"e_products\": {{ $json.results.map(p => ({\n    \"e_product_id\": p.id,\n    \"description\": p.description,\n    \"uom\": p.uoms[0].uom?.toLowerCase(),\n  })).sort((a, b) => (a.description ?? \"\").localeCompare(b.description ?? \"\", undefined, { sensitivity: \"base\" })).toJsonString() }},\n  \"error_message\": {{ $json.error?.message?.replace(\"400 - \", \"\") ?? '\"\"' }}\n}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "={{ ['https://profitpad-inc.github.io', 'https://sales.fairbankequipment.com', 'http://localhost'].includes($('Webhook').item.json.headers.origin) ? $('Webhook').item.json.headers.origin : '' }}"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        944,
+        176
+      ],
+      "id": "d943d8c8-873f-49a7-bf67-3502824b8fa2",
+      "name": "Respond to Product Name"
+    },
+    {
+      "parameters": {
+        "objectType": "0-2",
+        "operation": "search",
+        "searchInputMode": "json",
+        "filterJson": "={{\n(() => {\n  const name = $('Webhook').item.json.query.e_customer_name;\n  return {filterGroups: [{\n    filters: [\n      name.includes(\".\")\n        ? { propertyName: \"e_customer_id\", operator: \"EQ\", value: name.replace(\".\", \"\") }\n        : { propertyName: \"e_customer_id\", operator: \"HAS_PROPERTY\" }\n    ]\n  }]}.toJsonString();\n})()\n}}",
+        "properties": [
+          "name",
+          "e_customer_id",
+          "e_default_price_class",
+          "billto_shipto_flag",
+          "e_ship_to_ids",
+          "e_bill_to_id"
+        ],
+        "limit": 25,
+        "searchOptions": {
+          "query": "={{ $('Webhook').item.json.query.e_customer_name }}"
+        }
+      },
+      "type": "CUSTOM.hubspotApi",
+      "typeVersion": 1,
+      "position": [
+        496,
+        368
+      ],
+      "id": "9d1f5e0a-bc74-47d3-821e-cdd8527967f2",
+      "name": "HS Get Customers",
+      "credentials": {
+        "hubspotApi": {
+          "id": "sVf2mkwjVlflhBbV",
+          "name": "Fairbank Webtool"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "dataToSave": {
+          "values": [
+            {
+              "key": "path",
+              "value": "2 - search_customers"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executionData",
+      "typeVersion": 1.1,
+      "position": [
+        720,
+        368
+      ],
+      "id": "b017fc40-5f96-4ea0-996c-dd0ee0654b8f",
+      "name": "Execution Data2"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"e_customers\": {{ $json.results?.map(c => ({\n  \"hs_customer_id\": c.properties.hs_object_id,\n  \"e_customer_id\": c.properties.e_customer_id,\n  \"price_class\": c.properties.e_default_price_class,\n  \"e_ship_to_ids\": c.properties.e_ship_to_ids,\n  \"e_bill_to_id\": c.properties.e_bill_to_id,\n  \"billto_shipto_flag\": c.properties.billto_shipto_flag,\n  \"name\": c.properties.name\n  })).toJsonString() || '\"\"' }},\n  \"error_message\": {{ $json.error?.message ?? '\"\"' }}\n} ",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "={{ ['https://profitpad-inc.github.io', 'https://sales.fairbankequipment.com', 'http://localhost'].includes($('Webhook').item.json.headers.origin) ? $('Webhook').item.json.headers.origin : '' }}"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        944,
+        368
+      ],
+      "id": "beccffd0-403b-42ea-a49f-d28731609f52",
+      "name": "Respond to Customer Name"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "from hs-sites?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "from hs-sites?": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Unauthenticated",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "E get Inventory & Price",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "E get search Products",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HS Get Customers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "E get Inventory & Price": {
+      "main": [
+        [
+          {
+            "node": "Execution Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execution Data": {
+      "main": [
+        [
+          {
+            "node": "Shape Inquiry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape Inquiry": {
+      "main": [
+        [
+          {
+            "node": "Respond to Inquiry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond to Inquiry": {
+      "main": [
+        [
+          {
+            "node": "Event Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Event Items": {
+      "main": [
+        [
+          {
+            "node": "Send Custom Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "E get search Products": {
+      "main": [
+        [
+          {
+            "node": "Execution Data1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execution Data1": {
+      "main": [
+        [
+          {
+            "node": "Respond to Product Name",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HS Get Customers": {
+      "main": [
+        [
+          {
+            "node": "Execution Data2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execution Data2": {
+      "main": [
+        [
+          {
+            "node": "Respond to Customer Name",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "0fab727e43c2ebd733dea81f8bbe30697fb379fdf798fc2cce1e5adf9c5e2924"
+  }
+}

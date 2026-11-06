@@ -816,6 +816,10 @@ html[data-theme="light"] .fop-status--partial { color: #a14d00; border-color: rg
   color: var(--text); background-color: var(--input-bg);
   opacity: 1; -webkit-text-fill-color: var(--text); cursor: not-allowed;
 }
+/* An order that is not a bid keeps its PO, shipping instructions and
+   internal notes editable (Update Order): text cursor here, and the boxes
+   look like editable ones (below, next to the header's own box rules). */
+.fop-head--locked .fop-input[data-head]:not(:disabled) { cursor: text; }
 /* Locked header: no dropdown chevron on Ship via / Ship branch and no
    calendar icon on the dates, since none of them open. */
 .fop-head--locked select.fop-input,
@@ -1024,6 +1028,14 @@ html[data-theme="light"] .fop-status--partial { color: #a14d00; border-color: rg
 .fop-stockstrip--comment .fop-strip__lbl { align-self: flex-start; padding-top: 6px; }
 /* Inline layout: clicking a description jumps to that line's comment. */
 .fop-grid:not(.fop-grid--noall) .fop-line[data-row] .fop-cell--desc { cursor: text; }
+/* Desktop: the description cell fills the row's full height (2026-11-06,
+   on request), so a click anywhere above or below the text still opens the
+   line; the text stays centred. */
+@media (min-width: 768px) {
+  .fop-line[data-row] .fop-cell--desc {
+    align-self: stretch; display: flex; flex-direction: column; justify-content: center;
+  }
+}
 .fop-stockstrip--comment > .fop-muted { align-self: center; }
 .fop-line-comment {
   display: block; flex: 1; min-width: 200px; min-height: calc(1.4em + 14px);
@@ -1555,6 +1567,21 @@ html[data-theme="light"] .fop-head:not(.fop-head--locked) .fop-input:not(:disabl
 html[data-theme="light"] .fop-head:not(.fop-head--locked) .fop-date-alt.active { border-color: #00bda5; }
 html[data-theme="light"] .fop-head:not(.fop-head--locked) select.fop-input:not(:disabled) { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23516f90' stroke-width='2.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); }
 html[data-theme="light"] .fop-head:not(.fop-head--locked) .fop-date-alt { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23516f90' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4.5' width='18' height='16.5' rx='2'/%3E%3Cpath d='M3 9.5h18M8 2.5v4M16 2.5v4'/%3E%3C/svg%3E"); }
+html .fop-head.fop-head--locked .fop-input[data-head]:not(:disabled) { width: 100%; margin-left: 0; border-color: rgba(143, 164, 194, .35); background-color: var(--input-bg); }
+html .fop-head.fop-head--locked .fop-input[data-head]:not(:disabled):hover { border-color: rgba(143, 164, 194, .6); }
+html .fop-head.fop-head--locked .fop-input[data-head]:not(:disabled):focus { border-color: var(--gold); }
+html[data-theme="light"] .fop-head.fop-head--locked .fop-input[data-head]:not(:disabled) { border-color: var(--steel); background-color: #ffffff; }
+html[data-theme="light"] .fop-head.fop-head--locked .fop-input[data-head]:not(:disabled):hover { border-color: #a9bbcf; }
+html[data-theme="light"] .fop-head.fop-head--locked .fop-input[data-head]:not(:disabled):focus { border-color: #00bda5; }
+/* A date the rep must fix (required before ship date; a bid's past ship
+   date once it has a change): red outline and tint, in both themes, over
+   the header's own border and focus colours. */
+html .fop-head:not(.fop-head--locked) .fop-date-alt.fop-input--err,
+html .fop-head:not(.fop-head--locked) .fop-date-alt.fop-input--err.active,
+html[data-theme="light"] .fop-head:not(.fop-head--locked) .fop-date-alt.fop-input--err,
+html[data-theme="light"] .fop-head:not(.fop-head--locked) .fop-date-alt.fop-input--err.active {
+  border-color: var(--error); background-color: rgba(255, 95, 95, .12);
+}
 /* Beats the locked-header rules' input background (more specific). */
 html .fop-head--locked .fop-input,
 html .fop-head .fop-input:disabled,
@@ -2080,6 +2107,11 @@ html .fop-pid.fop-br-c:hover { border-color: var(--gold); }
    theme, darker on the dark one. */
 .fop-feedback { opacity: .7; }
 .fop-app:has(+ .fop-feedback) { padding-bottom: 32px; }
+/* Pinned to the bottom of the window on short pages (2026-11-06, on
+   request): the body is a column at least the window's height and the note
+   takes the space left over above it. Long pages are unchanged. */
+body:has(> .fop-feedback) { display: flex; flex-direction: column; }
+body > .fop-feedback { margin-top: auto; }
 @media (max-width: 767px) {
   /* Phones: the order page's action bar is fixed to the bottom, so the
      note carries the room for it that #app used to (--fop-bar-h, set by
