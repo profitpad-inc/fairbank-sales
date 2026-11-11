@@ -7,7 +7,8 @@
         "responseMode": "responseNode",
         "options": {
           "allowedOrigins": "*"
-        }
+        },
+        "authentication": "jwtAuth"
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
@@ -17,7 +18,13 @@
       ],
       "id": "5ae6cc80-43c5-485f-9ec3-cdf4a8e94a1f",
       "name": "Webhook",
-      "webhookId": "274f9db9-ad44-435d-896f-ea0c31ebf85b"
+      "webhookId": "274f9db9-ad44-435d-896f-ea0c31ebf85b",
+      "credentials": {
+        "jwtAuth": {
+          "id": "6sDOPAJdRYI8fpxX",
+          "name": "Fairbank session (JWT)"
+        }
+      }
     },
     {
       "parameters": {
@@ -106,73 +113,6 @@
       ],
       "id": "2892b86f-e79d-4f0c-86b3-5b812d263fb6",
       "name": "Switch"
-    },
-    {
-      "parameters": {
-        "rules": {
-          "values": [
-            {
-              "conditions": {
-                "options": {
-                  "caseSensitive": true,
-                  "leftValue": "",
-                  "typeValidation": "strict",
-                  "version": 3
-                },
-                "conditions": [
-                  {
-                    "id": "e7c91f30-47a7-4615-8429-5a2e1a50d029",
-                    "leftValue": "={{ \n$json.headers.origin?.includes(\"43793456.hubspotpreview-na1.com\") || \n$json.headers.origin?.includes(\"sales.fairbankequipment.com\") || \n$json.headers.origin?.includes(\"43793456.hs-sites.com\") || \n$json.headers.origin?.includes(\"profitpad-inc.github.io\") || \n$json.headers['tempauth']?.includes(\"claude19oct2026\") || $json.headers['x-forwarded-for'] === \"134.231.39.79\" || $json.headers['x-forwarded-for'] === \"134.231.51.33\"\n}}",
-                    "rightValue": "https://43793456.hs-sites.com",
-                    "operator": {
-                      "type": "boolean",
-                      "operation": "true",
-                      "singleValue": true
-                    }
-                  }
-                ],
-                "combinator": "and"
-              }
-            }
-          ]
-        },
-        "options": {
-          "fallbackOutput": "extra"
-        }
-      },
-      "type": "n8n-nodes-base.switch",
-      "typeVersion": 3.4,
-      "position": [
-        48,
-        288
-      ],
-      "id": "9d73787d-fd14-4ac3-a323-6bb22ae8e590",
-      "name": "from hs-sites?"
-    },
-    {
-      "parameters": {
-        "respondWith": "json",
-        "responseBody": "{\n  \"error\": \"Unauthenticated.\"\n}",
-        "options": {
-          "responseCode": 401,
-          "responseHeaders": {
-            "entries": [
-              {
-                "name": "Access-Control-Allow-Origin",
-                "value": "={{ ['https://profitpad-inc.github.io', 'https://sales.fairbankequipment.com', 'http://localhost'].includes($('Webhook').item.json.headers.origin) ? $('Webhook').item.json.headers.origin : '' }}"
-              }
-            ]
-          }
-        }
-      },
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.5,
-      "position": [
-        272,
-        384
-      ],
-      "id": "8669f588-f7fb-47de-8301-b4a784fd54b1",
-      "name": "Respond Unauthenticated"
     },
     {
       "parameters": {
@@ -489,25 +429,7 @@
       "main": [
         [
           {
-            "node": "from hs-sites?",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "from hs-sites?": {
-      "main": [
-        [
-          {
             "node": "Switch",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Respond Unauthenticated",
             "type": "main",
             "index": 0
           }
